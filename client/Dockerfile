@@ -1,9 +1,9 @@
-FROM node:22-alpine AS builder
+FROM node:22-slim AS builder
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm install --force && npm install lightningcss-linux-x64-gnu @tailwindcss/oxide-linux-x64-gnu
 
 COPY tsconfig.json next.config.ts postcss.config.mjs eslint.config.mjs ./
 COPY src ./src
@@ -14,7 +14,7 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
 RUN npm run build
 
-FROM node:22-alpine AS runner
+FROM node:22-slim AS runner
 
 WORKDIR /app
 

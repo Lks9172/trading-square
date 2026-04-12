@@ -20,6 +20,7 @@ services:
     environment:
       - PORT=5847
       - HOSTNAME=0.0.0.0
+      - SSR_API_URL=http://macrosquare-server:5846
     depends_on:
       - server
     restart: unless-stopped

@@ -2,11 +2,12 @@ import { Dashboard } from "@/components/Dashboard";
 
 export const dynamic = "force-dynamic";
 
+const SSR_API_URL = process.env.SSR_API_URL || "http://localhost:5846";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5846";
 
 async function fetchSnapshot() {
   try {
-    const res = await fetch(`${API_URL}/api/snapshot`, {
+    const res = await fetch(`${SSR_API_URL}/api/snapshot`, {
       next: { revalidate: 300 },
     });
     if (!res.ok) return null;
