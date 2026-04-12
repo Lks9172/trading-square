@@ -21,18 +21,18 @@ export function RegimeHeader({ regime }: Props) {
   const config = REGIME_CONFIG[regime.regime] || REGIME_CONFIG.NEUTRAL;
 
   return (
-    <div className={`rounded-xl border ${config.color} p-6`}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <span className="text-3xl">{config.emoji}</span>
-          <div>
-            <h2 className="text-xl font-bold">{config.label}</h2>
-            <p className="text-sm text-[var(--muted)]">{config.action}</p>
+    <div className={`rounded-xl border ${config.color} p-4 sm:p-6`}>
+      <div className="flex items-start sm:items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <span className="text-2xl sm:text-3xl shrink-0">{config.emoji}</span>
+          <div className="min-w-0">
+            <h2 className="text-lg sm:text-xl font-bold truncate">{config.label}</h2>
+            <p className="text-xs sm:text-sm text-[var(--muted)] truncate">{config.action}</p>
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-3xl font-bold font-mono">{regime.score}</div>
-          <div className="text-xs text-[var(--muted)]">/ 100</div>
+        <div className="text-right shrink-0">
+          <div className="text-2xl sm:text-3xl font-bold font-mono">{regime.score}</div>
+          <div className="text-[10px] sm:text-xs text-[var(--muted)]">/ 100</div>
         </div>
       </div>
 
@@ -50,11 +50,11 @@ export function RegimeHeader({ regime }: Props) {
         />
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-3 sm:mt-4 flex flex-wrap gap-1.5 sm:gap-2">
         {Object.entries(regime.components).map(([key, val]) => (
           <span
             key={key}
-            className={`px-2 py-1 rounded text-xs font-mono ${
+            className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-[10px] sm:text-xs font-mono ${
               val > 0 ? "bg-green-500/20 text-green-400"
               : val < 0 ? "bg-red-500/20 text-red-400"
               : "bg-neutral-700 text-neutral-400"

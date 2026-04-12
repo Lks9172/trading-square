@@ -31,8 +31,8 @@ interface Props {
 
 export function SignalPanel({ signals }: Props) {
   return (
-    <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-5">
-      <h3 className="text-lg font-semibold mb-4">자산별 신호</h3>
+    <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
+      <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">자산별 신호</h3>
       <div className="space-y-3">
         {signals.map((sig) => {
           const config = SIGNAL_CONFIG[sig.signal] || SIGNAL_CONFIG.HOLD;
