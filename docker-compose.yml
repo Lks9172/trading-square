@@ -1,0 +1,25 @@
+services:
+  server:
+    build: ./server
+    container_name: macrosquare-server
+    ports:
+      - "5846:5846"
+    environment:
+      - PORT=5846
+      - FRED_API_KEY=${FRED_API_KEY}
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ./client
+      args:
+        - NEXT_PUBLIC_API_URL=http://${HOST_IP:-localhost}:5846
+    container_name: macrosquare-client
+    ports:
+      - "5847:5847"
+    environment:
+      - PORT=5847
+      - HOSTNAME=0.0.0.0
+    depends_on:
+      - server
+    restart: unless-stopped

@@ -1,0 +1,30 @@
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY tsconfig.json next.config.ts postcss.config.mjs eslint.config.mjs ./
+COPY src ./src
+COPY public ./public
+
+ARG NEXT_PUBLIC_API_URL=http://localhost:5846
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
+RUN npm run build
+
+FROM node:22-alpine AS runner
+
+WORKDIR /app
+
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+
+EXPOSE 5847
+
+ENV PORT=5847
+ENV HOSTNAME=0.0.0.0
+
+CMD ["node", "server.js"]
