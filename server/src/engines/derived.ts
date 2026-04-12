@@ -48,7 +48,7 @@ export async function computeDerived(
   }
 
   try {
-    const nasdaqHistory = await fetchYahooHistory('^IXIC', 250);
+    const nasdaqHistory = await fetchYahooHistory('^IXIC', 400);
     if (nasdaqHistory.length >= 200) {
       const closes = nasdaqHistory.map((h) => h.close);
       const sma200 = closes.slice(0, 200).reduce((a, b) => a + b, 0) / 200;

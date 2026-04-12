@@ -21,54 +21,25 @@ const YAHOO_SYMBOLS: Record<string, string> = {
   EWJ: 'EWJ',
 };
 
-interface YahooQuote {
+interface ChartMeta {
   symbol: string;
   regularMarketPrice: number;
   regularMarketTime: number;
-  regularMarketPreviousClose: number;
-  fiftyTwoWeekHigh: number;
+  previousClose?: number;
+  chartPreviousClose?: number;
+  fiftyTwoWeekHigh?: number;
 }
 
-async function fetchQuotes(symbols: string[]): Promise<YahooQuote[]> {
-  const joined = symbols.join(',');
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(joined)}`;
-
-  const { data } = await axios.get(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-  });
-
-  return data.quoteResponse?.result || [];
-}
-
-async function fetchQuotesV6(symbols: string[]): Promise<YahooQuote[]> {
-  const joined = symbols.join(',');
-  const url = `https://query2.finance.yahoo.com/v6/finance/quote?symbols=${encodeURIComponent(joined)}`;
-
-  try {
-    const { data } = await axios.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
-    return data.quoteResponse?.result || [];
-  } catch {
-    return [];
-  }
-}
-
-async function fetchWithChart(symbol: string): Promise<YahooQuote | null> {
+async function fetchChart(symbol: string): Promise<ChartMeta | null> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=1d`;
   try {
     const { data } = await axios.get(url, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 10000,
     });
     const meta = data.chart?.result?.[0]?.meta;
-    if (!meta) return null;
-    return {
-      symbol: meta.symbol,
-      regularMarketPrice: meta.regularMarketPrice,
-      regularMarketTime: meta.regularMarketTime,
-      regularMarketPreviousClose: meta.previousClose || meta.chartPreviousClose || 0,
-      fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh || 0,
-    };
+    if (!meta || !meta.regularMarketPrice) return null;
+    return meta;
   } catch {
     return null;
   }
@@ -77,46 +48,35 @@ async function fetchWithChart(symbol: string): Promise<YahooQuote | null> {
 export async function fetchAllYahoo(): Promise<Record<string, MarketDataPoint>> {
   const results: Record<string, MarketDataPoint> = {};
   const entries = Object.entries(YAHOO_SYMBOLS);
-  const symbols = entries.map(([, sym]) => sym);
 
-  let quotes = await fetchQuotes(symbols);
+  const settled = await Promise.allSettled(
+    entries.map(([, sym]) => fetchChart(sym))
+  );
 
-  if (quotes.length === 0) {
-    quotes = await fetchQuotesV6(symbols);
-  }
+  entries.forEach(([key, symbol], i) => {
+    const result = settled[i];
+    if (result.status !== 'fulfilled' || !result.value) return;
 
-  if (quotes.length === 0) {
-    const chartResults = await Promise.allSettled(
-      symbols.map((sym) => fetchWithChart(sym))
-    );
-    quotes = chartResults
-      .filter((r): r is PromiseFulfilledResult<YahooQuote | null> => r.status === 'fulfilled')
-      .map((r) => r.value)
-      .filter((q): q is YahooQuote => q !== null);
-  }
+    const meta = result.value;
+    const date = new Date(meta.regularMarketTime * 1000).toISOString().split('T')[0];
 
-  const quoteMap = new Map(quotes.map((q) => [q.symbol, q]));
+    results[key] = {
+      code: symbol,
+      value: meta.regularMarketPrice,
+      date,
+      source: 'YAHOO',
+    };
 
-  for (const [key, symbol] of entries) {
-    const quote = quoteMap.get(symbol);
-    if (quote) {
-      results[key] = {
-        code: symbol,
-        value: quote.regularMarketPrice,
-        date: new Date(quote.regularMarketTime * 1000).toISOString().split('T')[0],
+    const high52 = meta.fiftyTwoWeekHigh ?? 0;
+    if (high52 > 0) {
+      results[`${key}_52WH`] = {
+        code: `${symbol}_52WH`,
+        value: high52,
+        date,
         source: 'YAHOO',
       };
-
-      if (quote.fiftyTwoWeekHigh > 0) {
-        results[`${key}_52WH`] = {
-          code: `${symbol}_52WH`,
-          value: quote.fiftyTwoWeekHigh,
-          date: results[key].date,
-          source: 'YAHOO',
-        };
-      }
     }
-  }
+  });
 
   return results;
 }
@@ -129,18 +89,23 @@ export async function fetchYahooHistory(
   const period1 = period2 - days * 86400;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d`;
 
-  const { data } = await axios.get(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-  });
+  try {
+    const { data } = await axios.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 15000,
+    });
 
-  const result = data.chart?.result?.[0];
-  if (!result) return [];
+    const result = data.chart?.result?.[0];
+    if (!result) return [];
 
-  const timestamps: number[] = result.timestamp || [];
-  const closes: number[] = result.indicators?.quote?.[0]?.close || [];
+    const timestamps: number[] = result.timestamp || [];
+    const closes: number[] = result.indicators?.quote?.[0]?.close || [];
 
-  return timestamps.map((ts, i) => ({
-    date: new Date(ts * 1000).toISOString().split('T')[0],
-    close: closes[i] ?? 0,
-  })).filter((d) => d.close > 0);
+    return timestamps.map((ts, i) => ({
+      date: new Date(ts * 1000).toISOString().split('T')[0],
+      close: closes[i] ?? 0,
+    })).filter((d) => d.close > 0);
+  } catch {
+    return [];
+  }
 }
