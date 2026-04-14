@@ -167,7 +167,6 @@
 | 금 | Yahoo `GC=F` | USD/온스, 200DMA 대비 | 일간 |
 | 은 | Yahoo `SI=F` | USD/온스 | 일간 |
 | 구리 | Yahoo `HG=F` | USD/파운드 | 일간 |
-| 비트코인 | Yahoo `BTC-USD` | USD | 일간 |
 | WTI | Yahoo `CL=F` | USD/배럴 | 일간 |
 | 원/달러 | Yahoo `KRW=X` | 환율 | 일간 |
 
@@ -549,7 +548,6 @@ IF 국면 == RISK_ON:
 | 구리/원자재 | CPER, COPX, TIGER 구리 | 경기회복 베팅 |
 | 한국 주식 | KODEX 200, 개별주 | 국내 시장 노출 |
 | 신흥국 ETF | EWZ, INDA, VNM | 달러약세 수혜 |
-| 암호화폐 | BTC (선택) | 위험선호 극단 |
 
 ---
 
@@ -909,7 +907,6 @@ IF 국면 == RISK_ON:
 | 은 | Yahoo `SI=F` | 일간 | ✅ |
 | 구리 | Yahoo `HG=F` | 일간 | ✅ |
 | WTI | Yahoo `CL=F` | 일간 | ✅ |
-| BTC | Yahoo `BTC-USD` | 일간 | ✅ |
 | DXY | Yahoo `DX-Y.NYB` | 일간 | ✅ |
 | 원/달러 | Yahoo `KRW=X` | 일간 | ✅ |
 | 코스피 | Yahoo `^KS11` | 일간 | ✅ |
