@@ -91,11 +91,20 @@ export function computeAllocation(
     }
   }
 
+  // FX 불리 (KRW_FX_LEVEL <= -1, 환율 1500원 초과) 시 한국 비중 일부 cash 이관.
+  // 기존 50% 삭감은 영상5 "외국인 매도 압력"을 과하게 반영해 base 10 → 5 수준으로
+  // 포지션을 사실상 소멸시킴. 영상5는 "환율이 방향의 70% 결정"이라고 했지만,
+  // 동시에 "외국인 복귀 시 반발 가능성"도 시사했으므로 최소한의 포지션은 쥐고 있어야 한다.
+  // → 삭감률 30% 로 완화 (base 10 → 7). 환율 -2(1550원 초과) 에서는 50% 적용으로 강화.
   const fxLevel = derived.KRW_FX_LEVEL?.value ?? 0;
-  if (fxLevel <= -1) {
-    const koreaReduction = base.korea * 0.5;
-    base.korea -= koreaReduction;
-    base.cash += koreaReduction;
+  if (fxLevel <= -2) {
+    const cut = base.korea * 0.5;
+    base.korea -= cut;
+    base.cash += cut;
+  } else if (fxLevel <= -1) {
+    const cut = base.korea * 0.3;
+    base.korea -= cut;
+    base.cash += cut;
   }
 
   // === 과열 보정 (OVERHEATED=1) ===
