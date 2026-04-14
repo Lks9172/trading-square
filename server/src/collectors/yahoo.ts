@@ -11,7 +11,6 @@ const YAHOO_SYMBOLS: Record<string, string> = {
   SILVER: 'SI=F',
   COPPER: 'HG=F',
   WTI: 'CL=F',
-  BTC: 'BTC-USD',
   DXY: 'DX-Y.NYB',
   USDJPY: 'JPY=X',
   USDKRW: 'KRW=X',
