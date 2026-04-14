@@ -1,12 +1,14 @@
 import { Regime, Signal, AssetSignal, AllocationPlan, DerivedIndicator, MarketDataPoint } from '../types/indicators';
 
+// PRD §6.3.1 비중 매트릭스와 정확히 정합. 이전에는 ±3%p 편차(특히 korea 7 vs
+// PRD 10) 와 합계 95~98 의 불완전 행이 있어 normalize 가 비율을 흐렸다.
 const BASE_ALLOCATIONS: Record<Regime, Record<string, number>> = {
-  RISK_ON:        { cash: 10, nasdaq: 43, leverage: 0,  gold: 12, silver: 5,  copper: 10, korea: 7,  emerging: 8 },
-  NEUTRAL:        { cash: 18, nasdaq: 37, leverage: 0,  gold: 18, silver: 5,  copper: 5,  korea: 7,  emerging: 5 },
-  CAUTION:        { cash: 28, nasdaq: 27, leverage: 0,  gold: 23, silver: 0,  copper: 5,  korea: 7,  emerging: 5 },
-  CORRECTION:     { cash: 22, nasdaq: 32, leverage: 0,  gold: 23, silver: 0,  copper: 5,  korea: 7,  emerging: 6 },
-  PANIC_BUT_OK:   { cash: 12, nasdaq: 38, leverage: 10, gold: 18, silver: 5,  copper: 5,  korea: 5,  emerging: 5 },
-  RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0,  copper: 0,  korea: 5,  emerging: 5 },
+  RISK_ON:        { cash: 10, nasdaq: 40, leverage: 0,  gold: 15, silver: 5,  copper: 10, korea: 10, emerging: 10 },
+  NEUTRAL:        { cash: 20, nasdaq: 35, leverage: 0,  gold: 20, silver: 5,  copper: 5,  korea: 10, emerging: 5  },
+  CAUTION:        { cash: 30, nasdaq: 25, leverage: 0,  gold: 25, silver: 0,  copper: 5,  korea: 10, emerging: 5  },
+  CORRECTION:     { cash: 25, nasdaq: 30, leverage: 0,  gold: 25, silver: 0,  copper: 5,  korea: 10, emerging: 5  },
+  PANIC_BUT_OK:   { cash: 15, nasdaq: 35, leverage: 10, gold: 20, silver: 5,  copper: 5,  korea: 5,  emerging: 5  },
+  RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0,  copper: 0,  korea: 5,  emerging: 5  },
 };
 
 // 신호 배수는 PRD §6.3.2 스펙을 따른다.
