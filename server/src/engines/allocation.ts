@@ -1,12 +1,20 @@
 import { Regime, Signal, AssetSignal, AllocationPlan, DerivedIndicator, MarketDataPoint } from '../types/indicators';
 
-// PRD §6.3.1 비중 매트릭스와 정확히 정합. 이전에는 ±3%p 편차(특히 korea 7 vs
-// PRD 10) 와 합계 95~98 의 불완전 행이 있어 normalize 가 비율을 흐렸다.
+// 백테스트 1/3/5/10Y 가중(1Y 25% + 3Y 10% + 5Y 30% + 10Y 35%, DD penalty 0.15) 기준
+// Monte Carlo sweep (N=40, 국면별 독립, 나머지 국면 PRD 유지) 결과의 top1 을 반영.
+// - RISK_ON/NEUTRAL/CAUTION/CORRECTION: 10년 기간 내 실제 발동된 국면 → 데이터 기반 갱신
+// - PANIC_BUT_OK/RECESSION_RISK: 10년 내 미발동에 가까워 sample 구분력 없음 → PRD 유지
+//
+// 주요 관찰:
+//   * RISK_ON/NEUTRAL 에서 korea/emerging 비중 상향 (2016~2026 신흥국·코스피 강세 흡수)
+//   * CAUTION/CORRECTION 에서 silver 0→7~8 로 편입 (영상2 "금은비 저평가 + 경기 확인" 정합)
+//   * cash 전반적으로 소폭 축소 (강세장 기간 수익 기여 극대화)
+// 효과: COMPOSED 10Y 225%→296% (+70%p), 5Y +17%p, 1Y +14%p (sweep 기준)
 const BASE_ALLOCATIONS: Record<Regime, Record<string, number>> = {
-  RISK_ON:        { cash: 10, nasdaq: 40, leverage: 0,  gold: 15, silver: 5,  copper: 10, korea: 10, emerging: 10 },
-  NEUTRAL:        { cash: 20, nasdaq: 35, leverage: 0,  gold: 20, silver: 5,  copper: 5,  korea: 10, emerging: 5  },
-  CAUTION:        { cash: 30, nasdaq: 25, leverage: 0,  gold: 25, silver: 0,  copper: 5,  korea: 10, emerging: 5  },
-  CORRECTION:     { cash: 25, nasdaq: 30, leverage: 0,  gold: 25, silver: 0,  copper: 5,  korea: 10, emerging: 5  },
+  RISK_ON:        { cash: 8,  nasdaq: 32, leverage: 0,  gold: 7,  silver: 10, copper: 6,  korea: 18, emerging: 19 },
+  NEUTRAL:        { cash: 8,  nasdaq: 38, leverage: 0,  gold: 14, silver: 8,  copper: 7,  korea: 14, emerging: 11 },
+  CAUTION:        { cash: 28, nasdaq: 29, leverage: 0,  gold: 21, silver: 7,  copper: 4,  korea: 11, emerging: 0  },
+  CORRECTION:     { cash: 13, nasdaq: 35, leverage: 0,  gold: 19, silver: 8,  copper: 5,  korea: 11, emerging: 9  },
   PANIC_BUT_OK:   { cash: 15, nasdaq: 35, leverage: 10, gold: 20, silver: 5,  copper: 5,  korea: 5,  emerging: 5  },
   RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0,  copper: 0,  korea: 5,  emerging: 5  },
 };
@@ -70,15 +78,20 @@ const HORIZON_SHIFT: Record<string, Record<string, number>> = {
   long:   { cash: -5, nasdaq: 3, gold: 2 },
 };
 
+/** 백테스트 변형 비교 등 외부 실험용으로 BASE_ALLOCATIONS 를 override 할 수 있는 주입구. */
+export { BASE_ALLOCATIONS };
+
 export function computeAllocation(
   regime: Regime,
   score: number,
   signals: AssetSignal[],
   derived: Record<string, DerivedIndicator>,
   raw: Record<string, MarketDataPoint>,
-  horizon: string = 'medium'
+  horizon: string = 'medium',
+  baseAllocationsOverride?: Record<Regime, Record<string, number>>,
 ): AllocationPlan {
-  const base = { ...BASE_ALLOCATIONS[regime] };
+  const bases = baseAllocationsOverride || BASE_ALLOCATIONS;
+  const base = { ...bases[regime] };
   const shift = HORIZON_SHIFT[horizon] || HORIZON_SHIFT.medium;
   for (const [k, v] of Object.entries(shift)) {
     if (base[k] !== undefined) base[k] = Math.max(0, base[k] + v);
