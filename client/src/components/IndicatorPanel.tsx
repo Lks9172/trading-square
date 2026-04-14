@@ -43,7 +43,6 @@ const YAHOO_LABELS: Record<string, { label: string; unit: string; desc: string }
   SILVER:   { label: "은",         unit: "$/oz",  desc: "산업+귀금속 이중 성격. 금은비로 상대가치 판단" },
   COPPER:   { label: "구리",       unit: "$/lb",  desc: "닥터 코퍼. 경기 선행 2~3개월. ISM과 함께 확인" },
   WTI:      { label: "WTI 원유",   unit: "$/bbl", desc: "에너지 가격. 인플레·지정학 영향" },
-  BTC:      { label: "비트코인",   unit: "$",     desc: "위험선호 극단 자산" },
   DXY:      { label: "달러인덱스", unit: "pt",    desc: "달러 강약. 약세→금/신흥국 우호, 강세→위험자산 부담" },
   USDKRW:   { label: "원/달러",    unit: "₩",     desc: "원화 환율. 외국인 수급·환위험 프록시" },
   USDJPY:   { label: "달러/엔",    unit: "¥",     desc: "엔캐리/위험선호 보조지표" },
