@@ -271,6 +271,19 @@ export async function computeDerived(
     };
   }
 
+  // SOFR - IORB: 지급준비금 부족(+) / 여유(-) 시그널.
+  // SOFR 가 IORB 를 의미있게 상회하면 은행간 담보금리가 정책금리 상단을 넘어서는
+  // 유동성 부족 신호. repo market 스트레스의 고전적 판별 기준.
+  const iorb = val(raw, 'IORB');
+  if (sofr !== null && iorb !== null) {
+    d.SOFR_IORB_SPREAD = {
+      name: 'sofr_iorb_spread',
+      value: parseFloat((sofr - iorb).toFixed(4)),
+      date: dt,
+      formula: 'SOFR - IORB (양수=지급준비금 부족 / 자금시장 긴장)',
+    };
+  }
+
   const apiKey = process.env.FRED_API_KEY || '';
 
   try {

@@ -20,7 +20,13 @@ const FRED_SERIES: Record<string, string> = {
   ICSA: 'ICSA',
   SOFR: 'SOFR',
   EFFR: 'EFFR',
+  IORB: 'IORB', // Interest on Reserve Balances — SOFR/IORB 스프레드 계산용
+  INDPRO: 'INDPRO',
+  M3_EURO: 'MABMM301EZM657S',
+  M3_JAPAN: 'MABMM301JPM657S',
 };
+
+export { FRED_SERIES };
 
 function getDateRange(): { start: string; end: string } {
   const end = new Date();
@@ -74,6 +80,25 @@ export async function fetchFredHistory(
 ): Promise<MarketDataPoint[]> {
   const { start, end } = getDateRange();
   const url = `${FRED_BASE}?series_id=${seriesId}&api_key=${apiKey}&file_type=json&observation_start=${start}&observation_end=${end}&sort_order=desc&limit=${limit}`;
+
+  const { data } = await axios.get(url);
+  return (data.observations || [])
+    .filter((obs: any) => obs.value !== '.')
+    .map((obs: any) => ({
+      code: seriesId,
+      value: parseFloat(obs.value),
+      date: obs.date,
+      source: 'FRED' as const,
+    }));
+}
+
+export async function fetchFredHistoryFrom(
+  seriesId: string,
+  apiKey: string,
+  observationStart: string
+): Promise<MarketDataPoint[]> {
+  const end = new Date().toISOString().split('T')[0];
+  const url = `${FRED_BASE}?series_id=${seriesId}&api_key=${apiKey}&file_type=json&observation_start=${observationStart}&observation_end=${end}&sort_order=asc&limit=100000`;
 
   const { data } = await axios.get(url);
   return (data.observations || [])

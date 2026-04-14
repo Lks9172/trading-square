@@ -1,58 +1,17 @@
 import { Router, Request, Response } from 'express';
-import { collectAll } from '../collectors';
-import { computeDerived } from '../engines/derived';
-import { classifyRegime } from '../engines/regime';
-import { computeSignals } from '../engines/signals';
-import { computeAllocation } from '../engines/allocation';
-import { UserProfile, SystemSnapshot } from '../types/indicators';
+import { UserProfile } from '../types/indicators';
+import { DEFAULT_PROFILE, getSnapshot, readCache, writeCache, buildSnapshot, CACHE_TTL } from '../state/cache';
+import { coverage, readHistory } from '../state/history-store';
+import { getHistorySeries } from '../state/history-series';
+import { fetchInsiderSummary } from '../collectors/smart-money';
+import { fetchUpcomingEarnings } from '../collectors/earnings';
+import { computeCorrelationMatrix } from '../engines/correlation';
 
 const router = Router();
 
-const DEFAULT_PROFILE: UserProfile = {
-  riskTolerance: 'moderate',
-  leverageEnabled: false,
-  includeCrypto: false,
-  includeKR: true,
-  manualInputs: {
-    policyDirection: 0,
-    geoRisk: 2,
-    cbBuying: true,
-  },
-};
-
-let cachedSnapshot: SystemSnapshot | null = null;
-let cacheTime = 0;
-const CACHE_TTL = 5 * 60 * 1000;
-
-async function buildSnapshot(profile: UserProfile): Promise<SystemSnapshot> {
-  const apiKey = process.env.FRED_API_KEY || '';
-  const raw = await collectAll(apiKey);
-  const derived = await computeDerived(raw);
-  const regime = classifyRegime({ raw, derived, manualInputs: profile.manualInputs });
-  const signals = computeSignals(raw, derived, regime, profile);
-  const allocation = computeAllocation(regime.regime, regime.score, signals, derived, raw);
-
-  return {
-    timestamp: new Date().toISOString(),
-    raw,
-    derived,
-    regime,
-    signals,
-    allocation,
-  };
-}
-
 router.get('/snapshot', async (_req: Request, res: Response) => {
   try {
-    const now = Date.now();
-    if (cachedSnapshot && now - cacheTime < CACHE_TTL) {
-      res.json(cachedSnapshot);
-      return;
-    }
-
-    const snapshot = await buildSnapshot(DEFAULT_PROFILE);
-    cachedSnapshot = snapshot;
-    cacheTime = now;
+    const snapshot = await getSnapshot(DEFAULT_PROFILE);
     res.json(snapshot);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Internal server error' });
@@ -61,18 +20,103 @@ router.get('/snapshot', async (_req: Request, res: Response) => {
 
 router.post('/snapshot', async (req: Request, res: Response) => {
   try {
-    const profile: UserProfile = { ...DEFAULT_PROFILE, ...req.body };
-    const snapshot = await buildSnapshot(profile);
-    cachedSnapshot = snapshot;
-    cacheTime = Date.now();
+    const body = req.body || {};
+    const profile: UserProfile = {
+      ...DEFAULT_PROFILE,
+      ...body,
+      manualInputs: {
+        ...DEFAULT_PROFILE.manualInputs,
+        ...(body.manualInputs || {}),
+      },
+    };
+
+    const snapshot = await getSnapshot(profile, true);
     res.json(snapshot);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Internal server error' });
   }
 });
 
+router.post('/refresh', async (_req: Request, res: Response) => {
+  try {
+    const snapshot = await buildSnapshot(DEFAULT_PROFILE);
+    writeCache(snapshot);
+    res.json(snapshot);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+router.get('/history/coverage', async (_req: Request, res: Response) => {
+  try {
+    res.json(await coverage());
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+router.get('/history/:source/:key', async (req: Request, res: Response) => {
+  try {
+    const source = Array.isArray(req.params.source) ? req.params.source[0] : req.params.source;
+    const key = Array.isArray(req.params.key) ? req.params.key[0] : req.params.key;
+    const points = await readHistory(source, key);
+    res.json({ source, key, count: points.length, points });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+router.get('/history-series', async (req: Request, res: Response) => {
+  try {
+    const keysParam = Array.isArray(req.query.keys) ? req.query.keys.join(',') : String(req.query.keys || '');
+    const range = String(req.query.range || '1Y') as '1D' | '1W' | '1M' | '1Y' | '5Y';
+    const interval = String(req.query.interval || '1D') as '1D' | '1W' | '1M';
+    const keys = keysParam.split(',').map((k) => k.trim()).filter(Boolean);
+    const series = await getHistorySeries(keys, range, interval);
+    res.json({ keys, range, interval, series });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+router.get('/smart-money', async (_req: Request, res: Response) => {
+  try {
+    const insider = await fetchInsiderSummary();
+    res.json({ insider });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/earnings', async (_req: Request, res: Response) => {
+  try {
+    const earnings = await fetchUpcomingEarnings();
+    res.json({ earnings, count: earnings.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/correlation', async (req: Request, res: Response) => {
+  try {
+    const lookback = Math.max(10, Math.min(500, parseInt(String(req.query.lookback || '60'), 10) || 60));
+    const keysParam = Array.isArray(req.query.keys) ? req.query.keys.join(',') : String(req.query.keys || '');
+    const keys = keysParam ? keysParam.split(',').map((k) => k.trim()).filter(Boolean) : undefined;
+    const result = await computeCorrelationMatrix(lookback, keys);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
 router.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  const { cacheTime } = readCache();
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    cacheTtlMs: CACHE_TTL,
+    lastRefreshAt: cacheTime ? new Date(cacheTime).toISOString() : null,
+  });
 });
 
 export default router;
