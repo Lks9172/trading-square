@@ -2,6 +2,7 @@ import { MarketDataPoint, DerivedIndicator } from '../types/indicators';
 import { fetchYahooHistory } from '../collectors/yahoo';
 import { fetchFredHistory } from '../collectors/fred';
 import { readHistory } from '../state/history-store';
+import { fetchKrxInvestorFlow, summarizeInvestorFlow } from '../collectors/krx-flow';
 
 function val(raw: Record<string, MarketDataPoint>, key: string): number | null {
   return raw[key]?.value ?? null;
@@ -525,6 +526,47 @@ export async function computeDerived(
     d.OVERHEATED = { name: 'overheated', value: 1, date: dt, formula: '이격도+15%이상 AND VIX<15 → 과열' };
   } else {
     d.OVERHEATED = { name: 'overheated', value: 0, date: dt, formula: '과열 조건 미충족' };
+  }
+
+  // === KRX 외국인·기관 순매수 (코스피 전략 4번째 축) ===
+  // 네이버 금융(공식 집계) 스크래핑. 단위: 억원.
+  try {
+    const flowDays = await fetchKrxInvestorFlow('KOSPI');
+    const summary = summarizeInvestorFlow('KOSPI', flowDays);
+    if (summary) {
+      d.KOSPI_FOREIGN_NET_1D = {
+        name: 'kospi_foreign_net_1d',
+        value: summary.foreignLatest,
+        date: summary.latestDate,
+        formula: '당일 외국인 순매수 (억원, 네이버 금융)',
+      };
+      d.KOSPI_FOREIGN_NET_5D = {
+        name: 'kospi_foreign_net_5d',
+        value: summary.foreignNet5D,
+        date: summary.latestDate,
+        formula: '최근 5영업일 외국인 순매수 합 (억원)',
+      };
+      d.KOSPI_FOREIGN_NET_20D = {
+        name: 'kospi_foreign_net_20d',
+        value: summary.foreignNet20D,
+        date: summary.latestDate,
+        formula: '최근 20영업일 외국인 순매수 합 (억원)',
+      };
+      d.KOSPI_FOREIGN_TREND = {
+        name: 'kospi_foreign_trend',
+        value: summary.foreignTrend,
+        date: summary.latestDate,
+        formula: '외국인 최근5일 평균 - 6~20일 평균 (양수=매수 가속)',
+      };
+      d.KOSPI_INSTITUTION_NET_5D = {
+        name: 'kospi_institution_net_5d',
+        value: summary.institutionNet5D,
+        date: summary.latestDate,
+        formula: '최근 5영업일 기관계 순매수 합 (억원)',
+      };
+    }
+  } catch {
+    /* 외국인 수급 수집 실패는 전체 파이프라인 막지 않음 */
   }
 
   return d;

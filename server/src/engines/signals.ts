@@ -485,7 +485,7 @@ function kospiSignal(
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
   let met = 0;
-  const total = 6;
+  const total = 7;
 
   const above200 = dv(derived, 'KOSPI_ABOVE_200DMA');
   if (above200 === 0) { met++; reasons.push('코스피 200DMA 하회 (가중치 1.0)'); }
@@ -513,6 +513,19 @@ function kospiSignal(
   const volumeConfirm = dv(derived, 'KOSPI_VOLUME_CONFIRM');
   if (volumeConfirm === 1) { met++; reasons.push('거래량 확인 (최근5일 평균 >= 20일 평균의 110%, 가중치 1.0)'); }
   else { unmetReasons.push('거래량 지속 조건 미충족 (가중치 1.0 미충족)'); }
+
+  // 외국인 수급 축 (영상5 "환율·추세·거래량·외국인수급" 4축 중 마지막)
+  const foreignNet20D = dv(derived, 'KOSPI_FOREIGN_NET_20D');
+  const foreignTrend = dv(derived, 'KOSPI_FOREIGN_TREND');
+  if (foreignNet20D !== null && foreignNet20D > 0) {
+    met++;
+    const trendTag = foreignTrend !== null && foreignTrend > 0 ? ' + 추세 가속' : '';
+    reasons.push(`외국인 20일 순매수 ${foreignNet20D >= 0 ? '+' : ''}${Math.round(foreignNet20D).toLocaleString('en-US')}억${trendTag} (가중치 1.0)`);
+  } else if (foreignNet20D !== null) {
+    unmetReasons.push(`외국인 20일 순매도 ${Math.round(foreignNet20D).toLocaleString('en-US')}억 → 매수 기반 부족 (가중치 1.0 미충족)`);
+  } else {
+    unmetReasons.push('외국인 수급 데이터 없음 (가중치 1.0 미충족)');
+  }
 
   const usdkrw = v(raw, 'USDKRW');
   if (usdkrw !== null && usdkrw >= 1500 && above200 === 0) {
