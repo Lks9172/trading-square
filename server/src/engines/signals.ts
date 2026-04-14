@@ -17,13 +17,21 @@ function signalFromScore(met: number, total: number, thresholds = [2, 3, 4]): Si
 
 function nasdaqSignal(
   raw: Record<string, MarketDataPoint>,
-  derived: Record<string, DerivedIndicator>
+  derived: Record<string, DerivedIndicator>,
+  profile: UserProfile
 ): AssetSignal {
+  // 영상1 §전략B "5기준" 을 카테고리 축으로 반영:
+  //   1) 저점 (200DMA / 이격도 / VIX / ICSA / F&G)
+  //   2) 유동성 (RRP 감소 · 글로벌 M2 확장)
+  //   3) 정책 (완화 방향)
+  //   4) 지정학 (GPR) — geoRisk 는 GOLD 에서 이미 주요 트리거로 사용 중이라 NASDAQ 에서는 보조만
+  //   5) 섹터 (XLK 기술 주도) — 기존에도 보조조건으로 존재
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
   let met = 0;
-  const total = 5;
+  const total = 7;
 
+  // --- 저점 카테고리 (5) ---
   const above200 = dv(derived, 'NASDAQ_ABOVE_200DMA');
   if (above200 === 0) { met++; reasons.push('200DMA 하회 (가중치 1.0)'); }
   else { unmetReasons.push('200DMA 하회 아님 (가중치 1.0 미충족)'); }
@@ -44,6 +52,33 @@ function nasdaqSignal(
   const fng = v(raw, 'FEAR_GREED');
   if (fng !== null && fng < 25) { met++; reasons.push(`F&G ${fng} < 25 (가중치 1.0)`); }
   else { unmetReasons.push('Fear & Greed 25 미만 조건 미충족 (가중치 1.0 미충족)'); }
+
+  // --- 유동성 카테고리 (1) ---
+  // RRP 감소(시장 유동성 유입) OR 글로벌 M2 YoY 양수(글로벌 유동성 확장) 중 하나 이상.
+  const rrpDir = dv(derived, 'RRP_DIRECTION');
+  const globalM2 = dv(derived, 'GLOBAL_M2_PROXY');
+  const rrpLoosening = rrpDir !== null && rrpDir < 0;
+  const m2Expanding = globalM2 !== null && globalM2 > 0;
+  if (rrpLoosening || m2Expanding) {
+    met++;
+    reasons.push(
+      `유동성 확장 (${rrpLoosening ? `RRP ${rrpDir?.toFixed(0)} 감소` : ''}` +
+      `${rrpLoosening && m2Expanding ? ' · ' : ''}` +
+      `${m2Expanding ? `글로벌 M2 YoY ${globalM2?.toFixed(1)}%` : ''}, 가중치 1.0)`
+    );
+  } else {
+    unmetReasons.push(`유동성 확장 미충족 (RRP ${rrpDir?.toFixed(0) ?? '?'}, M2 ${globalM2?.toFixed(1) ?? '?'}%, 가중치 1.0 미충족)`);
+  }
+
+  // --- 정책 카테고리 (1) ---
+  // 완화 방향 (policyDirection > 0: 금리인하·QE 기조) 이면 위험자산 우호.
+  const policy = profile.manualInputs?.policyDirection ?? 0;
+  if (policy > 0) {
+    met++;
+    reasons.push(`정책 완화 방향 (policyDirection=${policy}, 가중치 1.0)`);
+  } else {
+    unmetReasons.push(`정책 완화 미충족 (policyDirection=${policy}, 가중치 1.0 미충족)`);
+  }
 
   const cross = dv(derived, 'NASDAQ_CROSS');
   if (cross === -1) { reasons.push('데드크로스 발생 → 역발상 분할매수 구간 (보조조건)'); }
@@ -71,9 +106,10 @@ function nasdaqSignal(
     };
   }
 
+  // total=7 기준 등급 경계 [3,4,5] — STRONG_BUY 는 "저점 대부분 + 유동성 or 정책" 수준.
   return {
     asset: 'NASDAQ',
-    signal: signalFromScore(met, total, [2, 3, 4]),
+    signal: signalFromScore(met, total, [3, 4, 5]),
     conditionsMet: met,
     conditionsTotal: total,
     weightedScore: met,
@@ -460,7 +496,7 @@ export function computeSignals(
   profile: UserProfile
 ): AssetSignal[] {
   return [
-    nasdaqSignal(raw, derived),
+    nasdaqSignal(raw, derived, profile),
     kospiSignal(raw, derived),
     goldSignal(raw, derived, profile),
     silverSignal(derived, raw),
