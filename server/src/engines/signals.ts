@@ -1,4 +1,41 @@
+import fs from 'fs';
+import path from 'path';
 import { MarketDataPoint, DerivedIndicator, RegimeState, AssetSignal, Signal, UserProfile } from '../types/indicators';
+
+// === LEVERAGE 진입일 영속 저장 ===
+// 영상1 §전략C "레버리지는 2~3개월 짧게, 20~30% 익절, 횡보 시 원금잠식 위험".
+// 진입일(BUY 첫 발생일)을 파일로 기록해 경과일에 따라 경고 / 강제 REDUCE 처리.
+// 볼륨(/app/data)에 저장되어 재시작에도 보존.
+const LEVERAGE_ENTRY_FILE = path.resolve(process.cwd(), 'data', 'leverage-entry.json');
+const LEVERAGE_WARN_DAYS = 60;
+const LEVERAGE_FORCE_EXIT_DAYS = 90;
+
+function readLeverageEntry(): string | null {
+  try {
+    const content = fs.readFileSync(LEVERAGE_ENTRY_FILE, 'utf-8');
+    const parsed = JSON.parse(content);
+    return typeof parsed.entryDate === 'string' ? parsed.entryDate : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLeverageEntry(date: string) {
+  try {
+    fs.mkdirSync(path.dirname(LEVERAGE_ENTRY_FILE), { recursive: true });
+    fs.writeFileSync(LEVERAGE_ENTRY_FILE, JSON.stringify({ entryDate: date }));
+  } catch {
+    /* 쓰기 실패는 조용히 무시 — 저장 실패로 신호 자체를 막지는 않음 */
+  }
+}
+
+function clearLeverageEntry() {
+  try { fs.unlinkSync(LEVERAGE_ENTRY_FILE); } catch { /* 파일 없을 때 무시 */ }
+}
+
+function daysBetween(a: string, b: string): number {
+  return Math.floor((new Date(a).getTime() - new Date(b).getTime()) / 86400000);
+}
 
 function v(raw: Record<string, MarketDataPoint>, key: string): number | null {
   return raw[key]?.value ?? null;
@@ -392,18 +429,52 @@ function leverageCheck(
     unmetReasons.push(`⚠️ VIX ${vix.toFixed(1)} 안정 + 이격도 ${disparity.toFixed(1)}% → 횡보 원금잠식 위험 (보조조건)`);
   }
 
+  const today = new Date().toISOString().split('T')[0];
+  let signal: Signal = met === 3 ? 'BUY' : 'HOLD';
+  const decisionReasons = met === 3
+    ? [...reasons, '3조건 충족 → 2x ETF 최대 15% 허용']
+    : [...reasons, `${3 - met}개 조건 미충족 → 레버리지 불허`];
+
+  // === 시간 기반 청산 (영상1 §전략C) ===
+  const entryDate = readLeverageEntry();
+  if (signal === 'BUY') {
+    if (!entryDate) {
+      writeLeverageEntry(today);
+      decisionReasons.push(`레버리지 진입일 ${today} 기록 (상한 ${LEVERAGE_FORCE_EXIT_DAYS}일)`);
+    } else {
+      const elapsed = daysBetween(today, entryDate);
+      if (elapsed >= LEVERAGE_FORCE_EXIT_DAYS) {
+        signal = 'REDUCE';
+        decisionReasons.push(
+          `⏰ 진입 ${elapsed}일 경과 (≥ ${LEVERAGE_FORCE_EXIT_DAYS}일) → 영상1 §전략C "2~3개월 짧게" 원칙 강제 익절`,
+        );
+      } else if (elapsed >= LEVERAGE_WARN_DAYS) {
+        decisionReasons.push(
+          `⚠️ 진입 ${elapsed}일차 (${LEVERAGE_WARN_DAYS}~${LEVERAGE_FORCE_EXIT_DAYS}일) → 익절 준비 구간`,
+        );
+        unmetReasons.push(
+          `⏰ 레버리지 진입 ${elapsed}일 — 영상1 2~3개월 상한 접근, 이익실현 권고`,
+        );
+      } else {
+        decisionReasons.push(`진입 ${elapsed}일차 (상한 ${LEVERAGE_FORCE_EXIT_DAYS}일)`);
+      }
+    }
+  } else if (entryDate) {
+    // BUY 아닌 상태 → 포지션 종료로 간주, 진입일 리셋
+    clearLeverageEntry();
+    decisionReasons.push(`신호 종료 → 진입일 기록 삭제 (다음 BUY 시 재기록)`);
+  }
+
   return {
     asset: 'LEVERAGE',
-    signal: met === 3 ? 'BUY' : 'HOLD',
+    signal,
     conditionsMet: met,
     conditionsTotal: total,
     weightedScore: met,
     weightedMaxScore: total,
-    reasons: met === 3
-      ? [...reasons, '3조건 충족 → 2x ETF 최대 15% 허용']
-      : [...reasons, `${3 - met}개 조건 미충족 → 레버리지 불허`],
+    reasons: decisionReasons,
     unmetReasons,
-    date: new Date().toISOString().split('T')[0],
+    date: today,
   };
 }
 
