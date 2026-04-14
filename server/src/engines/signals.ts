@@ -20,23 +20,42 @@ function nasdaqSignal(
   derived: Record<string, DerivedIndicator>
 ): AssetSignal {
   const reasons: string[] = [];
+  const unmetReasons: string[] = [];
   let met = 0;
   const total = 5;
 
   const above200 = dv(derived, 'NASDAQ_ABOVE_200DMA');
-  if (above200 === 0) { met++; reasons.push('200DMA 하회'); }
+  if (above200 === 0) { met++; reasons.push('200DMA 하회 (가중치 1.0)'); }
+  else { unmetReasons.push('200DMA 하회 아님 (가중치 1.0 미충족)'); }
 
   const icsa = v(raw, 'ICSA');
-  if (icsa !== null && icsa < 300000) { met++; reasons.push(`실업수당 ${Math.round(icsa / 1000)}K < 300K`); }
+  if (icsa !== null && icsa < 300000) { met++; reasons.push(`실업수당 ${Math.round(icsa / 1000)}K < 300K (가중치 1.0)`); }
+  else { unmetReasons.push('실업수당 300K 미만 조건 미충족 (가중치 1.0 미충족)'); }
 
   const vix = v(raw, 'VIXCLS');
-  if (vix !== null && vix > 30) { met++; reasons.push(`VIX ${vix.toFixed(1)} > 30`); }
+  if (vix !== null && vix > 30) { met++; reasons.push(`VIX ${vix.toFixed(1)} > 30 (가중치 1.0)`); }
+  else { unmetReasons.push('VIX 30 초과 조건 미충족 (가중치 1.0 미충족)'); }
 
   const disparity = dv(derived, 'NASDAQ_DISPARITY');
-  if (disparity !== null && disparity < -15) { met++; reasons.push(`이격도 ${disparity.toFixed(1)}% < -15%`); }
+  if (disparity !== null && disparity < -10) { met++; reasons.push(`이격도 ${disparity.toFixed(1)}% < -10% (가중치 1.0)`); }
+  else if (disparity !== null) { unmetReasons.push(`이격도 ${disparity.toFixed(1)}% → -10% 미만 미충족 (가중치 1.0 미충족)`); }
+  else { unmetReasons.push('이격도 데이터 없음 (가중치 1.0 미충족)'); }
 
   const fng = v(raw, 'FEAR_GREED');
-  if (fng !== null && fng < 25) { met++; reasons.push(`F&G ${fng} < 25`); }
+  if (fng !== null && fng < 25) { met++; reasons.push(`F&G ${fng} < 25 (가중치 1.0)`); }
+  else { unmetReasons.push('Fear & Greed 25 미만 조건 미충족 (가중치 1.0 미충족)'); }
+
+  const cross = dv(derived, 'NASDAQ_CROSS');
+  if (cross === -1) { reasons.push('데드크로스 발생 → 역발상 분할매수 구간 (보조조건)'); }
+  else if (cross === 1) { unmetReasons.push('골든크로스 발생 → 추격매수 주의 (보조조건)'); }
+  else if (cross === -0.5) { reasons.push('역배열 유지 (50DMA < 200DMA, 보조조건)'); }
+
+  const chaseNasdaq = dv(derived, 'CHASE_NASDAQ');
+  if (chaseNasdaq !== null && chaseNasdaq > 15) { unmetReasons.push(`⚠️ 나스닥 20일 +${chaseNasdaq.toFixed(1)}% → 추격매수 주의 (보조조건)`); }
+
+  const xlk = dv(derived, 'SECTOR_XLK');
+  if (xlk !== null && xlk > 0) { reasons.push(`XLK 기술섹터 +${xlk.toFixed(1)}% → 성장주 랠리 질 양호 (보조조건)`); }
+  else if (xlk !== null && xlk < 0) { unmetReasons.push(`XLK 기술섹터 ${xlk.toFixed(1)}% → 성장주 주도력 약함 (보조조건)`); }
 
   if (icsa !== null && icsa >= 300000 && above200 === 0) {
     return {
@@ -44,7 +63,10 @@ function nasdaqSignal(
       signal: 'SELL',
       conditionsMet: met,
       conditionsTotal: total,
+      weightedScore: met,
+      weightedMaxScore: total,
       reasons: ['200DMA 하회 + 실업수당 30만 초과 → 구조적 위험'],
+      unmetReasons,
       date: new Date().toISOString().split('T')[0],
     };
   }
@@ -54,7 +76,10 @@ function nasdaqSignal(
     signal: signalFromScore(met, total, [2, 3, 4]),
     conditionsMet: met,
     conditionsTotal: total,
+    weightedScore: met,
+    weightedMaxScore: total,
     reasons,
+    unmetReasons,
     date: new Date().toISOString().split('T')[0],
   };
 }
@@ -65,18 +90,41 @@ function goldSignal(
   profile: UserProfile
 ): AssetSignal {
   const reasons: string[] = [];
+  const unmetReasons: string[] = [];
   let score = 0;
+  let metCount = 0;
   const maxScore = 8;
 
   const realYield = dv(derived, 'REAL_YIELD');
-  if (realYield !== null && realYield < 1.0) { score += 3; reasons.push(`실질금리 ${realYield.toFixed(2)}% 하락 추세`); }
+  const ryTrend = dv(derived, 'REAL_YIELD_TREND');
+  const ryFalling = ryTrend !== null ? ryTrend < -0.05 : (realYield !== null && realYield < 1.0);
+  const ryLabel = ryTrend !== null ? `추세 ${ryTrend.toFixed(3)}` : (realYield !== null ? `절대값 ${realYield.toFixed(2)}% (추세 데이터 없어 1.0% 기준 fallback)` : '데이터 없음');
+  if (ryFalling) { score += 3; metCount += 1; reasons.push(`실질금리 하락 확인 (${ryLabel}, 가중치 3.0)`); }
+  else { unmetReasons.push(`실질금리 하락 미충족 (${ryLabel}, 가중치 3.0 미충족)`); }
 
   const dxy = v(raw, 'DXY');
-  if (dxy !== null && dxy < 103) { score += 2; reasons.push(`DXY ${dxy.toFixed(1)} 약세`); }
+  const dxyTrend = dv(derived, 'DXY_TREND');
+  const dxyTrendLong = dv(derived, 'DXY_TREND_LONG');
+  const dxyWeak = dxyTrend !== null ? dxyTrend < -0.5 : (dxy !== null && dxy < 103);
+  if (dxyWeak) { score += 2; metCount += 1; reasons.push(`DXY ${dxy?.toFixed(1) ?? '?'} (단기: ${dxyTrend?.toFixed(2) ?? '?'}, 장기: ${dxyTrendLong?.toFixed(2) ?? '?'}, 약세, 가중치 2.0)`); }
+  else { unmetReasons.push(`DXY 약세 추세 미충족 (단기: ${dxyTrend?.toFixed(2) ?? '?'}, 장기: ${dxyTrendLong?.toFixed(2) ?? '?'}, 가중치 2.0 미충족)`); }
+  if (dxyTrendLong !== null && dxyTrendLong < -2) { reasons.push('DXY 구조적 약세 확인 → 금 장기 우호 (보조조건)'); }
 
-  if (profile.manualInputs.cbBuying) { score += 1.5; reasons.push('중앙은행 매수 지속'); }
+  if (profile.manualInputs.cbBuying) { score += 1.5; metCount += 1; reasons.push('중앙은행 매수 지속 (가중치 1.5)'); }
+  else { unmetReasons.push('중앙은행 매수 지속 아님 (가중치 1.5 미충족)'); }
 
-  if (profile.manualInputs.geoRisk >= 3) { score += 0.5; reasons.push('지정학 리스크 확대'); }
+  if (profile.manualInputs.geoRisk >= 3) { score += 0.5; metCount += 1; reasons.push('지정학 리스크 확대 (가중치 0.5)'); }
+  else { unmetReasons.push('지정학 리스크 확대 조건 미충족 (가중치 0.5 미충족)'); }
+
+  const goldDisparity = dv(derived, 'GOLD_DISPARITY');
+  if (goldDisparity !== null && goldDisparity <= -10) {
+    reasons.push(`금 200DMA 근처 (이격도 ${goldDisparity.toFixed(1)}%) → 분할매수 유리 구간 (보조조건)`);
+  } else if (goldDisparity !== null && goldDisparity > 15) {
+    unmetReasons.push(`금 200DMA 대비 +${goldDisparity.toFixed(1)}% → 추격매수 주의 (보조조건)`);
+  }
+
+  const chaseGold = dv(derived, 'CHASE_GOLD');
+  if (chaseGold !== null && chaseGold > 15) { unmetReasons.push(`⚠️ 금 20일 +${chaseGold.toFixed(1)}% → 추격매수 주의 (보조조건)`); }
 
   const pct = (score / maxScore) * 100;
 
@@ -84,9 +132,12 @@ function goldSignal(
     return {
       asset: 'GOLD',
       signal: 'HOLD',
-      conditionsMet: Math.round(score),
+      conditionsMet: metCount,
       conditionsTotal: 4,
+      weightedScore: Number(score.toFixed(1)),
+      weightedMaxScore: maxScore,
       reasons: ['실질금리 상승 + DXY 강세 → 지정학만으로 매수 위험'],
+      unmetReasons,
       date: new Date().toISOString().split('T')[0],
     };
   }
@@ -97,12 +148,28 @@ function goldSignal(
   else if (pct > 30) signal = 'HOLD';
   else signal = 'REDUCE';
 
+  const goldFibZone = dv(derived, 'GOLD_FIB_ZONE');
+  if (signal === 'REDUCE' && goldFibZone !== null && goldFibZone >= 2) {
+    signal = 'HOLD';
+    reasons.push(`피보나치 바닥권(구간 ${goldFibZone}) → 최소 HOLD 보장`);
+  }
+  if (signal === 'HOLD' && goldFibZone !== null && goldFibZone >= 3 && goldDisparity !== null && goldDisparity <= -15) {
+    const hardMacroBlock = (realYield !== null && realYield > 2.5) && (dxy !== null && dxy > 106);
+    if (!hardMacroBlock) {
+      signal = 'BUY';
+      reasons.push(`강한 바닥권(피보 ${goldFibZone}, 이격도 ${goldDisparity.toFixed(1)}%) → BUY 승격`);
+    }
+  }
+
   return {
     asset: 'GOLD',
     signal,
-    conditionsMet: Math.round(score),
+    conditionsMet: metCount,
     conditionsTotal: 4,
+    weightedScore: Number(score.toFixed(1)),
+    weightedMaxScore: maxScore,
     reasons,
+    unmetReasons,
     date: new Date().toISOString().split('T')[0],
   };
 }
@@ -112,38 +179,87 @@ function silverSignal(
   raw: Record<string, MarketDataPoint>
 ): AssetSignal {
   const reasons: string[] = [];
+  const unmetReasons: string[] = [];
   let met = 0;
   const total = 2;
 
+  // 영상2 "금은비 60~80 이상이면 은 저평가 가능성 + 경기회복 동반 확인 필요".
+  // 기존 임계 80은 상한선 기준이라 2021년 피크(~100) 같은 극단 구간에서만 점화.
+  // 실제 영상 해석상 70 정도부터 시작해 저평가 신호로 간주 가능 → 70 메인,
+  // 60~70 구간은 보조 가점.
   const gsr = dv(derived, 'GOLD_SILVER_RATIO');
-  if (gsr !== null && gsr >= 80) { met++; reasons.push(`금은비 ${gsr.toFixed(1)} ≥ 80`); }
+  if (gsr !== null && gsr >= 70) { met++; reasons.push(`금은비 ${gsr.toFixed(1)} ≥ 70 (영상2 저평가 구간, 가중치 1.0)`); }
+  else if (gsr !== null && gsr >= 60) { reasons.push(`금은비 ${gsr.toFixed(1)} → 60~70 관찰 구간 (보조조건)`); }
+  else { unmetReasons.push(`금은비 ${gsr?.toFixed(1) ?? '?'} < 70 미충족 (가중치 1.0 미충족)`); }
 
   const icsa = v(raw, 'ICSA');
-  if (icsa !== null && icsa < 250000) { met++; reasons.push('경기회복 신호 (실업수당 감소)'); }
+  if (icsa !== null && icsa < 250000) { met++; reasons.push('경기회복 신호 (실업수당 감소, 가중치 1.0)'); }
+  else { unmetReasons.push('경기회복(실업수당 감소) 조건 미충족 (가중치 1.0 미충족)'); }
+
+  const ismProxy = dv(derived, 'ISM_PROXY');
+  const xli = dv(derived, 'SECTOR_XLI');
+  let auxMet = 0;
+  if (ismProxy !== null && ismProxy >= 50) { auxMet++; reasons.push(`ISM ${ismProxy.toFixed(1)} ≥ 50 → 은 산업수요 우호 (보조조건)`); }
+  else if (ismProxy !== null) { unmetReasons.push(`ISM ${ismProxy.toFixed(1)} < 50 → 산업수요 약함 (보조조건)`); }
+  if (xli !== null && xli > 0) { auxMet++; reasons.push(`XLI 산업재 +${xli.toFixed(1)}% → 경기회복 동반 (보조조건)`); }
+  else if (xli !== null) { unmetReasons.push(`XLI 산업재 ${xli.toFixed(1)}% → 경기민감섹터 약세 (보조조건)`); }
+
+  let signal: Signal;
+  if (met === 2 && auxMet >= 2) signal = 'STRONG_BUY';
+  else if (met === 2) signal = 'BUY';
+  else if (met === 1 && auxMet >= 2) { signal = 'BUY'; reasons.push('메인 1개 + 보조 2개 충족 → BUY 승격 (보조조건)'); }
+  else signal = 'HOLD';
+
+  if (auxMet === 0 && signal === 'BUY') {
+    signal = 'HOLD';
+    unmetReasons.push('경기방향 보조조건 전부 미충족 → BUY 차단 (보조조건)');
+  }
 
   return {
     asset: 'SILVER',
-    signal: met === 2 ? 'BUY' : 'HOLD',
+    signal,
     conditionsMet: met,
     conditionsTotal: total,
+    weightedScore: met,
+    weightedMaxScore: total,
     reasons: reasons.length > 0 ? reasons : ['조건 미충족, 대기'],
+    unmetReasons,
     date: new Date().toISOString().split('T')[0],
   };
 }
 
 function copperSignal(
   derived: Record<string, DerivedIndicator>,
-  raw: Record<string, MarketDataPoint>
+  raw: Record<string, MarketDataPoint>,
+  profile: UserProfile
 ): AssetSignal {
   const reasons: string[] = [];
+  const unmetReasons: string[] = [];
   let met = 0;
   const total = 3;
 
   const icsa = v(raw, 'ICSA');
-  if (icsa !== null && icsa < 250000) { met++; reasons.push('실업수당 감소 추세'); }
+  if (icsa !== null && icsa < 250000) { met++; reasons.push('실업수당 감소 추세 (가중치 1.0)'); }
+  else { unmetReasons.push('실업수당 감소 조건 미충족 (가중치 1.0 미충족)'); }
 
   const cgr = dv(derived, 'COPPER_GOLD_RATIO');
-  if (cgr !== null) { reasons.push(`구리금비 ${cgr.toFixed(6)}`); }
+  if (cgr !== null && cgr > 0.00125) { met++; reasons.push(`구리금비 ${cgr.toFixed(6)} 상승 우위 (가중치 1.0)`); }
+  else if (cgr !== null) { unmetReasons.push(`구리금비 ${cgr.toFixed(6)} 아직 약함 (가중치 1.0 미충족)`); }
+  else { unmetReasons.push('구리금비 데이터 없음 (가중치 1.0 미충족)'); }
+
+  const ismManual = profile.manualInputs.ismPmi;
+  const ismAuto = dv(derived, 'ISM_PROXY');
+  const ismValue = ismManual ?? ismAuto;
+  if (ismValue !== null && ismValue >= 50) { met++; reasons.push(`ISM ${ismValue.toFixed(1)} ≥ 50 확장 ${ismManual ? '(수동)' : '(자동)'} (가중치 1.0)`); }
+  else if (ismValue !== null && ismValue >= 48) { reasons.push(`ISM ${ismValue.toFixed(1)} 바닥 근접 (보조조건)`); }
+  else if (ismValue !== null) { unmetReasons.push(`ISM ${ismValue.toFixed(1)} 수축 구간 (가중치 1.0 미충족)`); }
+  else { unmetReasons.push('ISM 데이터 없음 (가중치 1.0 미충족)'); }
+
+  const xli = dv(derived, 'SECTOR_XLI');
+  const xle = dv(derived, 'SECTOR_XLE');
+  if (xli !== null && xli > 0) { reasons.push(`XLI 산업재 +${xli.toFixed(1)}% → 경기민감섹터 강세 (보조조건)`); }
+  else if (xli !== null && xli < 0) { unmetReasons.push(`XLI 산업재 ${xli.toFixed(1)}% → 경기회복 신뢰 약화 (보조조건)`); }
+  if (xle !== null && xle > 5) { unmetReasons.push(`XLE 에너지 +${xle.toFixed(1)}% → 유가/전쟁 주도 가능성 (보조조건)`); }
 
   if (reasons.length === 0) reasons.push('조건 미충족, 대기');
 
@@ -157,7 +273,10 @@ function copperSignal(
     signal,
     conditionsMet: met,
     conditionsTotal: total,
+    weightedScore: met,
+    weightedMaxScore: total,
     reasons,
+    unmetReasons,
     date: new Date().toISOString().split('T')[0],
   };
 }
@@ -186,7 +305,10 @@ function cashSignal(regime: RegimeState): AssetSignal {
     signal: map[regime.regime] ?? 'HOLD',
     conditionsMet: 0,
     conditionsTotal: 0,
+    weightedScore: 0,
+    weightedMaxScore: 0,
     reasons: [reasons[regime.regime] ?? ''],
+    unmetReasons: [],
     date: new Date().toISOString().split('T')[0],
   };
 }
@@ -196,26 +318,137 @@ function leverageCheck(
   derived: Record<string, DerivedIndicator>
 ): AssetSignal {
   const reasons: string[] = [];
+  const unmetReasons: string[] = [];
   let met = 0;
   const total = 3;
 
   const disparity = dv(derived, 'NASDAQ_DISPARITY');
-  if (disparity !== null && disparity <= -25) { met++; reasons.push(`이격도 ${disparity.toFixed(1)}% ≤ -25%`); }
+  if (disparity !== null && disparity <= -25) { met++; reasons.push(`이격도 ${disparity.toFixed(1)}% ≤ -25% (가중치 1.0)`); }
+  else { unmetReasons.push('이격도 -25% 이하 조건 미충족 (가중치 1.0 미충족)'); }
 
   const vix = v(raw, 'VIXCLS');
-  if (vix !== null && vix >= 35) { met++; reasons.push(`VIX ${vix.toFixed(1)} ≥ 35`); }
+  if (vix !== null && vix >= 35) { met++; reasons.push(`VIX ${vix.toFixed(1)} ≥ 35 (가중치 1.0)`); }
+  else { unmetReasons.push('VIX 35 이상 조건 미충족 (가중치 1.0 미충족)'); }
 
   const icsa = v(raw, 'ICSA');
-  if (icsa !== null && icsa < 300000) { met++; reasons.push(`실업수당 ${Math.round(icsa / 1000)}K < 300K`); }
+  if (icsa !== null && icsa < 300000) { met++; reasons.push(`실업수당 ${Math.round(icsa / 1000)}K < 300K (가중치 1.0)`); }
+  else { unmetReasons.push('실업수당 300K 미만 조건 미충족 (가중치 1.0 미충족)'); }
+
+  if (disparity !== null && disparity >= 0 && met < 3) {
+    return {
+      asset: 'LEVERAGE',
+      signal: 'REDUCE',
+      conditionsMet: met,
+      conditionsTotal: total,
+      weightedScore: met,
+      weightedMaxScore: total,
+      reasons: [`이격도 ${disparity.toFixed(1)}% → 200DMA 복귀/초과. 레버리지 익절 구간 (목표 20~30% 도달 추정)`],
+      unmetReasons,
+      date: new Date().toISOString().split('T')[0],
+    };
+  }
+
+  if (disparity !== null && disparity > -10 && disparity < 0 && met < 3) {
+    reasons.push(`이격도 ${disparity.toFixed(1)}% → 회복 중. 목표 수익 근접. 익절 준비 (보조조건)`);
+  }
+
+  if (vix !== null && vix < 20 && disparity !== null && disparity > -15) {
+    unmetReasons.push(`⚠️ VIX ${vix.toFixed(1)} 안정 + 이격도 ${disparity.toFixed(1)}% → 횡보 원금잠식 위험 (보조조건)`);
+  }
 
   return {
     asset: 'LEVERAGE',
     signal: met === 3 ? 'BUY' : 'HOLD',
     conditionsMet: met,
     conditionsTotal: total,
+    weightedScore: met,
+    weightedMaxScore: total,
     reasons: met === 3
       ? [...reasons, '3조건 충족 → 2x ETF 최대 15% 허용']
       : [...reasons, `${3 - met}개 조건 미충족 → 레버리지 불허`],
+    unmetReasons,
+    date: new Date().toISOString().split('T')[0],
+  };
+}
+
+function kospiSignal(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>
+): AssetSignal {
+  const reasons: string[] = [];
+  const unmetReasons: string[] = [];
+  let met = 0;
+  const total = 6;
+
+  const above200 = dv(derived, 'KOSPI_ABOVE_200DMA');
+  if (above200 === 0) { met++; reasons.push('코스피 200DMA 하회 (가중치 1.0)'); }
+  else { unmetReasons.push('코스피 200DMA 상회 중 (가중치 1.0 미충족)'); }
+
+  const fxLevel = dv(derived, 'KRW_FX_LEVEL');
+  if (fxLevel !== null && fxLevel >= 1) { met++; reasons.push(`환율 우호 (레벨 ${fxLevel}, 가중치 1.0)`); }
+  else { unmetReasons.push('환율 1480원 이하 조건 미충족 (가중치 1.0 미충족)'); }
+
+  const disparity = dv(derived, 'KOSPI_DISPARITY');
+  if (disparity !== null && disparity < -15) { met++; reasons.push(`코스피 이격도 ${disparity.toFixed(1)}% < -15% (가중치 1.0)`); }
+  else { unmetReasons.push('코스피 이격도 -15% 이하 조건 미충족 (가중치 1.0 미충족)'); }
+
+  const wti = v(raw, 'WTI');
+  if (wti !== null && wti < 80) { met++; reasons.push(`유가 $${wti.toFixed(1)} < $80 안정 (가중치 1.0)`); }
+  else { unmetReasons.push('유가 $80 미만 조건 미충족 (가중치 1.0 미충족)'); }
+
+  const chaseKospi = dv(derived, 'CHASE_KOSPI');
+  if (chaseKospi !== null && chaseKospi > 15) { unmetReasons.push(`⚠️ 코스피 20일 +${chaseKospi.toFixed(1)}% → 추격매수 주의 (보조조건)`); }
+
+  const vix = v(raw, 'VIXCLS');
+  if (vix !== null && vix < 25) { met++; reasons.push(`VIX ${vix.toFixed(1)} < 25 안정 (가중치 1.0)`); }
+  else { unmetReasons.push('VIX 25 미만 조건 미충족 (가중치 1.0 미충족)'); }
+
+  const volumeConfirm = dv(derived, 'KOSPI_VOLUME_CONFIRM');
+  if (volumeConfirm === 1) { met++; reasons.push('거래량 확인 (최근5일 평균 >= 20일 평균의 110%, 가중치 1.0)'); }
+  else { unmetReasons.push('거래량 지속 조건 미충족 (가중치 1.0 미충족)'); }
+
+  const usdkrw = v(raw, 'USDKRW');
+  if (usdkrw !== null && usdkrw >= 1500 && above200 === 0) {
+    return {
+      asset: 'KOSPI',
+      signal: 'SELL',
+      conditionsMet: met,
+      conditionsTotal: total,
+      weightedScore: met,
+      weightedMaxScore: total,
+      reasons: ['코스피 200DMA 하회 + 환율 1500원 돌파 → 외국인 매도 압력 극대화'],
+      unmetReasons,
+      date: new Date().toISOString().split('T')[0],
+    };
+  }
+
+  let signal = signalFromScore(met, total, [2, 3, 4]);
+
+  const trendRecovery = dv(derived, 'KOSPI_TREND_RECOVERY');
+  const trendConfirmCount = [
+    trendRecovery === 1 ? 1 : 0,
+    volumeConfirm === 1 ? 1 : 0,
+    (fxLevel !== null && fxLevel >= 1) ? 1 : 0,
+  ].reduce((a, b) => a + b, 0);
+
+  if (trendConfirmCount < 2 && (signal === 'STRONG_BUY')) {
+    signal = 'BUY';
+    reasons.push(`추세전환 3조건 ${trendConfirmCount}/3 미충족 → BUY 상한 (보조조건)`);
+  }
+  if (trendConfirmCount === 0 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
+    signal = 'HOLD';
+    reasons.push(`추세전환 3조건 전부 미충족 → HOLD 상한 (보조조건)`);
+  }
+
+  return {
+    asset: 'KOSPI',
+    signal,
+    conditionsMet: met,
+    conditionsTotal: total,
+    weightedScore: met,
+    weightedMaxScore: total,
+    reasons,
+    unmetReasons,
     date: new Date().toISOString().split('T')[0],
   };
 }
@@ -228,9 +461,10 @@ export function computeSignals(
 ): AssetSignal[] {
   return [
     nasdaqSignal(raw, derived),
+    kospiSignal(raw, derived),
     goldSignal(raw, derived, profile),
     silverSignal(derived, raw),
-    copperSignal(derived, raw),
+    copperSignal(derived, raw, profile),
     cashSignal(regime),
     leverageCheck(raw, derived),
   ];
