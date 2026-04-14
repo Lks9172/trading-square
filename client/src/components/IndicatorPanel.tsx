@@ -91,7 +91,7 @@ const DERIVED_LABELS: Record<string, { label: string; unit: string; desc: string
   KOSPI_TREND_RECOVERY: { label: "코스피 추세회복", unit: "", desc: "1=추세선 회복 (현재가>50DMA>200DMA)", formula: "현재가>50DMA>200DMA" },
   KOSPI_YEAR_RETURN:  { label: "코스피 연수익률", unit: "%", desc: "1년 수익률. 75%+ 시 역사적 조정 패턴 경고", formula: "1년 수익률" },
   KOSPI_OVERHEATED:   { label: "코스피 과열",    unit: "",   desc: "1=연간 75%+ 상승 후 조정 패턴 경고", formula: "연간 수익률 75%+" },
-  GLOBAL_M2_PROXY:    { label: "글로벌 M2 프록시", unit: "%", desc: "미국 M2 + 유로 M3 + 일본 M3 YoY% 평균. 양수=글로벌 유동성 확장", formula: "3개 시리즈 각 (최신 / 12개월전 - 1) 평균" },
+  GLOBAL_M2_PROXY:    { label: "글로벌 M2 프록시", unit: "%", desc: "미국 M2 + 유로 M3 + 일본 M3 YoY% 평균. 양수=글로벌 유동성 확장. -20~30% 밖 이상치는 제외", formula: "3개 시리즈 각 (최신 / 12개월전 - 1), 범위 밖 제외 후 평균" },
   US_M2_YOY:          { label: "미국 M2 YoY",     unit: "%", desc: "미국 M2SL 12개월 대비 증가율", formula: "최신 / 12개월 전 - 1" },
   EURO_M3_YOY:        { label: "유로 M3 YoY",     unit: "%", desc: "유로지역 M3 12개월 대비 증가율", formula: "최신 / 12개월 전 - 1" },
   JAPAN_M3_YOY:       { label: "일본 M3 YoY",     unit: "%", desc: "일본 M3 12개월 대비 증가율", formula: "최신 / 12개월 전 - 1" },

@@ -198,39 +198,48 @@ export async function computeDerived(
     readYoY('M3_JAPAN'),
   ]);
 
-  if (usYoY !== null) {
-    d.US_M2_YOY = {
-      name: 'us_m2_yoy',
-      value: parseFloat(usYoY.toFixed(2)),
-      date: dt,
-      formula: '미국 M2SL 최신월 / 12개월 전 - 1 (%)',
-    };
-  }
-  if (euroYoY !== null) {
-    d.EURO_M3_YOY = {
-      name: 'euro_m3_yoy',
-      value: parseFloat(euroYoY.toFixed(2)),
-      date: dt,
-      formula: '유로 M3 최신월 / 12개월 전 - 1 (%)',
-    };
-  }
-  if (japanYoY !== null) {
-    d.JAPAN_M3_YOY = {
-      name: 'japan_m3_yoy',
-      value: parseFloat(japanYoY.toFixed(2)),
-      date: dt,
-      formula: '일본 M3 최신월 / 12개월 전 - 1 (%)',
-    };
-  }
+  // 광의통화 YoY 합리 범위: COVID 피크(미국 M2 약 +27%)까지 포섭하되,
+  // 시리즈 base 변경/스케일 오류로 인한 극단값(예: Japan M3 +96%)은 평균에서 제외.
+  const M2_YOY_MIN = -20;
+  const M2_YOY_MAX = 30;
+  const isM2Anomaly = (v: number) => v < M2_YOY_MIN || v > M2_YOY_MAX;
 
-  const m2Components = [usYoY, euroYoY, japanYoY].filter((v): v is number => v !== null);
-  if (m2Components.length > 0) {
-    const globalAvg = m2Components.reduce((s, v) => s + v, 0) / m2Components.length;
+  const pushYoY = (
+    key: 'US_M2_YOY' | 'EURO_M3_YOY' | 'JAPAN_M3_YOY',
+    name: string,
+    source: string,
+    yoy: number | null,
+  ) => {
+    if (yoy === null) return;
+    const anomaly = isM2Anomaly(yoy);
+    d[key] = {
+      name,
+      value: parseFloat(yoy.toFixed(2)),
+      date: dt,
+      formula: anomaly
+        ? `${source} 최신월 / 12개월 전 - 1 (%). 이상치(${M2_YOY_MIN}~${M2_YOY_MAX}% 범위 밖) — GLOBAL 평균 계산에서 제외됨`
+        : `${source} 최신월 / 12개월 전 - 1 (%)`,
+    };
+  };
+
+  pushYoY('US_M2_YOY', 'us_m2_yoy', '미국 M2SL', usYoY);
+  pushYoY('EURO_M3_YOY', 'euro_m3_yoy', '유로 M3', euroYoY);
+  pushYoY('JAPAN_M3_YOY', 'japan_m3_yoy', '일본 M3', japanYoY);
+
+  const m2All = [usYoY, euroYoY, japanYoY].filter((v): v is number => v !== null);
+  const m2Valid = m2All.filter((v) => !isM2Anomaly(v));
+  const excludedCount = m2All.length - m2Valid.length;
+
+  if (m2Valid.length > 0) {
+    const globalAvg = m2Valid.reduce((s, v) => s + v, 0) / m2Valid.length;
     d.GLOBAL_M2_PROXY = {
       name: 'global_m2_proxy',
       value: parseFloat(globalAvg.toFixed(2)),
       date: dt,
-      formula: `미국 M2 + 유로 M3 + 일본 M3 의 YoY% 평균 (${m2Components.length}개 기여)`,
+      formula:
+        `미국 M2 + 유로 M3 + 일본 M3 의 YoY% 평균 (${m2Valid.length}개 기여` +
+        (excludedCount > 0 ? `, ${excludedCount}개 이상치 제외` : '') +
+        `, ${M2_YOY_MIN}~${M2_YOY_MAX}% clamp)`,
     };
   }
 
