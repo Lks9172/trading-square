@@ -1,8 +1,33 @@
 services:
-  # Jaeger 는 홈서버에 이미 외부 서비스로 기동 중 (이름 `jaeger`, :16686/:4318).
-  # 중복 컨테이너 만들지 않고 host 네트워크로 forwarding (extra_hosts 로 host.docker.internal 해석).
-  # 새 MacroSquare 서비스가 보내는 trace 는 service.name=macrosquare-server 로 tagging 되어
-  # 기존 서비스 trace 와 UI 에서 구분됨.
+  # MacroSquare 전용 Jaeger (기존 호스트 jaeger 컨테이너와 완전 분리).
+  # 포트: UI 16687 / OTLP HTTP 4328 — 기존 jaeger :16686/:4318 과 충돌 없음.
+  # Badger 영속 스토리지 → ./jaeger-data (홈서버 재부팅 후에도 trace 복구).
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: macrosquare-jaeger
+    environment:
+      - SPAN_STORAGE_TYPE=badger
+      - BADGER_EPHEMERAL=false
+      - BADGER_DIRECTORY_VALUE=/badger/data
+      - BADGER_DIRECTORY_KEY=/badger/key
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16687:16686"   # UI (외부 http://192.168.0.200:16687)
+    expose:
+      - "4318"          # OTLP HTTP — compose network 내부만 노출 (server→jaeger)
+    volumes:
+      - ./jaeger-data:/badger
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:16686/ > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   server:
     build: ./server
@@ -18,11 +43,11 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_OPTIONS=--dns-result-order=ipv4first
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4318
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
       - OTEL_SERVICE_NAME=macrosquare-server
       - OTEL_TRACES_EXPORTER=otlp
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      - jaeger
     logging:
       driver: json-file
       options:
