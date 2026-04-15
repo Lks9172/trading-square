@@ -45,11 +45,42 @@ function dv(derived: Record<string, DerivedIndicator>, key: string): number | nu
   return derived[key]?.value ?? null;
 }
 
-function signalFromScore(met: number, total: number, thresholds = [2, 3, 4]): Signal {
-  if (met >= thresholds[2]) return 'STRONG_BUY';
-  if (met >= thresholds[1]) return 'BUY';
-  if (met >= thresholds[0]) return 'HOLD';
-  return 'HOLD';
+/**
+ * 5단계 임계치를 모두 받아 signal 을 결정.
+ *
+ * 기존 구현은 `[hold, buy, strongBuy]` 3값만 받고 REDUCE/SELL 분기를 사실상 제거해
+ * 두 분기 모두 `return 'HOLD'` 로 귀결시켰다(감사 Fix #1 지적). 그 결과 어떤 자산도
+ * met=0 이어도 최악 HOLD 에 그쳐 REDUCE/SELL 이 영원히 미발생했다.
+ *
+ * 수정 방향: **호출부에서 각 자산의 실제 conditions total 에 맞춘 임계치를 명시**로 지정.
+ * 표준 권고: `{ strongBuy: total, buy: total-2, hold: total-4, reduce: total-5, sell: 0 }`
+ * 단, PRD 에 자산별 스펙이 있으면 우선.
+ *
+ * 판정 순서 (내림차순):
+ *   met ≥ strongBuy → STRONG_BUY
+ *   met ≥ buy       → BUY
+ *   met ≥ hold      → HOLD
+ *   met ≥ reduce    → REDUCE
+ *   else            → SELL
+ *
+ * 주의: 모든 임계치는 strongBuy ≥ buy ≥ hold ≥ reduce ≥ sell 오름차순 가정.
+ * 저점 REDUCE 오판을 피하기 위해 호출부에서 기존 HOLD 범위는 보수적으로 유지하고
+ * 아주 낮은 met(≤ total-5 수준)만 REDUCE 로 강등한다.
+ */
+export interface SignalThresholds {
+  sell: number;        // met < reduce 시 sell (default 0)
+  reduce: number;      // reduce ≤ met < hold 시 REDUCE
+  hold: number;        // hold ≤ met < buy 시 HOLD
+  buy: number;         // buy ≤ met < strongBuy 시 BUY
+  strongBuy: number;   // strongBuy ≤ met 시 STRONG_BUY
+}
+
+function signalFromScore(met: number, total: number, thresholds: SignalThresholds): Signal {
+  if (met >= thresholds.strongBuy) return 'STRONG_BUY';
+  if (met >= thresholds.buy) return 'BUY';
+  if (met >= thresholds.hold) return 'HOLD';
+  if (met >= thresholds.reduce) return 'REDUCE';
+  return 'SELL';
 }
 
 function nasdaqSignal(
@@ -152,10 +183,13 @@ function nasdaqSignal(
     };
   }
 
-  // total=7 기준 등급 경계 [3,4,5] — STRONG_BUY 는 "저점 대부분 + 유동성 or 정책" 수준.
+  // total=7 기준 등급 경계 — STRONG_BUY 는 "저점 대부분 + 유동성 or 정책" 수준.
+  // Fix #1: 기존 3단계 [3,4,5] 에 REDUCE/SELL 하한을 명시해 저점에서도 실제 강등 가능하게 복구.
+  //   strongBuy=5 (기존 유지), buy=4 (기존 유지), hold=3 (기존 유지)
+  //   reduce=2 (total-5, 1~2개만 충족 시 약세), sell=0 (아무것도 충족 없음)
   return {
     asset: 'NASDAQ',
-    signal: signalFromScore(met, total, [3, 4, 5]),
+    signal: signalFromScore(met, total, { sell: 0, reduce: 2, hold: 3, buy: 4, strongBuy: 5 }),
     conditionsMet: met,
     conditionsTotal: total,
     weightedScore: met,
@@ -608,7 +642,10 @@ function kospiSignal(
     };
   }
 
-  let signal = signalFromScore(met, total, [2, 3, 4]);
+  // Fix #1: total=7 기준 [2,3,4] 에 REDUCE/SELL 하한을 명시. 기존 HOLD 시작 met=2 는 유지하고
+  // met=1 만 REDUCE, met=0 만 SELL 로 강등. KOSPI 는 환율·외인·거래량 축이 하나라도 깨지면
+  // met 급락 가능하므로 total-5=2 대신 보수적으로 reduce=1 채택.
+  let signal = signalFromScore(met, total, { sell: 0, reduce: 1, hold: 2, buy: 3, strongBuy: 4 });
 
   const trendRecovery = dv(derived, 'KOSPI_TREND_RECOVERY');
   const trendConfirmCount = [
