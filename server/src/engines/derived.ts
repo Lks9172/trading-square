@@ -1,5 +1,5 @@
 import { MarketDataPoint, DerivedIndicator } from '../types/indicators';
-import { fetchYahooHistory } from '../collectors/yahoo';
+import { fetchYahooHistory, fetchYahooOHLC } from '../collectors/yahoo';
 import { fetchFredHistory } from '../collectors/fred';
 import { readHistory } from '../state/history-store';
 import { fetchKrxInvestorFlow, summarizeInvestorFlow } from '../collectors/krx-flow';
@@ -981,6 +981,44 @@ export async function computeDerived(
     } catch {
       /* 멀티 타임프레임 수집 실패는 전체 파이프라인 막지 않음 */
     }
+  }
+
+  // === USD/KRW 주봉 선형 회귀 채널 (5년) ===
+  // stt_kospi: 환율이 채널 상단(>0.9)에 붙으면 원화 약세 극단 → 외국인 매도 리스크,
+  //           하단(<0.1)은 원화 강세 극단 → 매수 우호 환경.
+  try {
+    const krwDays = await fetchYahooOHLC('KRW=X', 365 * 6, '1wk');
+    if (krwDays.length >= 60) {
+      const ch = linearRegressionChannel(krwDays, 260); // ~5년 주봉
+      if (ch && ch.position !== null) {
+        d.USDKRW_WEEKLY_CHANNEL_POSITION = {
+          name: 'usdkrw_weekly_channel_position',
+          value: parseFloat(ch.position.toFixed(3)),
+          date: krwDays[krwDays.length - 1].date,
+          formula: '5년 주봉 회귀채널 내 위치(0~1). >0.9=원화 약세 극단(외인매도 리스크), <0.1=강세 극단',
+        };
+        d.USDKRW_WEEKLY_UPPER = {
+          name: 'usdkrw_weekly_upper',
+          value: ch.upperBand,
+          date: krwDays[krwDays.length - 1].date,
+          formula: '5년 주봉 회귀 상단 (mid + 1σ)',
+        };
+        d.USDKRW_WEEKLY_MID = {
+          name: 'usdkrw_weekly_mid',
+          value: ch.midLine,
+          date: krwDays[krwDays.length - 1].date,
+          formula: '5년 주봉 회귀선 (OLS)',
+        };
+        d.USDKRW_WEEKLY_LOWER = {
+          name: 'usdkrw_weekly_lower',
+          value: ch.lowerBand,
+          date: krwDays[krwDays.length - 1].date,
+          formula: '5년 주봉 회귀 하단 (mid - 1σ)',
+        };
+      }
+    }
+  } catch {
+    /* USDKRW 주봉 채널 실패는 무시 */
   }
 
   // === KRX 외국인·기관 순매수 (코스피 전략 4번째 축) ===
