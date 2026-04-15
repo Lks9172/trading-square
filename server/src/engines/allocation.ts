@@ -120,6 +120,26 @@ export function computeAllocation(
     base.cash += cut;
   }
 
+  // === 재정 리스크 보정 (FISCAL_STRESS=1, 영상4 §07 채권 자경단) ===
+  // 30년 금리 급등 + 높은 레벨 → 위험자산 축소, 금·현금 방어. OVERHEATED 와 별도로 발동 가능.
+  const fiscalStress = derived.FISCAL_STRESS?.value === 1;
+  const fiscalStressHard = derived.FISCAL_STRESS_HARD?.value === 1;
+  if (fiscalStress) {
+    const amount = fiscalStressHard ? 15 : 8; // hard 는 더 강하게
+    const reduceKeys = ['nasdaq', 'leverage', 'korea', 'emerging'];
+    const available = reduceKeys.reduce((s, k) => s + (base[k] || 0), 0);
+    const actual = Math.min(available, amount);
+    if (available > 0 && actual > 0) {
+      for (const k of reduceKeys) {
+        const v = base[k] || 0;
+        base[k] = Math.max(0, v - (v / available) * actual);
+      }
+    }
+    // 60% cash, 40% gold 로 이관 (영상4 § 금은 장기 방어)
+    base.cash = (base.cash || 0) + actual * 0.6;
+    base.gold = (base.gold || 0) + actual * 0.4;
+  }
+
   // === 과열 보정 (OVERHEATED=1) ===
   // 철학: 과열 국면에서는 위험자산을 줄이고 현금·금으로 이관한다.
   // 기존 구현은 `cash+20, gold+5` 를 먼저 더한 뒤 reduceKeys 총합에서 비례 25 를

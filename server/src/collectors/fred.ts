@@ -5,6 +5,7 @@ const FRED_BASE = 'https://api.stlouisfed.org/fred/series/observations';
 
 const FRED_SERIES: Record<string, string> = {
   DGS10: 'DGS10',
+  DGS30: 'DGS30',  // 30년 국채 금리 — 영상4 "채권 자경단" 감지용
   T10YIE: 'T10YIE',
   T10Y2Y: 'T10Y2Y',
   VIXCLS: 'VIXCLS',
