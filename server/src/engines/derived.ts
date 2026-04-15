@@ -11,6 +11,8 @@ import {
   detectOutsideBar,
   detectWBottom,
   linearRegressionChannel,
+  fetchYearlyBuckets,
+  detectYearlyAreaIndex,
 } from './candles';
 
 function val(raw: Record<string, MarketDataPoint>, key: string): number | null {
@@ -885,6 +887,28 @@ export async function computeDerived(
           };
         }
       }
+      // 연봉 계층 (stt_kospi "연봉 아래꼬리 저점 시그널")
+      try {
+        const yearly = await fetchYearlyBuckets(symbol, 20);
+        if (yearly.length > 0) {
+          const yai = detectYearlyAreaIndex(yearly, 5);
+          d[`${prefix}_YEARLY_CONSECUTIVE_BULLISH`] = {
+            name: `${prefix.toLowerCase()}_yearly_consecutive_bullish`,
+            value: yai.consecutiveBullish,
+            date: yearly[yearly.length - 1].date,
+            formula: '최근부터 역산한 연봉 연속 양봉 수. 3+ 과열, 0+아래꼬리 높음 = 바닥',
+          };
+          d[`${prefix}_YEARLY_LOWER_SHADOW_RATIO`] = {
+            name: `${prefix.toLowerCase()}_yearly_lower_shadow_ratio`,
+            value: yai.latestLowerShadowRatio,
+            date: yearly[yearly.length - 1].date,
+            formula: '최근 연봉 아래꼬리/몸통 비율 (stt_kospi). ≥1 = 강한 매수압력/바닥 탐색',
+          };
+        }
+      } catch {
+        /* 연봉 버킷팅 실패는 무시 */
+      }
+
       // W 반등 패턴 감지 (영상3·5) — 일봉 90일 창
       const wBottom = detectWBottom(mtf.daily, 90);
       d[`${prefix}_W_BOTTOM`] = {

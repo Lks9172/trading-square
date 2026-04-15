@@ -265,6 +265,91 @@ export function linearRegressionChannel(
   };
 }
 
+/**
+ * 일봉 → 연봉 버킷팅 (stt_kospi "연봉 아래꼬리 저점 시그널" 계층).
+ *
+ * 캘린더 연도별로 그룹핑:
+ *   - open: 그 해 첫 거래일 open
+ *   - close: 마지막 거래일 close
+ *   - high: 전체 high 최댓값
+ *   - low: 전체 low 최솟값
+ *   - date: YYYY-12-31 (연말로 정규화)
+ *
+ * years: 최근 N년만 반환 (부족하면 있는 만큼).
+ */
+export async function fetchYearlyBuckets(symbol: string, years = 20): Promise<OHLCCandle[]> {
+  // 넉넉히 30년치 일봉을 가져와서 연 단위로 버킷팅 (Yahoo는 ^IXIC/^KS11 모두 장기 커버)
+  const daily = await fetchYahooOHLC(symbol, 365 * 30, '1d');
+  if (daily.length === 0) return [];
+  const byYear = new Map<string, OHLCCandle[]>();
+  for (const c of daily) {
+    const yr = c.date.slice(0, 4);
+    if (!byYear.has(yr)) byYear.set(yr, []);
+    byYear.get(yr)!.push(c);
+  }
+  const yrs = Array.from(byYear.keys()).sort();
+  const buckets: OHLCCandle[] = yrs.map((yr) => {
+    const rows = byYear.get(yr)!;
+    const first = rows[0];
+    const last = rows[rows.length - 1];
+    return {
+      date: `${yr}-12-31`,
+      open: first.open,
+      high: Math.max(...rows.map((r) => r.high)),
+      low: Math.min(...rows.map((r) => r.low)),
+      close: last.close,
+      volume: rows.reduce((a, r) => a + (r.volume || 0), 0),
+    };
+  });
+  return buckets.slice(-years);
+}
+
+/**
+ * 연봉 Area Index 감지 (stt_kospi "연봉 아래꼬리" 저점 시그널).
+ *
+ * 반환:
+ *   - consecutiveBullish: 최근부터 역산한 연속 양봉 수
+ *   - avgLowerShadowRatio: 최근 N봉 평균 (lower wick / body) 비율
+ *   - latestLowerShadowRatio: 최신 연봉 아래꼬리/몸통
+ *
+ * 해석: consecutive ≥3 + latestLowerShadowRatio 낮음 → 소진 경고,
+ *       latestLowerShadowRatio 높음 (≥1) → 바닥 탐색 중 (매수 압력).
+ */
+export function detectYearlyAreaIndex(yearly: OHLCCandle[], lookback = 5): {
+  consecutiveBullish: number;
+  avgLowerShadowRatio: number | null;
+  latestLowerShadowRatio: number | null;
+} {
+  if (yearly.length === 0) {
+    return { consecutiveBullish: 0, avgLowerShadowRatio: null, latestLowerShadowRatio: null };
+  }
+  // 역순 연속 양봉
+  let cnt = 0;
+  for (let i = yearly.length - 1; i >= 0; i -= 1) {
+    if (yearly[i].close > yearly[i].open) cnt += 1;
+    else break;
+  }
+  const recent = yearly.slice(-lookback);
+  const ratios: number[] = [];
+  for (const c of recent) {
+    const body = Math.abs(c.close - c.open);
+    if (body < 1e-9) continue;
+    const lowerShadow = Math.min(c.open, c.close) - c.low;
+    ratios.push(lowerShadow / body);
+  }
+  const avg = ratios.length > 0 ? ratios.reduce((a, b) => a + b, 0) / ratios.length : null;
+  const latest = yearly[yearly.length - 1];
+  const latestBody = Math.abs(latest.close - latest.open);
+  const latestRatio = latestBody > 1e-9
+    ? (Math.min(latest.open, latest.close) - latest.low) / latestBody
+    : null;
+  return {
+    consecutiveBullish: cnt,
+    avgLowerShadowRatio: avg !== null ? parseFloat(avg.toFixed(3)) : null,
+    latestLowerShadowRatio: latestRatio !== null ? parseFloat(latestRatio.toFixed(3)) : null,
+  };
+}
+
 /** 월봉 기준 위치 지수: 최근 월봉의 종가가 최근 12개월 고점 대비 몇 % 위치 (0~1) */
 export function monthlyPositionScore(monthly: Array<OHLCCandle & { shape: CandleShape }>): number | null {
   if (monthly.length < 2) return null;
