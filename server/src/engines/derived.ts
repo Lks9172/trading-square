@@ -729,9 +729,69 @@ export async function computeDerived(
           formula: '재정리스크 + 수익률곡선 스티프닝 동시 → 채권 자경단 강경 신호 (영상4 §07)',
         };
       }
+
+      // === 채권 자경단 합성 지수 (영상4 §137-147 "재정적자 + 장기금리↑ + 달러↓ 3박자") ===
+      // DGS30 상승 + DXY 약세 + HY 스프레드 확대 동시 충족 시 '정책 실패 프리커서' 단계적 경보.
+      const dxyVal = val(raw, 'DXY');
+      const dxyTrendLong = d.DXY_TREND_LONG?.value;
+      const hySpread = val(raw, 'BAMLH0A0HYM2');
+      const dxyWeak = (dxyTrendLong !== undefined && dxyTrendLong !== null && dxyTrendLong < -1)
+                  || (dxyVal !== null && dxyVal < 100);
+      const yieldRising = delta20 >= 0.15;  // 20일 +0.15%p 이상
+      const hyWidening = hySpread !== null && hySpread >= 4.5; // 4.5% 이상 위험 스프레드
+      const vigilanteScore =
+        (yieldRising ? 1 : 0) +
+        (dxyWeak ? 1 : 0) +
+        (hyWidening ? 1 : 0);
+      d.BOND_VIGILANTE_SCORE = {
+        name: 'bond_vigilante_score',
+        value: vigilanteScore,
+        date: dt,
+        formula: `장기금리↑${yieldRising ? 'Y' : 'N'} + DXY약세${dxyWeak ? 'Y' : 'N'} + HY확대${hyWidening ? 'Y' : 'N'} → 3축 동시 확인 시 채권자경단 경보 (영상4 §137)`,
+      };
+      if (vigilanteScore >= 2) {
+        d.BOND_VIGILANTE_WARNING = {
+          name: 'bond_vigilante_warning',
+          value: 1,
+          date: dt,
+          formula: `채권 자경단 2축+ 충족 (${vigilanteScore}/3) — 정책 신뢰 이탈 프리커서`,
+        };
+      } else {
+        d.BOND_VIGILANTE_WARNING = {
+          name: 'bond_vigilante_warning',
+          value: 0,
+          date: dt,
+          formula: `3축 중 ${vigilanteScore}개만 충족 — 경보 미발동`,
+        };
+      }
     }
   } catch {
     /* DGS30 수집 실패는 다른 파이프라인 막지 않음 */
+  }
+
+  // === 스태그플레이션 레짐 (영상4 §145 "경기 둔화 + 물가 안 잡힘 신호") ===
+  // CPI 유가 압력 + ICSA 상승 추세 + ISM 50 하회 조합.
+  const cpiPressureD = d.CPI_OIL_LAG_PRESSURE?.value;
+  const icsaRegime = d.ICSA_REGIME_LABEL?.value;
+  const ismProxyD = d.ISM_PROXY?.value;
+  if (cpiPressureD !== undefined && ismProxyD !== undefined) {
+    const inflationRising = cpiPressureD !== null && cpiPressureD >= 1;
+    const growthSlowing = (ismProxyD !== null && ismProxyD < 50) || (icsaRegime !== undefined && icsaRegime !== null && icsaRegime <= -1);
+    const stagflationScore = (inflationRising ? 1 : 0) + (growthSlowing ? 1 : 0);
+    d.STAGFLATION_SCORE = {
+      name: 'stagflation_score',
+      value: stagflationScore,
+      date: dt,
+      formula: `인플레↑(${inflationRising ? 'Y' : 'N'}) + 성장둔화(${growthSlowing ? 'Y' : 'N'}) 동시 충족 시 2 (영상4 §145 스태그플레이션 신호)`,
+    };
+    d.STAGFLATION_WARNING = {
+      name: 'stagflation_warning',
+      value: stagflationScore === 2 ? 1 : 0,
+      date: dt,
+      formula: stagflationScore === 2
+        ? '스태그플레이션 2축 동시 충족 — CPI 상승 압력 + 성장 둔화 (영상4 §145)'
+        : '스태그플레이션 조건 미충족',
+    };
   }
 
   const nasdaqDisparity = d.NASDAQ_DISPARITY?.value ?? null;
