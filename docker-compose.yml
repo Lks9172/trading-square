@@ -2,7 +2,7 @@ services:
   jaeger:
     # Jaeger all-in-one + Badger 영속 스토리지.
     # 홈서버(192.168.0.200) 재부팅 이후에도 ./jaeger-data 볼륨에서 span 복구.
-    image: jaegertracing/all-in-one:1.63
+    image: jaegertracing/all-in-one:1.76.0
     container_name: macrosquare-jaeger
     environment:
       - SPAN_STORAGE_TYPE=badger
