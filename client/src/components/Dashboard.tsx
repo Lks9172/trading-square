@@ -88,7 +88,10 @@ export function Dashboard({ snapshot }: Props) {
         <AllocationPanel allocation={currentSnapshot.allocation} overheated={currentSnapshot?.derived?.OVERHEATED?.value === 1} />
       </div>
 
-      <ExecutionPlanPanel plans={currentSnapshot?.meta?.executionPlans} />
+      <ExecutionPlanPanel
+        plans={currentSnapshot?.meta?.executionPlans}
+        currentRegime={currentSnapshot?.regime?.regime}
+      />
 
       <SectorPanel derived={currentSnapshot.derived} />
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState, useCallback } from 'react';
+
 type ExecutionAction =
   | 'BUY_NOW'
   | 'SCALE_IN'
@@ -31,6 +33,34 @@ interface ExecutionPlan {
 
 interface Props {
   plans?: ExecutionPlan[];
+  currentRegime?: string;
+}
+
+interface TrancheSummary {
+  asset: string;
+  executedStages: number[];
+  nextStage: number | null;
+  latestRegime: string | null;
+  latestExecutedAt: string | null;
+}
+
+// 레짐 "상승" 정의: RISK_ON > NEUTRAL > CAUTION > CORRECTION / PANIC_BUT_OK > RECESSION_RISK.
+// level-up = 당시 regime 보다 현재 regime 이 더 긍정적 = 가격 상승 위험이 있는 "추격" 구간.
+const REGIME_LEVEL: Record<string, number> = {
+  RECESSION_RISK: 0,
+  PANIC_BUT_OK: 1,
+  CORRECTION: 1,
+  CAUTION: 2,
+  NEUTRAL: 3,
+  RISK_ON: 4,
+};
+
+function isLevelUp(from: string | null, to: string | undefined): boolean {
+  if (!from || !to) return false;
+  const a = REGIME_LEVEL[from];
+  const b = REGIME_LEVEL[to];
+  if (a === undefined || b === undefined) return false;
+  return b > a;
 }
 
 const ACTION_STYLE: Record<ExecutionAction, { bg: string; border: string; text: string }> = {
@@ -66,7 +96,46 @@ function stageStatusInfo(s: string): StageStatusInfo {
   return { icon: '⏳', text: '대기', color: 'text-neutral-500' };
 }
 
-export function ExecutionPlanPanel({ plans }: Props) {
+export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
+  const [summaries, setSummaries] = useState<Record<string, TrancheSummary>>({});
+  const [pendingAsset, setPendingAsset] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch('/api/execution-plan/tranche', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const map: Record<string, TrancheSummary> = {};
+      for (const s of data.summary as TrancheSummary[]) map[s.asset] = s;
+      setSummaries(map);
+    } catch {
+      /* 네트워크 실패 시 기존 상태 유지 */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const executeStage = useCallback(
+    async (asset: string, stage: number, priceAtEntry: number | null) => {
+      setPendingAsset(`${asset}-${stage}`);
+      try {
+        await fetch('/api/execution-plan/tranche', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asset, stage, priceAtEntry }),
+        });
+        await refresh();
+      } catch {
+        /* 서버 에러 조용히 무시 — 다음 refresh 때 재동기화 */
+      } finally {
+        setPendingAsset(null);
+      }
+    },
+    [refresh],
+  );
+
   if (!plans || plans.length === 0) return null;
 
   return (
@@ -88,6 +157,14 @@ export function ExecutionPlanPanel({ plans }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {plans.map((p) => {
           const style = ACTION_STYLE[p.action];
+          const summary = summaries[p.asset];
+          const executedSet = new Set(summary?.executedStages ?? []);
+          // 추격 경고: 이전 집행 이후 레짐이 레벨업했는데 다음 트랑셰 미집행
+          const chaseWarn =
+            !!summary &&
+            summary.nextStage !== null &&
+            !executedSet.has(summary.nextStage) &&
+            isLevelUp(summary.latestRegime, currentRegime);
           return (
             <div
               key={p.asset}
@@ -100,6 +177,14 @@ export function ExecutionPlanPanel({ plans }: Props) {
                     <span className="text-[10px] text-[var(--muted)] font-mono">
                       목표 {p.targetAllocationPct}%
                     </span>
+                    {chaseWarn && (
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 border border-yellow-500/40 text-yellow-300"
+                        title={`이전 집행(${summary?.latestRegime}) 이후 레짐이 ${currentRegime} 로 상승 — 추격 가능성`}
+                      >
+                        ⚠️ 추격 경고
+                      </span>
+                    )}
                   </div>
                   <div className={`text-sm font-semibold ${style.text} mt-0.5`}>{p.actionLabel}</div>
                 </div>
@@ -121,8 +206,18 @@ export function ExecutionPlanPanel({ plans }: Props) {
                 <div className="space-y-1 mb-2">
                   {p.stages.map((s) => {
                     const si = stageStatusInfo(s.status);
+                    const executed = executedSet.has(s.stage);
+                    const pendingKey = `${p.asset}-${s.stage}`;
+                    const isPending = pendingAsset === pendingKey;
                     return (
                       <div key={s.stage} className="flex items-start gap-2 text-[11px]">
+                        <input
+                          type="checkbox"
+                          checked={executed}
+                          readOnly
+                          aria-label={`${s.stage}차 집행 상태`}
+                          className="mt-0.5 shrink-0 accent-green-500"
+                        />
                         <span className={`${si.color} shrink-0`} title={si.text}>
                           {si.icon}
                         </span>
@@ -137,6 +232,18 @@ export function ExecutionPlanPanel({ plans }: Props) {
                           <span className="font-mono text-[10px] text-neutral-400 shrink-0">
                             @{s.triggerPrice.toLocaleString('en-US')}
                           </span>
+                        )}
+                        {!executed && (
+                          <button
+                            type="button"
+                            disabled={isPending}
+                            onClick={() =>
+                              executeStage(p.asset, s.stage, p.currentPrice ?? null)
+                            }
+                            className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20 disabled:opacity-40"
+                          >
+                            {isPending ? '…' : `${s.stage}차 집행`}
+                          </button>
                         )}
                       </div>
                     );

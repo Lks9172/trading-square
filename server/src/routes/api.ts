@@ -6,6 +6,13 @@ import { getHistorySeries } from '../state/history-series';
 import { fetchInsiderSummary } from '../collectors/smart-money';
 import { fetchUpcomingEarnings } from '../collectors/earnings';
 import { computeCorrelationMatrix } from '../engines/correlation';
+import {
+  appendTranche,
+  clearAssetTranches,
+  listTranches,
+  summarizeByAsset,
+  TrancheEntry,
+} from '../services/trancheStore';
 
 const router = Router();
 
@@ -104,6 +111,67 @@ router.get('/correlation', async (req: Request, res: Response) => {
     const keys = keysParam ? keysParam.split(',').map((k) => k.trim()).filter(Boolean) : undefined;
     const result = await computeCorrelationMatrix(lookback, keys);
     res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+// === Execution Plan 트랑셰 영속화 ===
+router.post('/execution-plan/tranche', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const asset = String(body.asset || '').trim();
+    const stage = Number(body.stage);
+    if (!asset || !Number.isFinite(stage) || stage < 1 || stage > 3) {
+      res.status(400).json({ error: 'asset(string) + stage(1~3) required' });
+      return;
+    }
+
+    // 현재 snapshot 에서 regime/price 보강
+    let regimeAtEntry: string | null = null;
+    let priceAtEntry: number | null =
+      typeof body.priceAtEntry === 'number' ? body.priceAtEntry : null;
+    try {
+      const snap = await getSnapshot(DEFAULT_PROFILE);
+      regimeAtEntry = snap.regime?.regime ?? null;
+      if (priceAtEntry === null) {
+        const raw = (snap as any).raw as Record<string, { value: number }> | undefined;
+        const candidate = raw?.[asset]?.value;
+        if (typeof candidate === 'number') priceAtEntry = candidate;
+      }
+    } catch {
+      /* snapshot 읽기 실패 시 regime/price 는 null 로 저장 */
+    }
+
+    const entry: TrancheEntry = {
+      asset,
+      stage,
+      executedAt: new Date().toISOString(),
+      priceAtEntry,
+      regimeAtEntry,
+    };
+    const entries = await appendTranche(entry);
+    res.status(201).json({ entry, total: entries.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+router.get('/execution-plan/tranche', async (_req: Request, res: Response) => {
+  try {
+    const entries = await listTranches();
+    const summary = summarizeByAsset(entries);
+    res.json({ entries, summary });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+router.delete('/execution-plan/tranche/:asset', async (req: Request, res: Response) => {
+  try {
+    const asset = Array.isArray(req.params.asset) ? req.params.asset[0] : req.params.asset;
+    const remaining = await clearAssetTranches(String(asset));
+    res.json({ asset, remainingTotal: remaining.length });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Internal server error' });
   }
