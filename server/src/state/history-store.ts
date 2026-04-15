@@ -59,6 +59,7 @@ function buildRawForDate(date: string, histories: Record<string, HistoryPoint[]>
   const defs: Array<[string, string, MarketDataPoint['source']]> = [
     ['DGS10', 'fred', 'FRED'], ['T10YIE', 'fred', 'FRED'], ['T10Y2Y', 'fred', 'FRED'], ['VIXCLS', 'fred', 'FRED'],
     ['BAMLH0A0HYM2', 'fred', 'FRED'], ['STLFSI4', 'fred', 'FRED'], ['ICSA', 'fred', 'FRED'], ['UNRATE', 'fred', 'FRED'],
+    ['DGS30', 'fred', 'FRED'],
     ['NASDAQ', 'yahoo', 'YAHOO'], ['GOLD', 'yahoo', 'YAHOO'], ['SILVER', 'yahoo', 'YAHOO'], ['COPPER', 'yahoo', 'YAHOO'],
     ['DXY', 'yahoo', 'YAHOO'], ['SP500', 'yahoo', 'YAHOO'], ['WTI', 'yahoo', 'YAHOO'], ['USDKRW', 'yahoo', 'YAHOO'],
     // 센티먼트 raw — KST 07:00 cron 의 appendSentimentDaily 가 daily append.
@@ -385,6 +386,104 @@ function reconstructPsychSubscore(
 }
 
 /**
+ * date 시점 OVERHEATED 재구성. live derived.ts 와 동일 룰:
+ *   NASDAQ_DISPARITY > 20 AND F&G > 75   → 1 (탐욕성 과열)
+ *   NASDAQ_DISPARITY > 15 AND VIX < 15   → 1 (변동성 과열)
+ *   외                                   → 0 (단, 판단 입력이 모두 null 이면 키 미발급)
+ *
+ * NASDAQ_DISPARITY 는 reconstruct200DmaSuite 가 채운 derivedSoFar 에서 가져온다 →
+ * 본 헬퍼는 반드시 200DMA suite 호출 이후에 실행.
+ */
+function reconstructOverheated(
+  date: string,
+  derivedSoFar: Record<string, DerivedIndicator>,
+  raw: Record<string, MarketDataPoint>,
+): Record<string, DerivedIndicator> {
+  const out: Record<string, DerivedIndicator> = {};
+  const nasdaqDisparity = derivedSoFar.NASDAQ_DISPARITY?.value ?? null;
+  const fng = raw.FEAR_GREED?.value ?? null;
+  const vixVal = raw.VIXCLS?.value ?? null;
+  if (nasdaqDisparity === null) return out;
+  if (nasdaqDisparity > 20 && fng !== null && fng > 75) {
+    out.OVERHEATED = { name: 'overheated', value: 1, date, formula: '이격도+20%이상 AND F&G 75+ → 과열' };
+  } else if (nasdaqDisparity > 15 && vixVal !== null && vixVal < 15) {
+    out.OVERHEATED = { name: 'overheated', value: 1, date, formula: '이격도+15%이상 AND VIX<15 → 과열' };
+  } else if (fng !== null || vixVal !== null) {
+    out.OVERHEATED = { name: 'overheated', value: 0, date, formula: '과열 조건 미충족' };
+  }
+  return out;
+}
+
+/**
+ * date 시점 BOND_VIGILANTE_SCORE/WARNING + FISCAL_STRESS 재구성.
+ * 입력: dgs30Hist (FRED) · dxyHist (Yahoo) · raw.BAMLH0A0HYM2.
+ *
+ * 라이브 derived.ts § "채권 자경단 / 재정 리스크" 와 동일 룰:
+ *   yieldRising = DGS30 20영업일 변화 ≥ +0.15%p
+ *   dxyWeak     = DXY 현재 < 100  (DXY_TREND_LONG 은 history 만으론 재구성 부담 → 레벨 룰만 사용)
+ *   hyWidening  = HY OAS ≥ 4.5
+ * BOND_VIGILANTE_SCORE = 합. ≥2 → WARNING=1.
+ * FISCAL_STRESS = (Δ20≥0.2 AND cur≥4.5) OR (Δ20≥0.3) → 1.
+ *
+ * STAGFLATION_WARNING/FISCAL_STRESS_HARD 는 다단계 derived 의존 (CPI_OIL_LAG_PRESSURE,
+ * ICSA_REGIME_LABEL, ISM_PROXY · T10Y2Y 곡선 스티프닝) 으로 본 스코프에서는 제외 →
+ * 향후 별도 헬퍼 (reconstructStagflation / reconstructFiscalHard) 로 분리.
+ */
+function reconstructBondVigilante(
+  date: string,
+  dgs30Hist: HistoryPoint[],
+  dxyHist: HistoryPoint[],
+  hyOasRaw: number | undefined,
+): Record<string, DerivedIndicator> {
+  const out: Record<string, DerivedIndicator> = {};
+  const target = dateToTime(date);
+  const dgs30Eligible = dgs30Hist.filter((p) => dateToTime(p.date) <= target);
+  if (dgs30Eligible.length < 20) return out;
+
+  const cur = dgs30Eligible[dgs30Eligible.length - 1].value;
+  const past = dgs30Eligible[dgs30Eligible.length - 20].value;
+  const delta20 = cur - past;
+
+  out.DGS30_20D_CHANGE = {
+    name: 'dgs30_20d_change',
+    value: parseFloat(delta20.toFixed(3)),
+    date,
+    formula: 'DGS30 20영업일 변화폭 (%p)',
+  };
+
+  const fiscalStress = (delta20 >= 0.2 && cur >= 4.5) || (delta20 >= 0.3);
+  out.FISCAL_STRESS = {
+    name: 'fiscal_stress',
+    value: fiscalStress ? 1 : 0,
+    date,
+    formula: `DGS30 20일 변화 ${delta20.toFixed(2)}p (현 ${cur.toFixed(2)}%) · 1=재정리스크/채권자경단 경고`,
+  };
+
+  const dxyEligible = dxyHist.filter((p) => dateToTime(p.date) <= target);
+  const dxyVal = dxyEligible.length > 0 ? dxyEligible[dxyEligible.length - 1].value : null;
+  const dxyWeak = dxyVal !== null && dxyVal < 100;
+  const yieldRising = delta20 >= 0.15;
+  const hyWidening = hyOasRaw !== undefined && hyOasRaw >= 4.5;
+  const score = (yieldRising ? 1 : 0) + (dxyWeak ? 1 : 0) + (hyWidening ? 1 : 0);
+
+  out.BOND_VIGILANTE_SCORE = {
+    name: 'bond_vigilante_score',
+    value: score,
+    date,
+    formula: `장기금리↑${yieldRising ? 'Y' : 'N'} + DXY약세${dxyWeak ? 'Y' : 'N'} + HY확대${hyWidening ? 'Y' : 'N'} → 3축 동시 (영상4 §137)`,
+  };
+  out.BOND_VIGILANTE_WARNING = {
+    name: 'bond_vigilante_warning',
+    value: score >= 2 ? 1 : 0,
+    date,
+    formula: score >= 2
+      ? `채권 자경단 ${score}/3 충족 — 정책 신뢰 이탈 프리커서`
+      : `3축 중 ${score}개만 충족 — 경보 미발동`,
+  };
+  return out;
+}
+
+/**
  * Fix(3차 감사): cachedLiveDerived 과거 일자 오염 차단.
  *
  * 변경 전: 라이브 derived 를 shallow clone 후 NASDAQ/비율만 덮어써 STAGFLATION/MTF/PSYCH 등
@@ -409,6 +508,8 @@ export async function recomputeFullDerivedForDate(
     hygHistory: HistoryPoint[];
     iefHistory: HistoryPoint[];
     m2Wm2nsHistory: HistoryPoint[];
+    dgs30History?: HistoryPoint[];
+    dxyHistory?: HistoryPoint[];
   },
 ): Promise<Record<string, DerivedIndicator>> {
   // 오늘 날짜 anchor 면 라이브 derived 를 그대로 사용 (NEW: 단일 스냅샷 신선도 보존).
@@ -454,11 +555,23 @@ export async function recomputeFullDerivedForDate(
     for (const [k, v] of Object.entries(reconstructM2Yoy(date, ctx.m2Wm2nsHistory))) {
       derived[k] = v;
     }
+    // 채권 자경단 / 재정 스트레스 (DGS30 + DXY history + HY OAS raw).
+    if (ctx.dgs30History && ctx.dxyHistory) {
+      for (const [k, v] of Object.entries(
+        reconstructBondVigilante(date, ctx.dgs30History, ctx.dxyHistory, raw.BAMLH0A0HYM2?.value),
+      )) {
+        derived[k] = v;
+      }
+    }
   }
 
   // 센티먼트 패스스루 + PSYCH_SUBSCORE 재구성 (raw 에 cnn/sentiment 항목이 있으면 발급).
   // raw 가 비면 자연스럽게 키 미발급 → signals.ts 의 dv() null 가드로 깔끔히 스킵.
   for (const [k, v] of Object.entries(reconstructPsychSubscore(date, raw))) {
+    derived[k] = v;
+  }
+  // OVERHEATED — NASDAQ_DISPARITY 가 위에서 채워진 상태이므로 마지막에 평가.
+  for (const [k, v] of Object.entries(reconstructOverheated(date, derived, raw))) {
     derived[k] = v;
   }
 
@@ -493,6 +606,8 @@ export async function refreshComputedHistories() {
   const hygHistory = await readHistory('yahoo', 'HYG');
   const iefHistory = await readHistory('yahoo', 'IEF');
   const m2Wm2nsHistory = await readHistory('fred', 'WM2NS');
+  const dgs30History = await readHistory('fred', 'DGS30');
+  const dxyHistory = await readHistory('yahoo', 'DXY');
 
   const base = histories['yahoo:NASDAQ'] || [];
   const computed: Record<string, HistoryPoint[]> = {
@@ -533,6 +648,8 @@ export async function refreshComputedHistories() {
       hygHistory,
       iefHistory,
       m2Wm2nsHistory,
+      dgs30History,
+      dxyHistory,
     });
     if (dateToTime(anchor.date) >= oneYearAgoMs) {
       const nonNullKeys = Object.values(derived).filter((d) => d.value !== null).length;
