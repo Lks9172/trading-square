@@ -25,6 +25,11 @@ export interface CandleShape {
   isHammer: boolean;      // lower wick >= 60% + small body
   isInvertedHammer: boolean; // upper wick >= 60% + small body
   isMaru: boolean;        // body >= 90% (거의 꼬리 없음, 영상5 "아래꼬리 없는 장대양봉" 핵심)
+  /** 영상5 §106 "Area Index": 아래꼬리/전체 높이 비율. 10% 미만 경고. */
+  areaIndex: number;
+  /** 영상3 §217 핀바: 한쪽 꼬리가 60%+ 이면서 반대쪽 꼬리는 <10%, 몸통 <30% */
+  isPinBarBullish: boolean;  // 하방 핀바 (매수 반전 후보)
+  isPinBarBearish: boolean;  // 상방 핀바 (매도 반전 후보)
 }
 
 export function analyzeCandle(c: OHLCCandle): CandleShape {
@@ -35,6 +40,9 @@ export function analyzeCandle(c: OHLCCandle): CandleShape {
   const lowerWickPct = ((Math.min(c.open, c.close) - c.low) / range) * 100;
   const rangePct = (range / c.close) * 100;
   const isBullish = c.close > c.open;
+
+  const isPinBarBullish = bodyPct < 30 && lowerWickPct >= 60 && upperWickPct < 10;
+  const isPinBarBearish = bodyPct < 30 && upperWickPct >= 60 && lowerWickPct < 10;
 
   return {
     bodyPct: parseFloat(bodyPct.toFixed(2)),
@@ -47,7 +55,25 @@ export function analyzeCandle(c: OHLCCandle): CandleShape {
     isHammer: bodyPct < 40 && lowerWickPct >= 60,
     isInvertedHammer: bodyPct < 40 && upperWickPct >= 60,
     isMaru: bodyPct >= 90,
+    // Area Index — lowerWickPct 와 같은 값이지만 명시적으로 노출 (영상5 용어 그대로)
+    areaIndex: parseFloat(lowerWickPct.toFixed(2)),
+    isPinBarBullish,
+    isPinBarBearish,
   };
+}
+
+/**
+ * 아웃사이드 바 (영상3 §217): 현재 봉의 high/low 가 이전 봉을 완전히 감싸는 형태.
+ * 상승 돌파 또는 하락 돌파의 강한 관성 시그널.
+ */
+export function detectOutsideBar(prev: OHLCCandle, cur: OHLCCandle): {
+  isOutside: boolean;
+  direction: 'bullish' | 'bearish' | 'none';
+} {
+  const isOutside = cur.high > prev.high && cur.low < prev.low;
+  if (!isOutside) return { isOutside: false, direction: 'none' };
+  const direction: 'bullish' | 'bearish' = cur.close > cur.open ? 'bullish' : 'bearish';
+  return { isOutside: true, direction };
 }
 
 export interface MultiTimeframeSnapshot {
