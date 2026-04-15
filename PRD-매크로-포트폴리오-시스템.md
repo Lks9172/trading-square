@@ -363,6 +363,33 @@ IF 종합점수 < 25:
     → RECESSION_RISK ("구조적 위험, 현금 비중 극대화")
 ```
 
+#### 4.4.4 최우선 override (감사 Fix #5, 총 8종)
+
+score 기반 일반 분기보다 먼저 평가하는 3가지 override:
+
+1. **STAGFLATION_WARNING === 1** → `STAGFLATION` (영상4 §145)
+   - CPI 유가 압력 + (ICSA 악화 or ISM<50) 동시 충족.
+   - 물가↑ + 성장↓. 위험자산 축소, 금·은 방어 극대화.
+
+2. **BOND_VIGILANTE_WARNING === 1** → `BOND_VIGILANTE` (영상4 §137-147)
+   - DGS30 20일 +0.15%p↑ + DXY 장기 약세 + HY 확대 3축 중 2+ 충족.
+   - "정책 신뢰 이탈 프리커서". 현금·금 극단 방어.
+
+3. **OVERHEATED === 1 && score ≥ 55** → `CAUTION`
+   - 이격도 +20% + F&G 75+ 또는 이격도 +15% + VIX<15.
+   - "과열 시 강세장으로 해석하지 말라" (영상 5).
+
+#### 4.4.5 CREDIT_STRESS_FLAG 강등 (감사 Fix #4)
+
+score 분류 및 override 이후 추가로 적용:
+
+```
+IF CREDIT_STRESS_FLAG = 1:  # HY OAS ≥ 600bp OR HYG/IEF z ≤ -2
+  RISK_ON → NEUTRAL
+  NEUTRAL → CAUTION
+  (CAUTION 이하 및 STAGFLATION/BOND_VIGILANTE 는 이미 방어적 → 추가 강등 없음)
+```
+
 ---
 
 ## 5. Phase 2 — 시그널 엔진
@@ -383,6 +410,48 @@ IF 종합점수 < 25:
 | HOLD | 현 비중 유지, 관망 | ⚪ |
 | REDUCE | 비중 축소 고려 | 🟡 |
 | SELL | 비중 대폭 축소 / 현금화 | 🔴 |
+
+#### 5.2.2 signalFromScore 5단계 임계치 (감사 Fix #1)
+
+기존 `signalFromScore([hold, buy, strongBuy])` 3값 설정은 REDUCE/SELL 분기를
+사실상 제거해 두 분기 모두 HOLD 로 귀결시키는 버그가 있었다. 아래 5값 객체로 전환:
+
+```
+signalFromScore(met, total, { sell, reduce, hold, buy, strongBuy })
+
+판정 순서:
+  met ≥ strongBuy → STRONG_BUY
+  met ≥ buy       → BUY
+  met ≥ hold      → HOLD
+  met ≥ reduce    → REDUCE
+  else            → SELL
+```
+
+자산별 실제 설정:
+
+| 자산 | total | sell | reduce | hold | buy | strongBuy |
+|---|---:|---:|---:|---:|---:|---:|
+| NASDAQ | 7 | 0 | 2 | 3 | 4 | 5 |
+| KOSPI  | 7 | 0 | 1 | 2 | 3 | 4 |
+
+표준 권고: `strongBuy = total`, `buy = total-2`, `hold = total-4`, `reduce = total-5`, `sell = 0`.
+자산별 PRD 스펙이 있으면 우선. 기존 HOLD 범위는 보존해 실서비스 회귀 최소화.
+
+#### 5.2.3 과열 REDUCE override (감사 Fix #2)
+
+met 계산 및 `signalFromScore` 판정 후, 최종 반환 직전에 과열 조건 2+ 충족 시
+신호를 REDUCE 로 강등 (SELL 은 override 하지 않음).
+
+**NASDAQ** — 4개 체크 중 2+ 발동 시 REDUCE:
+- 이격도 ≥ +25%
+- F&G ≥ 85
+- VIX < 16
+- `NASDAQ_CHASE_WARNING === 1` (이격률 ±15% 20일 지속)
+
+**KOSPI** — 3개 체크 중 2+ 발동 시 REDUCE:
+- 코스피 이격도 ≥ +20%
+- `KOSPI_CHASE_WARNING === 1`
+- `KOSPI_FX_ELASTICITY_DEVIATION ≥ 2` (외인 실매도가 환율 기대 대비 2배 이상)
 
 #### 5.2.2 신호 출력 형태
 
@@ -431,13 +500,19 @@ IF 종합점수 < 25:
 **신호 결정:**
 
 ```
-score = 위 조건 중 충족 개수
+score = 위 조건 중 충족 개수 (보조 포함 total=7)
 
-0~1개: HOLD
-2개:   HOLD (관심 시작)
-3개:   BUY (1차 분할매수)
-4개:   BUY (2차 분할매수)
-5개:   STRONG_BUY (적극 분할매수)
+0~1개: SELL  (감사 Fix #1 REDUCE/SELL 복구)
+2개:   REDUCE
+3개:   HOLD
+4개:   BUY
+5~7개: STRONG_BUY
+
++ 보너스 (감사 Fix #4): PSYCH_SUBSCORE ≤ 0.20 (극공포) 이면 met +1
+  — F&G·PC Ratio 10D·AAII·NAAIM 가중평균 저점 확인 시 저점 카테고리 보강.
+
++ 과열 REDUCE override (감사 Fix #2): 4개 체크 중 2+ 충족 시 signal = REDUCE
+  — 이격 +25%, F&G ≥ 85, VIX < 16, NASDAQ_CHASE_WARNING (이격률 ±15% 20일 지속)
 ```
 
 **레버리지 허용 조건 (영상 1 기준):**
@@ -560,14 +635,22 @@ copper_buy_signal =
 **신호 결정:**
 
 ```
-score = 위 조건 중 충족 개수
+score = 위 조건 중 충족 개수 (total=7)
 
-0~1개: HOLD
-2개:   HOLD (관심 시작)
+0개:   SELL   (감사 Fix #1 REDUCE/SELL 복구)
+1개:   REDUCE
+2개:   HOLD
 3개:   BUY (분할매수 준비)
-4개:   BUY (본격 분할매수)
-5개:   STRONG_BUY (적극 분할매수)
-6~7개: STRONG_BUY (여러 축 확인)
+4~7개: STRONG_BUY (여러 축 확인)
+
++ 과열 REDUCE override (감사 Fix #2): 3개 체크 중 2+ 충족 시 signal = REDUCE
+  - 코스피 이격도 ≥ +20%
+  - KOSPI_CHASE_WARNING === 1
+  - KOSPI_FX_ELASTICITY_DEVIATION ≥ 2 (외인 실매도 ATM화)
+
++ USDKRW 주봉 채널 극단 (감사 Fix #4):
+  - USDKRW_WEEKLY_CHANNEL_POSITION ≥ 0.9 → met -= 1 (FX 게이트 강화)
+  - ≤ 0.1 → 보조 reason (원화 강세 복귀 우호)
 ```
 
 **추세전환 게이트** (영상 5 코스피 편):
@@ -693,18 +776,18 @@ IF 국면 == RISK_ON:
 
 ### 6.3 국면별 기본 비중 템플릿
 
-#### 6.3.1 비중 매트릭스
+#### 6.3.1 비중 매트릭스 (8종, 감사 Fix #5 반영)
 
-| 자산군 | 🟢 RISK_ON | 🔵 NEUTRAL | 🟡 CAUTION | 🟠 CORRECTION | 🔴 PANIC_OK | ⚫ RECESSION |
-|---|---:|---:|---:|---:|---:|---:|
-| 현금 | 8% | 8% | 28% | 13% | 15% | 50% |
-| 나스닥 | 32% | 38% | 29% | 35% | 35% | 15% |
-| 레버리지 | 0% | 0% | 0% | 0% | 10% | 0% |
-| 금 | 7% | 14% | 21% | 19% | 20% | 25% |
-| 은 | 10% | 8% | 7% | 8% | 5% | 0% |
-| 구리 | 6% | 7% | 4% | 5% | 5% | 0% |
-| 코스피 | 18% | 14% | 11% | 11% | 5% | 5% |
-| 신흥국 | 19% | 11% | 0% | 9% | 5% | 5% |
+| 자산군 | 🟢 RISK_ON | 🔵 NEUTRAL | 🟡 CAUTION | 🟠 CORRECTION | 🔴 PANIC_OK | ⚫ RECESSION | STAGFLATION | BOND_VIGILANTE |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 현금 | 8% | 8% | 28% | 13% | 15% | 50% | 25% | 30% |
+| 나스닥 | 32% | 38% | 29% | 35% | 35% | 15% | 15% | 10% |
+| 레버리지 | 0% | 0% | 0% | 0% | 10% | 0% | 0% | 0% |
+| 금 | 7% | 14% | 21% | 19% | 20% | 25% | 30% | 35% |
+| 은 | 10% | 8% | 7% | 8% | 5% | 0% | 10% | 8% |
+| 구리 | 6% | 7% | 4% | 5% | 5% | 0% | 5% | 3% |
+| 코스피 | 18% | 14% | 11% | 11% | 5% | 5% | 8% | 7% |
+| 신흥국 | 19% | 11% | 0% | 9% | 5% | 5% | 7% | 7% |
 
 **최적화 근거** (Monte Carlo sweep, 10년 누적, DD penalty 0.15):
 
@@ -712,6 +795,8 @@ IF 국면 == RISK_ON:
 - **CAUTION/CORRECTION**: 은 편입 (7~8%) → 영상 2 "금은비 저평가 + 경기 신호 동반" 정합
 - **현금 전반 축소**: 강세장 기간 수익 기여 극대화
 - **PANIC_BUT_OK**: 레버리지 10% 허용 → 영상 1 "저점 집중 2~3개월 짧게" 구현
+- **STAGFLATION** (영상4 §145): 물가↑+성장↓ → 금·은 방어, 위험자산 -50% 수준 축소
+- **BOND_VIGILANTE** (영상4 §137-147): 장기금리 급등 → 현금·금 극단 방어 (gold 35 최대치)
 
 **핵심 통찰:**
 - NASDAQ과 달리 한국(KOSPI) + 신흥국은 **환율과 달러 약세**에 민감
@@ -772,37 +857,84 @@ IF 국면 == RISK_ON:
 
 ---
 
-#### 6.3.4 재정 리스크 보정 (FISCAL_STRESS)
+#### 6.3.4 방어 보정 우선순위 정책 (감사 Fix #7)
 
-30년 금리 급등 + 높은 수준 → 위험자산 축소, 금·현금 방어.
+기존: FISCAL_STRESS 와 OVERHEATED 가 **독립 if 블록**으로 순차 발동 가능했음.
+동시 on 이면 cash / gold 이중 팽창으로 포트폴리오 분산이 왜곡 (cash>60%, gold>45%).
+
+**채택 정책: 더 강한 쪽 하나만 적용 (exclusive)**
 
 ```
-IF FISCAL_STRESS = 1:
+우선순위:
+  FISCAL_STRESS_HARD  > FISCAL_STRESS / BOND_VIGILANTE > OVERHEATED
+
+defenseMode =
+  fiscalStressHard ? 'fiscal-hard' :
+  fiscalStress     ? 'fiscal' :
+  overheated       ? 'overheated' :
+                     'none'
+
+철학: FISCAL 은 "구조적/거시 위기", OVERHEATED 는 "단기 추세 과열" — 성격이
+다른 두 보정을 동시 가중하면 dampen 이 과도해져 포지션 자체가 소멸.
+판정 확정 후 보정 단계에서는 가장 강한 원인 하나로 집중.
+```
+
+##### 6.3.4.1 FISCAL_STRESS 보정
+
+30년 금리 급등 + 높은 수준 → 위험자산 축소, 금·현금 방어. (영상 4 §07 채권 자경단)
+
+```
+IF defenseMode ∈ {'fiscal-hard', 'fiscal'}:
   위험자산 총합 (nasdaq, leverage, korea, emerging) 중
-  8% 삭감 (FISCAL_STRESS_HARD 시: 15% 삭감)
-  
-  이관 비율:
-    - 현금: 삭감분 × 60%
-    - 금: 삭감분 × 40%
-  
-  근거: 영상 4 §07 "채권 자경단 = 위험자산 회피 국면"
+  amount = fiscal-hard ? 15 : 8  (hard 는 더 강하게)
+
+  이관 비율: cash 60%, gold 40%
+
+점화 조건 (감사 Fix #4 반영, OR 합성):
+  FISCAL_STRESS === 1
+  OR BOND_VIGILANTE_WARNING === 1  (DGS30↑ + DXY약세 + HY확대 3축 중 2+)
+```
+
+##### 6.3.4.2 OVERHEATED 보정
+
+월봉 및 주봉이 극단적 상승으로 "아래꼬리 없는 장대양봉" (영상 5 과열 신호).
+
+```
+IF defenseMode === 'overheated':  (FISCAL 이 발동 안 했을 때만)
+  위험자산 (nasdaq, leverage, korea, emerging, copper) 축소
+  actual = min(available, 25)
+
+  이관 비율: cash 20/25, gold 5/25
+
+감지 기준:
+  - 나스닥 이격도 +20% AND F&G 75+  →  OVERHEATED=1
+  - 또는 나스닥 이격도 +15% AND VIX<15  →  OVERHEATED=1
+```
+
+##### 6.3.4.3 M2 유동성 쿠션 (감사 Fix #4)
+
+```
+IF !overheated AND 0 ≤ M2_YOY_CROSS_DAYS ≤ 90:
+  NASDAQ 비중 +5% (cash 에서 이관)
+
+철학: 글로벌 M2 YoY 음→양 교차 직후 90일은 유동성 랠리 초기 구간.
+OVERHEATED 중에는 비활성 — 과열 위 쿠션은 리스크 증폭.
 ```
 
 ---
 
-#### 6.3.5 과열 보정 (OVERHEATED)
+#### 6.3.5 USDKRW 주봉 채널 극단 경고 (감사 Fix #4)
 
-월봉 및 주봉이 극단적 상승으로 "아래꼬리 없는 장대양봉" 패턴 확인 (영상 5 과열 신호).
+KOSPI 신호 계산 시 USDKRW_WEEKLY_CHANNEL_POSITION 참조:
 
 ```
-IF OVERHEATED = 1:
-  위험자산 축소, 현금/금 비중 강화
-  
-  목표: 현금 +15%, 금 +5% (실제 차감 가능한 범위 내)
-  
-  감지 기준: 
-    - 코스피 월봉: body >= 90% + 아래꼬리 < 5%
-    - 나스닥 월봉: 3개월 연속 장대양봉 + 아래꼬리 없음
+IF position ≥ 0.9 (상단 근접, 원화 약세 극단):
+  KOSPI met -= 1  (FX 게이트 강화)
+  reason 추가: "원화 약세 극단 → 외국인 매도 리스크"
+
+IF position ≤ 0.1 (하단 근접, 원화 강세 극단):
+  보조 reason: "원화 강세 복귀 우호"
+  (met 가점은 없음 — 외국인 매수 전환은 별도 축에서 확인)
 ```
 
 ---
@@ -810,6 +942,15 @@ IF OVERHEATED = 1:
 #### 6.3.6 레버리지 게이트 (LEVERAGE / 영상 1 저점 집중)
 
 레버리지(2x ETF)는 극한 신호일 때만 허용하며, 자동 타이머로 관리된다 (영상 1 "2~3개월 짧게").
+
+**allocation 게이트 (감사 Fix #3):**
+
+```
+leverageAllowed = leverageSignal === 'BUY' || leverageSignal === 'STRONG_BUY'
+
+기존은 === 'BUY' 만 통과시켜 STRONG_BUY 로 승격 시 레버리지 0% 로 비대칭 처리되는 모순 존재.
+3/3 조건 충족 후 승격된 STRONG_BUY 에서도 레버리지 허용되도록 수정.
+```
 
 **진입 조건 (3개 모두 충족):**
 
@@ -838,6 +979,23 @@ IF OVERHEATED = 1:
   - 최대 총자산의 15% (PANIC_BUT_OK 국면 기본값 10%)
   - 2x ETF만 허용 (3x 금지)
 ```
+
+---
+
+#### 6.3.7 결측 데이터 처리 원칙 (감사 Fix #6)
+
+**원칙**: 결측은 명시적으로 표기·스킵한다. 0 이나 중립값으로 암묵 대체하지 않는다.
+0 대체는 "알 수 없음" 을 "중립" 으로 위장해 신호에 거짓 안정성을 주입한다.
+
+구체 조정:
+
+| 위치 | 기존 | 수정 |
+|---|---|---|
+| `allocation.ts` `KRW_FX_LEVEL` | `?? 0` (환율 중립 가정) | `?? null` + 가드 → 결측이면 FX 보정 블록 전체 skip |
+| `allocation.ts` `NASDAQ_ABOVE_200DMA` | `?? 1` (암묵 상승 가정) | `?? null` → `determineBuyStage` 가 `null` 반환, AllocationPlan.buyStage 타입 `0\|1\|2\|3\|null` 로 확장 |
+| `derived.ts` `T10Y2Y` | `?? 0` (곡선 평탄 가정) | `null` 유지 + `curveSteepening = (!= null && > 0.1)` 로 "결측 → false" 를 명시 |
+
+UI (`AllocationPanel.tsx`) 도 `buyStage === null` 일 때 "데이터 없음 (NASDAQ 200DMA 수집 실패)" 로 명시 표시.
 
 ---
 
