@@ -921,8 +921,51 @@ IF defenseMode ∈ {'fiscal-hard', 'fiscal'}:
 
 점화 조건 (감사 Fix #4 반영, OR 합성):
   FISCAL_STRESS === 1
-  OR BOND_VIGILANTE_WARNING === 1  (DGS30↑ + DXY약세 + HY확대 3축 중 2+)
+  OR BOND_VIGILANTE_WARNING === 1  (4축 중 3+ 충족 — 아래 Fix #FE2 정의)
 ```
+
+**Fix #FE2 — BOND_VIGILANTE 4축 정의 (영상4 §137-147 원 정의 복원)**
+
+```
+BOND_VIGILANTE_SCORE = sum of:
+  1) 30y-10y 스티프닝 : (DGS30 - DGS10) > 0.4%p
+  2) 장기금리 레벨    : DGS30 >= 4.8%
+  3) DXY 약세         : DXY < 100 OR DXY_TREND_LONG < -2%
+  4) HY 확대          : CREDIT_HY_OAS_BP >= 500 OR HYG/IEF z <= -1.5
+
+BOND_VIGILANTE_WARNING = (SCORE >= 3)
+```
+
+기존 3축(장기금리 rise · DXY 약세 · HY) 에서 스티프닝/장기금리 레벨
+분리. 미충족 축은 derived[].formula 에 명시돼 /api/snapshot 에서 관측.
+
+**Fix #FE1 — 레짐/플래그 히스테리시스 (5분 스냅샷 whipsaw 방지)**
+
+이진 플래그가 1↔0 깜빡일 때 BASE_ALLOCATIONS 즉시 전환되는 문제를
+차단하기 위해 다음 플래그에 **minDays 히스테리시스** 적용.
+
+| 플래그 | minDays |
+|---|---|
+| OVERHEATED | 7 |
+| FISCAL_STRESS / FISCAL_STRESS_HARD | 7 |
+| BOND_VIGILANTE_WARNING | 7 |
+| STAGFLATION_WARNING | 14 (구조적 경보) |
+| CREDIT_STRESS_FLAG | 7 |
+| NASDAQ_CHASE_WARNING / KOSPI_CHASE_WARNING | 5 |
+
+구현: `server/src/services/flagPersistence.ts` 가
+`data/runtime/flag-state.json` 에 {value, sinceDate, lastChecked,
+lastRaw} 영속. `cache.ts` snapshot 경로에서만 적용 (히스토리 재계산은
+날짜별 확정값이라 제외). raw 가 confirmed value 와 다르면 sinceDate
+로부터 경과일 누적, minDays 도달 시 flip. 중간에 raw 꺾이면 reset.
+
+**Fix #FE3 — 근거 불명 상수 TODO 주석**
+
+BASE_ALLOCATIONS(Monte Carlo top1), score 컷 {75,55,40,25}, scoreVIX
+{40,30,20,15}, copperSignal CGR > 0.00125 등 경험적 상수 4곳에 근거
+보강/재선정 TODO 주석 추가. portfolio-sweep.ts 에 각 regime top-decile
+평균 출력 모드 추가(top1 과 diff 함께) — BASE 교체 후보로 사용 예정.
+실제 숫자 교체는 sweep 재실행 + 백테스트 회귀 후 별도 커밋.
 
 ##### 6.3.4.2 OVERHEATED 보정
 
