@@ -14,6 +14,7 @@ import { StalenessPanel } from "./StalenessPanel";
 import { RealtimePanel } from "./RealtimePanel";
 import { SmartMoneyPanel } from "./SmartMoneyPanel";
 import { CalendarPanel } from "./CalendarPanel";
+import { MultiTimeframePanel } from "./MultiTimeframePanel";
 import { OptionsVolatilityPanel } from "./OptionsVolatilityPanel";
 import { formatKstDateTime } from "@/lib/format";
 
@@ -84,6 +85,8 @@ export function Dashboard({ snapshot }: Props) {
       </div>
 
       <SectorPanel derived={currentSnapshot.derived} />
+
+      <MultiTimeframePanel derived={currentSnapshot.derived} />
 
       <OptionsVolatilityPanel raw={currentSnapshot.raw} derived={currentSnapshot.derived} />
 
