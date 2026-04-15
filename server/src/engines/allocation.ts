@@ -167,7 +167,10 @@ export function computeAllocation(
   }
 
   const leverageSignal = signals.find((s) => s.asset === 'LEVERAGE');
-  const leverageAllowed = leverageSignal?.signal === 'BUY';
+  // Fix #3: STRONG_BUY 도 허용. 기존엔 === 'BUY' 만 통과시켜 STRONG_BUY 시 레버리지 0%
+  // 처리되는 비대칭이 있었다(3/3 조건 충족 후 승격되면 오히려 차단되는 모순).
+  const leverageSig = leverageSignal?.signal;
+  const leverageAllowed = leverageSig === 'BUY' || leverageSig === 'STRONG_BUY';
 
   if (!leverageAllowed) {
     if (base.leverage > 0) {
