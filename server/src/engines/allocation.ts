@@ -101,6 +101,23 @@ export function computeAllocation(
     if (base[k] !== undefined) base[k] = Math.max(0, base[k] + v);
   }
 
+  // Fix #4(2차 감사): M2_YOY_CROSS_DAYS 쿠션을 **signal multiplier 이전** 으로 이동.
+  // 배경: 기존 구현은 승수 적용 후 base.nasdaq 에 +5 를 더해 누적 팽창(승수×base + 쿠션)으로
+  // 해석 일관성이 깨졌다. 승수 전에 쿠션을 얹으면 "쿠션된 원점에서 승수 적용" 으로 의미 명확화.
+  // 주석 정합(Fix #4): NASDAQ 에만 쿠션 적용 — 레버리지는 leverageAllowed 게이트로 별도 통제되므로
+  // 누적 금지. OVERHEATED=1 이면 비활성 (아래 defenseMode 판정 전에 overheated 플래그를 선행 조회).
+  const overheatedEarly = derived.OVERHEATED?.value === 1;
+  const m2CrossDays = derived.M2_YOY_CROSS_DAYS?.value ?? null;
+  if (!overheatedEarly && m2CrossDays !== null && m2CrossDays >= 0 && m2CrossDays <= 90) {
+    const cushion = 5;
+    const cashAvail = base.cash || 0;
+    const actualCushion = Math.min(cashAvail, cushion);
+    if (actualCushion > 0) {
+      base.cash = cashAvail - actualCushion;
+      base.nasdaq = (base.nasdaq || 0) + actualCushion;
+    }
+  }
+
   for (const sig of signals) {
     const allocKey = SIGNAL_ASSET_MAP[sig.asset];
     if (allocKey && base[allocKey] !== undefined && sig.asset !== 'LEVERAGE') {
@@ -198,20 +215,7 @@ export function computeAllocation(
     base.gold = (base.gold || 0) + actual * (5 / 25);
   }
 
-  // Fix #4: M2_YOY_CROSS_DAYS 소비 — 글로벌 유동성 음→양 교차 후 90일 이내면
-  // NASDAQ/LEVERAGE 에 +5% 쿠션(cash 에서 이관). 교차 직후의 유동성 랠리 초기 구간을 포착.
-  // 단 OVERHEATED=1 이면 비활성 — 과열 위에 쿠션 추가는 리스크 증폭이므로 금지.
-  const m2CrossDays = derived.M2_YOY_CROSS_DAYS?.value ?? null;
-  if (!overheated && m2CrossDays !== null && m2CrossDays >= 0 && m2CrossDays <= 90) {
-    const cushion = 5;
-    const cashAvail = base.cash || 0;
-    const actualCushion = Math.min(cashAvail, cushion);
-    if (actualCushion > 0) {
-      // NASDAQ 우선, 남으면 LEVERAGE 에 (단 leverageAllowed 는 아래에서 결정되므로 무조건 base 에 얹고 이후 차단 시 nasdaq 로 합산됨)
-      base.cash = cashAvail - actualCushion;
-      base.nasdaq = (base.nasdaq || 0) + actualCushion;
-    }
-  }
+  // Fix #4(2차 감사): M2 쿠션 블록은 승수 루프 이전으로 이동됨. 여기서 중복 적용 금지.
 
   const leverageSignal = signals.find((s) => s.asset === 'LEVERAGE');
   // Fix #3: STRONG_BUY 도 허용. 기존엔 === 'BUY' 만 통과시켜 STRONG_BUY 시 레버리지 0%
