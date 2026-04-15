@@ -10,6 +10,7 @@ import { fetchInsiderSummary } from '../collectors/smart-money';
 import { fetchEconomicCalendar } from '../collectors/calendar';
 import { computeExecutionPlans } from '../engines/execution_plan';
 import { getUSPriceSource } from '../utils/market-hours';
+import { hardenFlag } from '../services/flagPersistence';
 
 export const DEFAULT_PROFILE: UserProfile = {
   riskTolerance: 'moderate',
@@ -77,6 +78,44 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
   const smartMoney = await fetchInsiderSummary().catch(() => null);
   const calendar = await fetchEconomicCalendar(apiKey).catch(() => []);
   const derived = await computeDerived(raw);
+
+  // === Fix #FE1: 이진 플래그 히스테리시스 ===
+  // 5분 스냅샷 경로에서만 적용. raw 값이 1↔0 으로 깜빡여도 minDays 경과 전에는 persisted value 로
+  // 덮어써서 BASE_ALLOCATIONS 가 즉각 뒤집히는 whipsaw 를 차단한다.
+  // history 재계산(recomputeFullDerivedForDate) 경로는 이미 날짜별 확정값이라 적용하지 않는다.
+  const flagHysteresis: Array<{ key: string; minDays: number }> = [
+    { key: 'OVERHEATED', minDays: 7 },
+    { key: 'FISCAL_STRESS', minDays: 7 },
+    { key: 'FISCAL_STRESS_HARD', minDays: 7 },
+    { key: 'BOND_VIGILANTE_WARNING', minDays: 7 },
+    { key: 'STAGFLATION_WARNING', minDays: 14 }, // 구조적 경보 — 더 보수
+    { key: 'CREDIT_STRESS_FLAG', minDays: 7 },
+    { key: 'NASDAQ_CHASE_WARNING', minDays: 5 },
+    { key: 'KOSPI_CHASE_WARNING', minDays: 5 },
+  ];
+  for (const { key, minDays } of flagHysteresis) {
+    const ind = derived[key];
+    if (!ind) continue; // 계산 경로에서 값이 없으면(결측) 히스테리시스 생략 — 0 주입 금지.
+    const rawVal = ind.value === 1 ? 1 : 0;
+    try {
+      const hardened = await hardenFlag(key, rawVal, minDays);
+      if (hardened !== rawVal) {
+        derived[key] = {
+          ...ind,
+          value: hardened,
+          formula: `${ind.formula} [히스테리시스 ${minDays}일 적용 — raw=${rawVal} / persisted=${hardened}]`,
+        };
+      } else {
+        derived[key] = {
+          ...ind,
+          formula: `${ind.formula} [히스테리시스 ${minDays}일 적용]`,
+        };
+      }
+    } catch (err) {
+      // 영속 실패는 신호 흐름을 막지 않는다 — raw 값 그대로 통과.
+      console.warn(`[flagPersistence] ${key} hardenFlag failed:`, err);
+    }
+  }
 
   // 스마트머니 점수를 derived 에도 publish — regime.ts 는 별도 인자로 받지만, UI/히스토리/
   // 관측성 경로는 derived 를 본다. 일관성 확보 (cachedLiveDerived 공유 구조).
