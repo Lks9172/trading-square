@@ -1952,3 +1952,43 @@ signal 조건이 완전히 불발되는 사태는 회피. 실패 지표를 명�
 | 노션 링크 기반 데이터 | 주요 핵심 소스 대부분 반영 |
 | 미세 조정 | 지속 가능 |
 | 핵심 누락 | 외국인 수급 1개 |
+
+## 12. Observability 스택 (2026-04 추가)
+
+Docker 로그가 container 재시작 시 휘발돼 5분 스냅샷·KST 07:00 append 사이클의 진단이
+어려웠던 문제를 해결하기 위해 OpenTelemetry + Jaeger 기반 분산 추적을 도입.
+
+### 12.1 구성
+
+| 레이어 | 구성 요소 | 역할 |
+|---|---|---|
+| 계측 | `@opentelemetry/sdk-node` + `auto-instrumentations-node` | axios / http / express 자동 span |
+| 수동 span | `server/src/observability/trace.ts` `withSpan` | 핵심 경로(수집/엔진/히스토리)에 span 부여 |
+| OTLP 전송 | `@opentelemetry/exporter-trace-otlp-http` | `http://jaeger:4318/v1/traces` |
+| 수집/저장 | Jaeger all-in-one 1.63 + Badger | `./jaeger-data` 바인드 마운트로 홈서버 재시작해도 영속 |
+| UI | Jaeger UI | `http://192.168.0.200:16686` (service = `macrosquare-server`) |
+| 로그 | docker-compose json-file driver | max-size 10m × max-file 5 로 휘발 완화 |
+
+### 12.2 수동 span 네이밍 컨벤션
+
+`macrosquare.<module>.<operation>` 형식.
+
+- `macrosquare.snapshot.build` — buildSnapshot 전체
+- `macrosquare.collector.collectAll` — 4개 수집기 병렬 집계 루트
+- `macrosquare.collector.{fred,yahoo,cnn,sentiment,smartMoney,calendar}.*`
+- `macrosquare.engine.{derived,regime,signals,allocation,executionPlan}`
+- `macrosquare.history.refreshComputed` — 히스토리 재계산 루트
+
+부모 span 에는 실패한 소스(`collector.failed_sources`), regime 라벨/점수,
+히스토리 재계산 커버리지 등 진단 attribute 를 부여.
+
+### 12.3 안전장치
+
+- telemetry 초기화 실패는 애플리케이션 로직을 중단시키지 않음 (try/catch + NoOp tracer).
+- `OTEL_EXPORTER_OTLP_ENDPOINT` 미설정 시 `http://localhost:4318` 기본.
+- SIGTERM/SIGINT 에서 SDK graceful shutdown.
+
+### 12.4 남은 TODO
+
+- client(Next 16) 측 브라우저 RUM 계측 여부는 추후 판단 (우선순위 낮음, 서버 사이클 진단이 더 시급했음).
+- metrics / logs signal 확장(OTel Collector 분리, Loki 연동) — 현 단계는 traces only.
