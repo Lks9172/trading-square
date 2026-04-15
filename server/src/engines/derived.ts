@@ -1230,5 +1230,94 @@ export async function computeDerived(
     /* 크레딧 스프레드 계산 실패는 파이프라인 막지 않음 */
   }
 
+  // === M2 YoY 방향 전환 훅 (WM2NS 주간 시리즈) ===
+  // 유동성 방향 전환(음→양 교차) 이후 경과일을 트래킹해 "유동성 랠리 초기 구간" 식별.
+  try {
+    const m2Hist = await readHistory('fred', 'WM2NS');
+    if (m2Hist.length >= 60) {
+      // YoY 시리즈: 각 포인트에 대해 52주 전 포인트 찾아 % 변화 산출.
+      const yoySeries: { date: string; yoy: number }[] = [];
+      for (let i = 0; i < m2Hist.length; i += 1) {
+        const cur = m2Hist[i];
+        const targetDt = new Date(cur.date);
+        targetDt.setFullYear(targetDt.getFullYear() - 1);
+        const targetMs = targetDt.getTime();
+        // 52주 전에 가장 근접한 과거 포인트
+        let past: { date: string; value: number } | null = null;
+        for (let j = i - 1; j >= 0; j -= 1) {
+          if (new Date(m2Hist[j].date).getTime() <= targetMs) {
+            past = m2Hist[j];
+            break;
+          }
+        }
+        if (past && past.value > 0) {
+          yoySeries.push({ date: cur.date, yoy: (cur.value / past.value - 1) * 100 });
+        }
+      }
+
+      if (yoySeries.length > 0) {
+        const latest = yoySeries[yoySeries.length - 1];
+        d.M2_YOY_PCT = {
+          name: 'm2_yoy_pct',
+          value: parseFloat(latest.yoy.toFixed(2)),
+          date: dt,
+          formula: 'WM2NS 현재 / 52주 전 - 1 (%)',
+        };
+
+        // 3개월(약 13주) 전 YoY 대비 변화 (포인트)
+        if (yoySeries.length >= 14) {
+          const past3m = yoySeries[yoySeries.length - 14];
+          const delta = latest.yoy - past3m.yoy;
+          d.M2_YOY_DELTA_3M = {
+            name: 'm2_yoy_delta_3m',
+            value: parseFloat(delta.toFixed(2)),
+            date: dt,
+            formula: 'M2 YoY 현재 - 약 13주 전 YoY (포인트)',
+          };
+        }
+
+        // 음→양 교차 탐색: 현재가 양수일 때만 의미.
+        if (latest.yoy > 0) {
+          let crossDate: string | null = null;
+          for (let i = yoySeries.length - 1; i > 0; i -= 1) {
+            const prev = yoySeries[i - 1];
+            const cur = yoySeries[i];
+            if (prev.yoy < 0 && cur.yoy >= 0) {
+              crossDate = cur.date;
+              break;
+            }
+          }
+          if (crossDate) {
+            const daysElapsed = Math.floor(
+              (new Date(latest.date).getTime() - new Date(crossDate).getTime()) / 86400000,
+            );
+            d.M2_YOY_CROSS_DAYS = {
+              name: 'm2_yoy_cross_days',
+              value: daysElapsed,
+              date: dt,
+              formula: `WM2NS YoY 음→양 교차(${crossDate}) 이후 경과일`,
+            };
+          } else {
+            d.M2_YOY_CROSS_DAYS = {
+              name: 'm2_yoy_cross_days',
+              value: null,
+              date: dt,
+              formula: '히스토리 내 음→양 교차 미확인',
+            };
+          }
+        } else {
+          d.M2_YOY_CROSS_DAYS = {
+            name: 'm2_yoy_cross_days',
+            value: null,
+            date: dt,
+            formula: '현재 YoY 음수 — 교차 미발생',
+          };
+        }
+      }
+    }
+  } catch {
+    /* M2 YoY 계산 실패는 파이프라인 막지 않음 */
+  }
+
   return d;
 }

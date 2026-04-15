@@ -17,6 +17,7 @@ const FRED_SERIES: Record<string, string> = {
   WTREGEN: 'WTREGEN',
   WRMFNS: 'WRMFNS',
   M2SL: 'M2SL',
+  WM2NS: 'WM2NS', // 주간 M2 (Non-Seasonally Adjusted) — YoY 방향 전환 훅
   UNRATE: 'UNRATE',
   ICSA: 'ICSA',
   SOFR: 'SOFR',
