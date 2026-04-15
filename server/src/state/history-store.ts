@@ -12,6 +12,7 @@ import { linearRegressionChannel } from '../engines/candles';
 import type { OHLCCandle } from '../collectors/yahoo';
 import { DEFAULT_PROFILE } from './cache';
 import { DerivedIndicator, MarketDataPoint } from '../types/indicators';
+import { withSpan } from '../observability/trace';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const HISTORY_DIR = path.join(DATA_DIR, 'history');
@@ -862,9 +863,11 @@ function signalValue(signal: string) {
 }
 
 export async function refreshComputedHistories(options?: { force?: boolean }) {
+  return withSpan('macrosquare.history.refreshComputed', async (span) => {
   // 3차 감사 Fix #2: 증분 skip. signal-REGIME 마지막 date 가 오늘(UTC) 이상이면 full
   // 재계산 skip (환경변수 REFRESH_FULL=true 또는 options.force=true 로 강제 full).
   const force = options?.force === true || process.env.REFRESH_FULL === 'true';
+  span.setAttribute('history.force', force);
   if (!force) {
     try {
       const regimeHist = await readHistory('signal', 'REGIME');
@@ -981,13 +984,18 @@ export async function refreshComputedHistories(options?: { force?: boolean }) {
   await writeHistory('signal', 'SILVER', computed.SILVER);
   await writeHistory('signal', 'COPPER', computed.COPPER);
 
+  span.setAttribute('history.anchor_count', base.length);
+  span.setAttribute('history.computed_assets', Object.keys(computed).length);
   if (recentCoveragePoints > 0) {
     const avg = recentCoverageSum / recentCoveragePoints;
+    span.setAttribute('history.recent_coverage_avg', Number(avg.toFixed(1)));
+    span.setAttribute('history.recent_coverage_points', recentCoveragePoints);
     console.log(
       `[history] 재구성 커버리지: 최근 1년 평균 ${avg.toFixed(1)} non-null derived keys/일자 (${recentCoveragePoints}일 기준). ` +
       `단발 snapshot 지표 (STAGFLATION/MTF/PSYCH/RRP_DIRECTION/SECTOR_*/KRX_* 등) 는 정책상 null 유지.`
     );
   }
+  });
 }
 
 export async function readHistory(source: string, key: string): Promise<HistoryPoint[]> {

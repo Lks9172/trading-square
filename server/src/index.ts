@@ -1,3 +1,7 @@
+// OpenTelemetry 는 반드시 다른 모듈 require 이전에 초기화돼야 auto-instrumentation
+// 이 axios/http/express 를 훅할 수 있다. 최상단 import 유지.
+import './telemetry';
+
 import dns from 'dns';
 // Node 17+ 기본 DNS 결과 순서가 verbatim(IPv6 우선)이라 Docker 브릿지에서
 // IPv6 라우팅 막힌 환경에선 telegram API 등 outbound 호출이 ETIMEDOUT 됨.

@@ -11,6 +11,7 @@ import { fetchEconomicCalendar } from '../collectors/calendar';
 import { computeExecutionPlans } from '../engines/execution_plan';
 import { getUSPriceSource } from '../utils/market-hours';
 import { hardenFlag } from '../services/flagPersistence';
+import { withSpan } from '../observability/trace';
 
 export const DEFAULT_PROFILE: UserProfile = {
   riskTolerance: 'moderate',
@@ -43,6 +44,7 @@ function latestDates(raw: SystemSnapshot['raw'], derived: SystemSnapshot['derive
 let cachedAutoInputs: { policyDirection: number; geoRisk: number; cbBuying: boolean; ismPmi: number | null } | null = null;
 
 export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapshot> {
+  return withSpan('macrosquare.snapshot.build', async (rootSpan) => {
   const apiKey = process.env.FRED_API_KEY || '';
 
   if (!cachedAutoInputs) {
@@ -75,9 +77,18 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
     if (raw.SP500) raw.SP500_SPOT = { ...raw.SP500 };
   }
 
-  const smartMoney = await fetchInsiderSummary().catch(() => null);
-  const calendar = await fetchEconomicCalendar(apiKey).catch(() => []);
-  const derived = await computeDerived(raw);
+  const smartMoney = await withSpan('macrosquare.collector.smartMoney', () =>
+    fetchInsiderSummary().catch(() => null),
+  );
+  const calendar = await withSpan('macrosquare.collector.calendar', () =>
+    fetchEconomicCalendar(apiKey).catch(() => []),
+  );
+  const derived = await withSpan('macrosquare.engine.derived', (s) =>
+    computeDerived(raw).then((d) => {
+      s.setAttribute('derived.keys', Object.keys(d).length);
+      return d;
+    }),
+  );
 
   // === Fix #FE1: 이진 플래그 히스테리시스 ===
   // 5분 스냅샷 경로에서만 적용. raw 값이 1↔0 으로 깜빡여도 minDays 경과 전에는 persisted value 로
@@ -133,10 +144,25 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
     }
   }
 
-  const regime = classifyRegime({ raw, derived, manualInputs: effectiveInputs, smartMoneyScore: smartMoney?.score ?? 0 });
-  const signals = computeSignals(raw, derived, regime, effectiveProfile);
-  const allocation = computeAllocation(regime.regime, regime.score, signals, derived, raw, effectiveProfile.investmentHorizon);
-  const executionPlans = computeExecutionPlans(raw, derived, signals, allocation, regime);
+  const regime = await withSpan('macrosquare.engine.regime', (s) => {
+    const r = classifyRegime({ raw, derived, manualInputs: effectiveInputs, smartMoneyScore: smartMoney?.score ?? 0 });
+    s.setAttribute('regime.label', r.regime);
+    s.setAttribute('regime.score', r.score);
+    return Promise.resolve(r);
+  });
+  const signals = await withSpan('macrosquare.engine.signals', (s) => {
+    const r = computeSignals(raw, derived, regime, effectiveProfile);
+    s.setAttribute('signals.count', r.length);
+    return Promise.resolve(r);
+  });
+  const allocation = await withSpan('macrosquare.engine.allocation', () =>
+    Promise.resolve(computeAllocation(regime.regime, regime.score, signals, derived, raw, effectiveProfile.investmentHorizon)),
+  );
+  const executionPlans = await withSpan('macrosquare.engine.executionPlan', () =>
+    Promise.resolve(computeExecutionPlans(raw, derived, signals, allocation, regime)),
+  );
+  rootSpan.setAttribute('snapshot.regime', regime.regime);
+  rootSpan.setAttribute('snapshot.regime_score', regime.score);
   const fetchedAt = new Date().toISOString();
 
   return {
@@ -173,6 +199,7 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
       executionPlans,
     },
   };
+  });
 }
 
 function computeStaleness(raw: SystemSnapshot['raw']): Record<string, { date: string; daysAgo: number; frequency: string }> {
