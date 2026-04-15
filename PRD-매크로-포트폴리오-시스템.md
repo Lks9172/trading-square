@@ -735,6 +735,9 @@ IF 국면 == RISK_ON:
   SELL       → 0.3  (기본에서 -70%)
 
 주의: 기존 1.4/1.2/0.65/0.25 에서 더 보수적으로 조정 (과도한 추격매수 방지)
+
+승수는 NASDAQ/KOSPI/GOLD/SILVER/COPPER/CASH/EMERGING 7자산에 적용된다.
+(LEVERAGE 는 별도 게이트로 처리 — 아래 6.3.6 참고)
 ```
 
 **예시:**

@@ -38,6 +38,7 @@ const SIGNAL_ASSET_MAP: Record<string, string> = {
   SILVER: 'silver',
   COPPER: 'copper',
   CASH: 'cash',
+  EMERGING: 'emerging',
 };
 
 function determineBuyStage(
