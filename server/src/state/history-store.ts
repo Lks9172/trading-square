@@ -5,6 +5,7 @@ import { fetchYahooHistoryYears, YAHOO_SYMBOLS } from '../collectors/yahoo';
 import { classifyRegime } from '../engines/regime';
 import { computeSignals } from '../engines/signals';
 import { computeAllocation } from '../engines/allocation';
+import { computeDerived } from '../engines/derived';
 import { DEFAULT_PROFILE } from './cache';
 import { DerivedIndicator, MarketDataPoint } from '../types/indicators';
 
@@ -71,24 +72,17 @@ function buildRawForDate(date: string, histories: Record<string, HistoryPoint[]>
   return map;
 }
 
-function buildDerivedForDate(date: string, raw: Record<string, MarketDataPoint>, nasdaqHistory: HistoryPoint[]): Record<string, DerivedIndicator> {
+/**
+ * 일자별 NASDAQ 파생지표를 저장된 히스토리에서 재구성.
+ * computeDerived() 는 live Yahoo/FRED 를 fetch 하므로 과거 일자 기준 정확한 값을 줄 수 없다.
+ * 이 헬퍼는 저장된 NASDAQ 히스토리(readHistory('yahoo','NASDAQ')) 만 사용해 date 시점의
+ * SMA200/DISPARITY/DRAWDOWN/ABOVE_200DMA 를 계산해 후속 덮어쓰기용으로 반환.
+ */
+function reconstructDateSpecificDerived(
+  date: string,
+  nasdaqHistory: HistoryPoint[],
+): Record<string, DerivedIndicator> {
   const derived: Record<string, DerivedIndicator> = {};
-  const dgs10 = raw.DGS10?.value;
-  const t10yie = raw.T10YIE?.value;
-  if (dgs10 !== undefined && t10yie !== undefined) {
-    derived.REAL_YIELD = { name: 'real_yield', value: dgs10 - t10yie, date, formula: 'DGS10 - T10YIE' };
-  }
-
-  const gold = raw.GOLD?.value;
-  const silver = raw.SILVER?.value;
-  const copper = raw.COPPER?.value;
-  if (gold !== undefined && silver) {
-    derived.GOLD_SILVER_RATIO = { name: 'gold_silver_ratio', value: gold / silver, date, formula: 'GOLD / SILVER' };
-  }
-  if (gold && copper !== undefined) {
-    derived.COPPER_GOLD_RATIO = { name: 'copper_gold_ratio', value: copper / gold, date, formula: 'COPPER / GOLD' };
-  }
-
   const eligible = nasdaqHistory.filter((p) => dateToTime(p.date) <= dateToTime(date));
   if (eligible.length >= 200) {
     const latest200 = eligible.slice(-200);
@@ -100,6 +94,54 @@ function buildDerivedForDate(date: string, raw: Record<string, MarketDataPoint>,
     derived.NASDAQ_DRAWDOWN = { name: 'nasdaq_drawdown', value: ((current - allTimeHigh) / allTimeHigh) * 100, date, formula: '(P-ATH)/ATH*100' };
     derived.NASDAQ_ABOVE_200DMA = { name: 'nasdaq_above_200dma', value: current > sma200 ? 1 : 0, date, formula: 'P>SMA200' };
   }
+  return derived;
+}
+
+/**
+ * Fix #1+#2(2차 감사): 백필 derived 경로를 라이브 computeDerived 로 수렴.
+ *
+ * 1차 감사에서 추가된 STAGFLATION/BOND_VIGILANTE/OVERHEATED/CREDIT_STRESS_FLAG/PSYCH_SUBSCORE/MTF 등이
+ * 히스토리에 반영되지 않던 원인: buildDerivedForDate 가 NASDAQ 4개 필드 + 2개 비율만 채웠기 때문.
+ *
+ * 해법: 히스토리에서 raw 를 재구성 → computeDerived(raw) 직접 호출해 라이브 경로와 **동일 시그니처** 로
+ * 풀 derived 획득. 그 위에 reconstructDateSpecificDerived 로 NASDAQ 날짜별 재계산치를 덮어써 일자별
+ * 변동이 보존되도록 한다.
+ *
+ * 성능 주의: computeDerived 는 내부에서 Yahoo/FRED 를 live fetch 한다. 10년 백필 × 전체 재계산은
+ * 매우 무거우므로 **실행 경로 당 한 번만** 호출하고 (모듈 스코프 캐시) 자산 가격 비율(GSR/CGR/REAL_YIELD)
+ * 과 NASDAQ 날짜 의존 필드만 raw/date 로 오버라이드해 재사용한다.
+ * 캐시 로직은 refreshComputedHistories 안에서 지역 상수로 구현.
+ */
+export async function recomputeFullDerivedForDate(
+  date: string,
+  raw: Record<string, MarketDataPoint>,
+  nasdaqHistory: HistoryPoint[],
+  cachedLiveDerived: Record<string, DerivedIndicator>,
+): Promise<Record<string, DerivedIndicator>> {
+  // 라이브 derived 를 shallow clone — 과거 일자별로 NASDAQ·비율만 덮어쓰고 나머지는 최신 상태 유지.
+  // (MTF/STAGFLATION/PSYCH_SUBSCORE 등은 과거 정확한 값을 복원하기 어려워 현 시점 값으로 합의.
+  //  라이브와 **같은 시그니처·키 집합** 을 히스토리에 남기는 것이 Fix #1+#2 의 목적.)
+  const derived: Record<string, DerivedIndicator> = { ...cachedLiveDerived };
+
+  // 가격 비율 — raw 가 있으면 date 시점으로 재계산.
+  const dgs10 = raw.DGS10?.value;
+  const t10yie = raw.T10YIE?.value;
+  if (dgs10 !== undefined && t10yie !== undefined) {
+    derived.REAL_YIELD = { name: 'real_yield', value: dgs10 - t10yie, date, formula: 'DGS10 - T10YIE' };
+  }
+  const gold = raw.GOLD?.value;
+  const silver = raw.SILVER?.value;
+  const copper = raw.COPPER?.value;
+  if (gold !== undefined && silver) {
+    derived.GOLD_SILVER_RATIO = { name: 'gold_silver_ratio', value: gold / silver, date, formula: 'GOLD / SILVER' };
+  }
+  if (gold && copper !== undefined) {
+    derived.COPPER_GOLD_RATIO = { name: 'copper_gold_ratio', value: copper / gold, date, formula: 'COPPER / GOLD' };
+  }
+
+  // NASDAQ 날짜 의존 필드 — 저장된 히스토리로 as-of-date 재계산 + 덮어쓰기.
+  const dateSpecific = reconstructDateSpecificDerived(date, nasdaqHistory);
+  for (const [k, v] of Object.entries(dateSpecific)) derived[k] = v;
 
   return derived;
 }
@@ -130,10 +172,32 @@ export async function refreshComputedHistories() {
     COPPER: [],
   };
 
+  // Fix #1+#2(2차 감사): live computeDerived 를 anchor 루프 전에 **한 번만** 호출해 재사용.
+  //   내부에서 Yahoo/FRED live fetch 가 많아 per-date 호출은 비용 폭발. 날짜 의존 필드는
+  //   recomputeFullDerivedForDate 에서 raw/nasdaqHistory 로 덮어쓴다.
+  let cachedLiveDerived: Record<string, DerivedIndicator> = {};
+  try {
+    const latestRaw = buildRawForDate(
+      base.length > 0 ? base[base.length - 1].date : new Date().toISOString().split('T')[0],
+      histories,
+    );
+    cachedLiveDerived = await computeDerived(latestRaw);
+  } catch (error) {
+    console.warn('[history] computeDerived cache failed, falling back to date-specific only:', error);
+    cachedLiveDerived = {};
+  }
+
   for (const anchor of base) {
     const raw = buildRawForDate(anchor.date, histories);
-    const derived = buildDerivedForDate(anchor.date, raw, base);
-    const regime = classifyRegime({ raw, derived, manualInputs: DEFAULT_PROFILE.manualInputs });
+    const derived = await recomputeFullDerivedForDate(anchor.date, raw, base, cachedLiveDerived);
+    // smartMoneyScore: 히스토리에는 smart-money 시계열이 없으므로 0 을 명시적으로 전달.
+    //   라이브 경로와 동일 시그니처 유지가 이 Fix 의 핵심.
+    const regime = classifyRegime({
+      raw,
+      derived,
+      manualInputs: DEFAULT_PROFILE.manualInputs,
+      smartMoneyScore: 0,
+    });
     const signals = computeSignals(raw, derived, regime, DEFAULT_PROFILE);
     const allocation = computeAllocation(regime.regime, regime.score, signals, derived, raw);
     const byAsset = Object.fromEntries(signals.map((s) => [s.asset, s]));
