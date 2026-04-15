@@ -3,6 +3,12 @@ import { fetchYahooHistory } from '../collectors/yahoo';
 import { fetchFredHistory } from '../collectors/fred';
 import { readHistory } from '../state/history-store';
 import { fetchKrxInvestorFlow, summarizeInvestorFlow } from '../collectors/krx-flow';
+import {
+  fetchMultiTimeframe,
+  detectClimaxExhaustion,
+  detectWeeklyReversal,
+  monthlyPositionScore,
+} from './candles';
 
 function val(raw: Record<string, MarketDataPoint>, key: string): number | null {
   return raw[key]?.value ?? null;
@@ -526,6 +532,69 @@ export async function computeDerived(
     d.OVERHEATED = { name: 'overheated', value: 1, date: dt, formula: '이격도+15%이상 AND VIX<15 → 과열' };
   } else {
     d.OVERHEATED = { name: 'overheated', value: 0, date: dt, formula: '과열 조건 미충족' };
+  }
+
+  // === 멀티 타임프레임 캔들 분석 (영상3·4·5 "월→주→일" 위계) ===
+  // NASDAQ, KOSPI 주요 자산에 대해 월봉 소진/주봉 반전/월봉 위치지수 파생지표 생성.
+  const mtfTargets: Array<{ symbol: string; prefix: string }> = [
+    { symbol: '^IXIC', prefix: 'NASDAQ' },
+    { symbol: '^KS11', prefix: 'KOSPI' },
+  ];
+  for (const { symbol, prefix } of mtfTargets) {
+    try {
+      const mtf = await fetchMultiTimeframe(symbol);
+      if (!mtf) continue;
+      const exhaustion = detectClimaxExhaustion(mtf.monthly, 3);
+      const weeklyRev = detectWeeklyReversal(mtf.weekly, 4);
+      const monthPos = monthlyPositionScore(mtf.monthly);
+      const latestMonthly = mtf.monthly[mtf.monthly.length - 1];
+      const latestWeekly = mtf.weekly[mtf.weekly.length - 1];
+
+      d[`${prefix}_MONTHLY_EXHAUSTION`] = {
+        name: `${prefix.toLowerCase()}_monthly_exhaustion`,
+        value: exhaustion.warning ? 1 : 0,
+        date: dt,
+        formula: `최근 3개월 연속 장대양봉(${exhaustion.consecutiveBullishLargeBody}/3) + 아래꼬리 없음(${exhaustion.latestNoLowerWick ? 'Y' : 'N'}) = 과열 소진 경고`,
+      };
+      d[`${prefix}_WEEKLY_REVERSAL`] = {
+        name: `${prefix.toLowerCase()}_weekly_reversal`,
+        value: weeklyRev.reversalWarning ? 1 : 0,
+        date: dt,
+        formula: `이전 4주 상승 추세 AND 최근 주봉 장대음봉 → 추세 전환 경고`,
+      };
+      if (monthPos !== null) {
+        d[`${prefix}_MONTH_POS`] = {
+          name: `${prefix.toLowerCase()}_month_pos`,
+          value: parseFloat((monthPos * 100).toFixed(1)),
+          date: dt,
+          formula: `월봉 종가의 최근 12개월 고-저 사이 위치(%). 100=고점, 0=저점`,
+        };
+      }
+      if (latestMonthly) {
+        d[`${prefix}_MONTHLY_BODY_PCT`] = {
+          name: `${prefix.toLowerCase()}_monthly_body_pct`,
+          value: latestMonthly.shape.bodyPct,
+          date: latestMonthly.date,
+          formula: `최근 월봉 몸통 비율 (|close-open|/range). 90+=마루보주, <10=도지`,
+        };
+        d[`${prefix}_MONTHLY_LOWER_WICK_PCT`] = {
+          name: `${prefix.toLowerCase()}_monthly_lower_wick_pct`,
+          value: latestMonthly.shape.lowerWickPct,
+          date: latestMonthly.date,
+          formula: `최근 월봉 아래꼬리 비율. <5 + 장대양봉 = 매수 압력 검증 없이 상승`,
+        };
+      }
+      if (latestWeekly) {
+        d[`${prefix}_WEEKLY_BULLISH`] = {
+          name: `${prefix.toLowerCase()}_weekly_bullish`,
+          value: latestWeekly.shape.isBullish ? 1 : 0,
+          date: latestWeekly.date,
+          formula: `최근 주봉 양봉 여부`,
+        };
+      }
+    } catch {
+      /* 멀티 타임프레임 수집 실패는 전체 파이프라인 막지 않음 */
+    }
   }
 
   // === KRX 외국인·기관 순매수 (코스피 전략 4번째 축) ===

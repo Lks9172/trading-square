@@ -129,6 +129,15 @@ function nasdaqSignal(
   if (xlk !== null && xlk > 0) { reasons.push(`XLK 기술섹터 +${xlk.toFixed(1)}% → 성장주 랠리 질 양호 (보조조건)`); }
   else if (xlk !== null && xlk < 0) { unmetReasons.push(`XLK 기술섹터 ${xlk.toFixed(1)}% → 성장주 주도력 약함 (보조조건)`); }
 
+  // 멀티 타임프레임 경고 (영상5 패턴 — 매수 신호 감쇠 요소)
+  const mtfExhaustion = dv(derived, 'NASDAQ_MONTHLY_EXHAUSTION');
+  const mtfReversal = dv(derived, 'NASDAQ_WEEKLY_REVERSAL');
+  const mtfMonthPos = dv(derived, 'NASDAQ_MONTH_POS');
+  if (mtfExhaustion === 1) { unmetReasons.push('⚠️ 월봉 소진 경고: 3개월 연속 장대양봉 + 아래꼬리 없음 (보조조건)'); }
+  if (mtfReversal === 1) { unmetReasons.push('⚠️ 주봉 반전 경고: 상승 추세 후 장대음봉 (보조조건)'); }
+  if (mtfMonthPos !== null && mtfMonthPos >= 95) { unmetReasons.push(`⚠️ 월봉 위치 ${mtfMonthPos.toFixed(0)}% → 12개월 고점 근처, 추격매수 주의 (보조조건)`); }
+  else if (mtfMonthPos !== null && mtfMonthPos <= 15) { reasons.push(`월봉 위치 ${mtfMonthPos.toFixed(0)}% → 저점권, 분할매수 구간 (보조조건)`); }
+
   if (icsa !== null && icsa >= 300000 && above200 === 0) {
     return {
       asset: 'NASDAQ',
@@ -513,6 +522,20 @@ function kospiSignal(
   const volumeConfirm = dv(derived, 'KOSPI_VOLUME_CONFIRM');
   if (volumeConfirm === 1) { met++; reasons.push('거래량 확인 (최근5일 평균 >= 20일 평균의 110%, 가중치 1.0)'); }
   else { unmetReasons.push('거래량 지속 조건 미충족 (가중치 1.0 미충족)'); }
+
+  // 멀티 타임프레임 경고 (영상5 코스피 연봉/월봉 "정상성" 판정)
+  const kMtfExhaustion = dv(derived, 'KOSPI_MONTHLY_EXHAUSTION');
+  const kMtfReversal = dv(derived, 'KOSPI_WEEKLY_REVERSAL');
+  const kMtfMonthPos = dv(derived, 'KOSPI_MONTH_POS');
+  const kMtfLowerWick = dv(derived, 'KOSPI_MONTHLY_LOWER_WICK_PCT');
+  const kMtfBody = dv(derived, 'KOSPI_MONTHLY_BODY_PCT');
+  if (kMtfExhaustion === 1) { unmetReasons.push('⚠️ 코스피 월봉 소진 경고: 3개월 연속 장대양봉 + 아래꼬리 없음 (영상5 과열 패턴, 보조조건)'); }
+  if (kMtfReversal === 1) { unmetReasons.push('⚠️ 코스피 주봉 반전 경고: 상승 추세 후 장대음봉 (보조조건)'); }
+  if (kMtfMonthPos !== null && kMtfMonthPos >= 95) { unmetReasons.push(`⚠️ 코스피 월봉 위치 ${kMtfMonthPos.toFixed(0)}% → 12개월 고점 근처 (보조조건)`); }
+  else if (kMtfMonthPos !== null && kMtfMonthPos <= 15) { reasons.push(`코스피 월봉 위치 ${kMtfMonthPos.toFixed(0)}% → 저점권 (보조조건)`); }
+  if (kMtfBody !== null && kMtfBody >= 90 && kMtfLowerWick !== null && kMtfLowerWick < 5) {
+    unmetReasons.push(`⚠️ 최근 월봉 마루보주 (body ${kMtfBody.toFixed(0)}%, 아래꼬리 ${kMtfLowerWick.toFixed(0)}%) → 매수 검증 부족 (보조조건)`);
+  }
 
   // 외국인 수급 축 (영상5 "환율·추세·거래량·외국인수급" 4축 중 마지막)
   const foreignNet20D = dv(derived, 'KOSPI_FOREIGN_NET_20D');

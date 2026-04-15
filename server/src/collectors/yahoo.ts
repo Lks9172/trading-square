@@ -131,3 +131,55 @@ export async function fetchYahooHistoryYears(
 ): Promise<{ date: string; close: number }[]> {
   return fetchYahooHistory(symbol, Math.round(years * 365.25));
 }
+
+export type OHLCInterval = '1d' | '1wk' | '1mo';
+
+export interface OHLCCandle {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+/**
+ * Yahoo chart API 로 OHLC 캔들을 받아온다. interval 로 일/주/월봉 직접 요청 가능.
+ * Yahoo 의 공식 집계(주봉·월봉)를 그대로 쓰므로 로컬 aggregation 불필요.
+ */
+export async function fetchYahooOHLC(
+  symbol: string,
+  days: number,
+  interval: OHLCInterval = '1d',
+): Promise<OHLCCandle[]> {
+  const period2 = Math.floor(Date.now() / 1000);
+  const period1 = period2 - days * 86400;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=${interval}`;
+  try {
+    const { data } = await axios.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 15000,
+    });
+    const result = data.chart?.result?.[0];
+    if (!result) return [];
+    const ts: number[] = result.timestamp || [];
+    const q = result.indicators?.quote?.[0] || {};
+    const opens: number[] = q.open || [];
+    const highs: number[] = q.high || [];
+    const lows: number[] = q.low || [];
+    const closes: number[] = q.close || [];
+    const vols: number[] = q.volume || [];
+    return ts
+      .map((t, i) => ({
+        date: new Date(t * 1000).toISOString().split('T')[0],
+        open: opens[i] ?? 0,
+        high: highs[i] ?? 0,
+        low: lows[i] ?? 0,
+        close: closes[i] ?? 0,
+        volume: vols[i] ?? 0,
+      }))
+      .filter((c) => c.close > 0 && c.high > 0 && c.low > 0 && c.open > 0);
+  } catch {
+    return [];
+  }
+}
