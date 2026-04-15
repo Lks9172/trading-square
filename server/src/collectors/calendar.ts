@@ -32,6 +32,14 @@ const FRED_RELEASES: Array<{ id: number; name: string; category: CalendarEvent['
  * FRED에 별도 시리즈 없음. 미국 Fed의 공식 schedule은 https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
  * 정확한 연도별 업데이트는 매년 초.
  */
+/**
+ * 정적 정치·정책 이벤트 — FRED에 없는 굵직한 마커.
+ * 영상4 §104 "모든 정책 퍼즐이 선거로 수렴" 철학 반영.
+ */
+const STATIC_POLITICAL_EVENTS: Array<{ date: string; name: string; category: CalendarEvent['category']; importance: 'high' | 'medium' }> = [
+  { date: '2026-11-03', name: '🗳 미 중간선거', category: 'OTHER', importance: 'high' },
+];
+
 const FOMC_MEETINGS_2026 = [
   '2026-01-27', '2026-01-28',
   '2026-03-17', '2026-03-18',
@@ -107,9 +115,26 @@ export async function fetchEconomicCalendar(apiKey: string): Promise<CalendarEve
     });
   }
 
-  // 정렬 + 향후 7일 이내 + 과거 7일 이내만 반환
+  // 3. 정적 정치·정책 이벤트 (미 중간선거 등 — 장기 카운트다운이라 ±100일 범위)
+  for (const e of STATIC_POLITICAL_EVENTS) {
+    const daysU = daysBetween(e.date, today);
+    if (daysU >= -30 && daysU <= 400) {
+      events.push({
+        date: e.date,
+        name: e.name,
+        category: e.category,
+        daysUntil: daysU,
+        importance: e.importance,
+      });
+    }
+  }
+
+  // 정렬 + 향후 30일 이내 + 과거 7일 이내 + 정치 이벤트는 장기도 포함
   events.sort((a, b) => a.date.localeCompare(b.date));
-  return events.filter((e) => e.daysUntil >= -7 && e.daysUntil <= 30);
+  return events.filter((e) => {
+    if (e.category === 'OTHER') return e.daysUntil >= -30 && e.daysUntil <= 400;
+    return e.daysUntil >= -7 && e.daysUntil <= 30;
+  });
 }
 
 /** 임박 이벤트(D-3 이내) 요약 */
