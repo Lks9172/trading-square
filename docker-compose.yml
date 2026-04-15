@@ -1,12 +1,51 @@
 services:
+  jaeger:
+    # Jaeger all-in-one + Badger 영속 스토리지.
+    # 홈서버(192.168.0.200) 재부팅 이후에도 ./jaeger-data 볼륨에서 span 복구.
+    image: jaegertracing/all-in-one:1.63
+    container_name: macrosquare-jaeger
+    environment:
+      - SPAN_STORAGE_TYPE=badger
+      - BADGER_EPHEMERAL=false
+      - BADGER_DIRECTORY_VALUE=/badger/data
+      - BADGER_DIRECTORY_KEY=/badger/key
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4318:4318"     # OTLP HTTP (server → jaeger)
+    volumes:
+      - ./jaeger-data:/badger
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:16686/ > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   server:
     build: ./server
     container_name: macrosquare-server
     ports:
       - "5846:5846"
+    volumes:
+      - ./server/data:/app/data
+      - ./server-logs:/app/logs
     environment:
       - PORT=5846
       - FRED_API_KEY=${FRED_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      - OTEL_SERVICE_NAME=macrosquare-server
+      - OTEL_TRACES_EXPORTER=otlp
+    depends_on:
+      - jaeger
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     restart: unless-stopped
 
   client:
@@ -23,4 +62,9 @@ services:
       - SSR_API_URL=http://macrosquare-server:5846
     depends_on:
       - server
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     restart: unless-stopped
