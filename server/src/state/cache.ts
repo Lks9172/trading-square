@@ -77,6 +77,23 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
   const smartMoney = await fetchInsiderSummary().catch(() => null);
   const calendar = await fetchEconomicCalendar(apiKey).catch(() => []);
   const derived = await computeDerived(raw);
+
+  // 스마트머니 점수를 derived 에도 publish — regime.ts 는 별도 인자로 받지만, UI/히스토리/
+  // 관측성 경로는 derived 를 본다. 일관성 확보 (cachedLiveDerived 공유 구조).
+  // 값은 regime.components.smartMoney 와 동일 (insider + dataroma 합성).
+  if (smartMoney) {
+    const today = new Date().toISOString().split('T')[0];
+    const score = smartMoney.score ?? 0;
+    derived.SMART_MONEY_SCORE = { name: 'SMART_MONEY_SCORE', value: score, date: today, formula: 'insider + dataroma 평균 (-2..+2)' };
+    derived.SMART_MONEY_INSIDER_BUY_RATIO = { name: 'SMART_MONEY_INSIDER_BUY_RATIO', value: smartMoney.insiderBuyRatio, date: today, formula: 'openinsider 매수/(매수+매도) %' };
+    if (smartMoney.dataromaScore !== undefined) {
+      derived.SMART_MONEY_DATAROMA_SCORE = { name: 'SMART_MONEY_DATAROMA_SCORE', value: smartMoney.dataromaScore, date: today, formula: 'dataroma 13F net flow 점수 (-2..+2)' };
+    }
+    if (smartMoney.dataromaNetPortfolioFlow !== undefined && smartMoney.dataromaNetPortfolioFlow !== null) {
+      derived.SMART_MONEY_DATAROMA_NET_FLOW = { name: 'SMART_MONEY_DATAROMA_NET_FLOW', value: smartMoney.dataromaNetPortfolioFlow, date: today, formula: 'dataroma 기관 순매수 포트폴리오 기여 (+ 유입 / - 유출)' };
+    }
+  }
+
   const regime = classifyRegime({ raw, derived, manualInputs: effectiveInputs, smartMoneyScore: smartMoney?.score ?? 0 });
   const signals = computeSignals(raw, derived, regime, effectiveProfile);
   const allocation = computeAllocation(regime.regime, regime.score, signals, derived, raw, effectiveProfile.investmentHorizon);
