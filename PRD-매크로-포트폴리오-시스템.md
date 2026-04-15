@@ -1446,17 +1446,27 @@ snapshot 지표가 시계열 신호를 왜곡 (HOLD 되어야 할 날이 REDUCE 
   - `CREDIT_HY_OAS_BP`, `CREDIT_HYG_IEF_RATIO`, `CREDIT_HYG_IEF_ZSCORE`, `CREDIT_STRESS_FLAG`
     (FRED BAMLH0A0HYM2 raw + Yahoo HYG/IEF history)
   - `M2_YOY_PCT`, `M2_YOY_DELTA_3M`, `M2_YOY_CROSS_DAYS` (FRED WM2NS history)
+  - **(신규)** `PSYCH_SUBSCORE` + 패스스루 `PC_RATIO_10D` / `AAII_BULL_BEAR_SPREAD` /
+    `NAAIM_EXPOSURE` — 센티먼트 raw history (cnn / sentiment 소스) + `reconstructPsychSubscore`.
+    KST 07:00 cron 의 `appendSentimentDaily` 가 daily append (CNN F&G + CBOE P/C 10D + AAII
+    spread + NAAIM exposure). 결측 시 append skip(null 저장 금지), `(source,key,date)` 멱등.
+  - **(신규)** `OVERHEATED` — `reconstructOverheated` (NASDAQ_DISPARITY + F&G + VIX 룰 동일).
+  - **(신규)** `BOND_VIGILANTE_SCORE` / `BOND_VIGILANTE_WARNING` / `FISCAL_STRESS` /
+    `DGS30_20D_CHANGE` — `reconstructBondVigilante` (FRED DGS30 history + Yahoo DXY history +
+    raw HY OAS). DGS30 < 100 (DXY 약세) · DGS30 Δ20 ≥ 0.15 · HY OAS ≥ 4.5 의 3축 합산.
 - **단발 snapshot 지표 (history 미저장 → 과거 복원 불가)** 는 과거 일자에서 명시적으로
   null 유지 (= derived 맵에서 키 자체가 없음). signals.ts 의 `dv()` 가 null 가드로 깔끔히
   스킵하므로 met 카운트 왜곡이 발생하지 않음. 해당 지표:
   - `RRP_DIRECTION`, `TGA_DIRECTION`, `MMF_DIRECTION`, `GLOBAL_M2_PROXY` (raw snapshot)
-  - `PSYCH_SUBSCORE`, `MTF_EXHAUSTION`, `NASDAQ_MONTHLY_*`, `KOSPI_MONTHLY_*`,
-    `NASDAQ_WEEKLY_REVERSAL`, `KOSPI_WEEKLY_REVERSAL`
-  - `STAGFLATION_WARNING`/`SCORE`, `BOND_VIGILANTE_WARNING`/`SCORE`, `FISCAL_STRESS`/`HARD`,
-    `OVERHEATED`
+  - `MTF_EXHAUSTION`, `NASDAQ_MONTHLY_*`, `KOSPI_MONTHLY_*`,
+    `NASDAQ_WEEKLY_REVERSAL`, `KOSPI_WEEKLY_REVERSAL` (월/주봉 OHLC 리샘플링 필요)
+  - `STAGFLATION_WARNING`/`SCORE` (CPI_OIL_LAG_PRESSURE · ICSA_REGIME_LABEL · ISM_PROXY 다단계
+    derived 의존 — 별도 헬퍼 `reconstructStagflation` 으로 분리 예정)
+  - `FISCAL_STRESS_HARD` (T10Y2Y 곡선 스티프닝 + DGS30 동시 조건 — 별도 헬퍼 분리 예정)
   - `SECTOR_*`, `SMART_MONEY_*`, `KRX_*`/`KOSPI_FOREIGN_*`, `USDKRW_WEEKLY_CHANNEL_*`
 - 향후 단발 snapshot 지표를 history 에 보존하려면 해당 collectors 에 별도 history append
-  (현 라이브 호출 결과를 daily snapshot 으로 기록) 가 필요. 이는 별도 PRD 작업으로 분리.
+  (현 라이브 호출 결과를 daily snapshot 으로 기록) 가 필요. 센티먼트 4축은 본 정책에 이미
+  반영. 섹터·SM·KRX·MTF·USDKRW 주봉은 별도 PRD 작업으로 분리.
 
 **검증 — 커버리지 로그:** `refreshComputedHistories` 종료 시 최근 1년 평균 non-null
 derived 키 수를 출력. 회귀 시 이 수치를 기준으로 데이터 손실 여부 점검.
