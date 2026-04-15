@@ -35,9 +35,28 @@ const REGIME_EMOJI: Record<string, string> = {
 };
 
 let previousSignals: Record<string, string> = {};
+let previousSignalReasons: Record<string, string[]> = {};
 let previousRegime: string = '';
+let previousRegimeComponents: Record<string, number> = {};
 let previousAllocations: Record<string, number> = {};
 let previousOverallSignal: string = '';
+
+const REGIME_COMPONENT_LABELS: Record<string, string> = {
+  vix: 'VIX',
+  yieldCurve: '수익률곡선',
+  hySpread: 'HY 스프레드',
+  joblessClaims: '실업수당',
+  nasdaqDisparity: '나스닥 이격도',
+  finStress: '금융 스트레스',
+  dxy: '달러 방향',
+  liquidityDir: '유동성 방향',
+  wti: 'WTI 유가',
+  globalM2: '글로벌 M2',
+  smartMoney: '스마트머니',
+  sectorMomentum: '섹터 모멘텀',
+  policy: '정책',
+  geoRisk: '지정학',
+};
 
 const ALLOC_LABELS: Record<string, string> = {
   cash: '현금',
@@ -50,18 +69,58 @@ const ALLOC_LABELS: Record<string, string> = {
   emerging: '신흥국',
 };
 
-function formatSignalChange(asset: string, oldSignal: string, newSignal: string, reasons: string[]): string {
+function formatSignalChange(
+  asset: string,
+  oldSignal: string,
+  newSignal: string,
+  reasons: string[],
+  prevReasons: string[] = [],
+): string {
   const label = ASSET_LABELS[asset] || asset;
   const oldEmoji = SIGNAL_EMOJI[oldSignal] || '?';
   const newEmoji = SIGNAL_EMOJI[newSignal] || '?';
-  const topReasons = reasons.slice(0, 3).join('\n  • ');
-  return `📊 ${label} 신호 변경\n${oldEmoji} ${oldSignal} → ${newEmoji} ${newSignal}\n  • ${topReasons}`;
+
+  // 이전엔 없다가 지금 충족된 조건 (새로 켜진 근거)
+  const prevSet = new Set(prevReasons);
+  const newlyMet = reasons.filter((r) => !prevSet.has(r));
+  // 신규 충족 조건이 있으면 우선 노출, 없으면 현재 상위 근거
+  const keyReasons = (newlyMet.length > 0 ? newlyMet : reasons).slice(0, 3);
+  const reasonLines = keyReasons.join('\n  • ');
+  const newTag = newlyMet.length > 0 ? '🆕 새로 충족' : '📌 주요 근거';
+  return `📊 ${label} 신호 변경\n${oldEmoji} ${oldSignal} → ${newEmoji} ${newSignal}\n\n${newTag}:\n  • ${reasonLines}`;
 }
 
-function formatRegimeChange(oldRegime: string, newRegime: string, score: number): string {
+function formatRegimeChange(
+  oldRegime: string,
+  newRegime: string,
+  score: number,
+  prevComponents: Record<string, number>,
+  newComponents: Record<string, number>,
+): string {
   const oldEmoji = REGIME_EMOJI[oldRegime] || '?';
   const newEmoji = REGIME_EMOJI[newRegime] || '?';
-  return `🏛️ 국면 변경\n${oldEmoji} ${oldRegime} → ${newEmoji} ${newRegime} (${score}/100)`;
+
+  // 컴포넌트 점수 변화 top-3 (절댓값 기준)
+  const deltas: Array<{ key: string; delta: number; now: number }> = [];
+  for (const [k, v] of Object.entries(newComponents)) {
+    const prev = prevComponents[k] ?? 0;
+    const delta = v - prev;
+    if (Math.abs(delta) > 0.01) deltas.push({ key: k, delta, now: v });
+  }
+  deltas.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  let deltaSection = '';
+  if (deltas.length > 0) {
+    const top = deltas.slice(0, 3).map((d) => {
+      const label = REGIME_COMPONENT_LABELS[d.key] || d.key;
+      const arrow = d.delta > 0 ? '📈' : '📉';
+      const sign = d.delta > 0 ? '+' : '';
+      return `${arrow} ${label}: ${sign}${d.delta.toFixed(1)} (현재 ${d.now.toFixed(1)})`;
+    }).join('\n  ');
+    deltaSection = `\n\n🔍 주요 변화 (top 3):\n  ${top}`;
+  }
+
+  return `🏛️ 국면 변경\n${oldEmoji} ${oldRegime} → ${newEmoji} ${newRegime} (${score}/100)${deltaSection}`;
 }
 
 function overallSignalFromAllocation(allocation?: AllocationPlan): string {
@@ -115,9 +174,10 @@ export async function checkAndNotify(
   const overallSignal = overallSignalFromAllocation(allocation);
 
   if (previousRegime && previousRegime !== regime.regime) {
-    messages.push(formatRegimeChange(previousRegime, regime.regime, regime.score));
+    messages.push(formatRegimeChange(previousRegime, regime.regime, regime.score, previousRegimeComponents, regime.components));
   }
   previousRegime = regime.regime;
+  previousRegimeComponents = { ...regime.components };
 
   if (previousOverallSignal && previousOverallSignal !== overallSignal) {
     messages.push(formatOverallSignalChange(previousOverallSignal, overallSignal, allocation));
@@ -127,9 +187,11 @@ export async function checkAndNotify(
   for (const sig of signals) {
     const prev = previousSignals[sig.asset];
     if (prev && prev !== sig.signal) {
-      messages.push(formatSignalChange(sig.asset, prev, sig.signal, sig.reasons));
+      const prevReasons = previousSignalReasons[sig.asset] || [];
+      messages.push(formatSignalChange(sig.asset, prev, sig.signal, sig.reasons, prevReasons));
     }
     previousSignals[sig.asset] = sig.signal;
+    previousSignalReasons[sig.asset] = [...sig.reasons];
   }
 
   const allocChanges: string[] = [];
@@ -175,8 +237,10 @@ export async function sendStartupSnapshot(signals: AssetSignal[], regime: Regime
   if (!token || !chatId) return false;
 
   previousRegime = regime.regime;
+  previousRegimeComponents = { ...regime.components };
   previousOverallSignal = overallSignalFromAllocation(allocation);
   previousSignals = Object.fromEntries(signals.map((s) => [s.asset, s.signal]));
+  previousSignalReasons = Object.fromEntries(signals.map((s) => [s.asset, [...s.reasons]]));
   previousAllocations = allocation ? { ...allocation.allocations } : {};
 
   const text = `🚀 MacroSquare 서버 시작\n${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}` + buildSummaryMessage(signals, regime, allocation);
