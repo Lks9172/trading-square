@@ -15,6 +15,7 @@ import { RealtimePanel } from "./RealtimePanel";
 import { SmartMoneyPanel } from "./SmartMoneyPanel";
 import { CalendarPanel } from "./CalendarPanel";
 import { MultiTimeframePanel } from "./MultiTimeframePanel";
+import { ExecutionPlanPanel } from "./ExecutionPlanPanel";
 import { OptionsVolatilityPanel } from "./OptionsVolatilityPanel";
 import { formatKstDateTime } from "@/lib/format";
 
@@ -83,6 +84,8 @@ export function Dashboard({ snapshot }: Props) {
         <SignalPanel signals={currentSnapshot.signals} />
         <AllocationPanel allocation={currentSnapshot.allocation} overheated={currentSnapshot?.derived?.OVERHEATED?.value === 1} />
       </div>
+
+      <ExecutionPlanPanel plans={currentSnapshot?.meta?.executionPlans} />
 
       <SectorPanel derived={currentSnapshot.derived} />
 

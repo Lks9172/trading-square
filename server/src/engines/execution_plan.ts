@@ -1,0 +1,378 @@
+/**
+ * Execution Plan 엔진 — 영상 공통 철학 "지표는 진단, 실행은 분할매수 규칙".
+ *
+ * 근거:
+ * - 이동평균선.md:236-257: 분할매수 3단계, 손절=지지선 이탈, 익절=단기추세선 이탈
+ * - video5:99-102: "매수는 분할 3회 (1차: 현재가, 2차: 강한 하락, 3차: W 저점)"
+ * - video1:211-232: "시스템적 투자 = 진입/비중/청산 규칙"
+ *
+ * 본 엔진은 regime + signals + derived + 현재 가격 을 입력받아 자산별 플레이북 반환.
+ * 비중 결정(allocation.ts) 과 독립 — allocation은 "얼마" / execution_plan은 "언제·어떻게".
+ */
+
+import {
+  AssetSignal,
+  RegimeState,
+  AllocationPlan,
+  MarketDataPoint,
+  DerivedIndicator,
+  ExecutionPlan,
+  ExecutionStage,
+  ExecutionAction,
+} from '../types/indicators';
+
+const vRaw = (raw: Record<string, MarketDataPoint>, k: string): number | null => raw[k]?.value ?? null;
+const vDer = (d: Record<string, DerivedIndicator>, k: string): number | null => d[k]?.value ?? null;
+
+function round(n: number, digits = 2): number {
+  return parseFloat(n.toFixed(digits));
+}
+
+/** 자산별 할당 키 매핑 (allocation 측 키). */
+const ASSET_ALLOC_KEY: Record<string, string> = {
+  NASDAQ: 'nasdaq',
+  KOSPI: 'korea',
+  GOLD: 'gold',
+  SILVER: 'silver',
+  COPPER: 'copper',
+  LEVERAGE: 'leverage',
+};
+
+function actionLabel(action: ExecutionAction): string {
+  const map: Record<ExecutionAction, string> = {
+    BUY_NOW: '🟢 지금 1차 매수',
+    SCALE_IN: '🔵 추가 분할 대기',
+    HOLD: '⚪ 관망',
+    TAKE_PROFIT: '🟡 익절 준비',
+    EXIT: '🔴 전량 청산',
+    AVOID: '⚫ 진입 금지',
+  };
+  return map[action] || action;
+}
+
+/** NASDAQ 플레이북 — 이격도·200DMA·VIX·ICSA 기반 */
+function nasdaqPlan(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
+  signal: AssetSignal,
+  alloc: number,
+): ExecutionPlan {
+  const price = vRaw(raw, 'NASDAQ');
+  const sma200 = vDer(derived, 'NASDAQ_SMA200');
+  const disparity = vDer(derived, 'NASDAQ_DISPARITY');
+  const vix = vRaw(raw, 'VIXCLS');
+  const icsa = vRaw(raw, 'ICSA');
+  const above200 = vDer(derived, 'NASDAQ_ABOVE_200DMA');
+  const wBottom = vDer(derived, 'NASDAQ_W_BOTTOM');
+  const monthPos = vDer(derived, 'NASDAQ_MONTH_POS');
+  const channelPos = vDer(derived, 'NASDAQ_CHANNEL_POSITION');
+
+  let action: ExecutionAction = 'HOLD';
+  let reason = '조건 대기';
+  const stages: ExecutionStage[] = [];
+  let stopPrice: number | null = null;
+  let stopCond = '';
+  let takePrice: number | null = null;
+  let takeCond = '';
+
+  if (signal.signal === 'STRONG_BUY') {
+    action = 'BUY_NOW';
+    reason = `STRONG_BUY (${signal.conditionsMet}/${signal.conditionsTotal}) — 즉시 1차 진입 후 분할`;
+    stages.push({ stage: 1, weightPct: 40, triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: 30, triggerCondition: '-5% 추가 하락 시', triggerPrice: price ? round(price * 0.95) : undefined, status: 'pending' });
+    stages.push({
+      stage: 3,
+      weightPct: 30,
+      triggerCondition: wBottom === 1 ? 'W 반등 저점 (이미 확인)' : 'W 반등 저점 또는 -10% 추가 하락',
+      triggerPrice: price ? round(price * 0.9) : undefined,
+      status: wBottom === 1 ? 'ready' : 'pending',
+    });
+    if (sma200) { stopPrice = round(sma200 * 0.85); stopCond = '200DMA × 0.85 이탈'; }
+    if (price) { takePrice = round(price * 1.2); takeCond = '+20% 수익 또는 15년 채널 상단 터치'; }
+  } else if (signal.signal === 'BUY') {
+    action = 'SCALE_IN';
+    reason = `BUY (${signal.conditionsMet}/${signal.conditionsTotal}) — 1차만 즉시, 2·3차 조건 대기`;
+    stages.push({ stage: 1, weightPct: 50, triggerCondition: '현재가에서 1차 진입', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: 30, triggerCondition: '이격도 -20% 도달 시', status: 'pending' });
+    stages.push({ stage: 3, weightPct: 20, triggerCondition: 'W 반등 저점 확인 시', status: 'pending' });
+    if (sma200) { stopPrice = round(sma200 * 0.9); stopCond = '200DMA × 0.90 이탈'; }
+  } else if (signal.signal === 'REDUCE') {
+    action = 'TAKE_PROFIT';
+    reason = 'REDUCE — 보유분 일부 익절';
+    stages.push({ stage: 1, weightPct: 30, triggerCondition: '현재가에서 30% 익절', status: 'ready' });
+    if (channelPos !== null && channelPos >= 95) { takeCond = '15년 채널 상단 도달 — 저항 확정'; }
+    else if (monthPos !== null && monthPos >= 95) { takeCond = '월봉 12개월 고점 근처'; }
+    else takeCond = '모멘텀 둔화';
+  } else if (signal.signal === 'SELL') {
+    action = 'EXIT';
+    reason = 'SELL — 구조적 위험, 전량 청산';
+    stages.push({ stage: 1, weightPct: 100, triggerCondition: '전량 청산', status: 'ready' });
+  } else if (above200 === 0 && icsa !== null && icsa >= 300000) {
+    action = 'AVOID';
+    reason = '200DMA 하회 + 실업수당 30만 초과 — 구조적 위험 구간';
+  } else {
+    action = 'HOLD';
+    reason = `HOLD (${signal.conditionsMet}/${signal.conditionsTotal}) — 진입 트리거 미충족, VIX ${vix?.toFixed(1) ?? '?'}`;
+  }
+
+  return {
+    asset: 'NASDAQ',
+    action,
+    actionLabel: actionLabel(action),
+    currentPrice: price,
+    targetAllocationPct: alloc,
+    stages,
+    stopLoss: { price: stopPrice, condition: stopCond || '— ' },
+    takeProfit: { price: takePrice, condition: takeCond || '— ' },
+    validityDays: 45,
+    primaryReason: reason,
+  };
+}
+
+/** GOLD 플레이북 — 피보나치·200DMA·DXY */
+function goldPlan(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
+  signal: AssetSignal,
+  alloc: number,
+): ExecutionPlan {
+  const price = vRaw(raw, 'GOLD');
+  const sma200 = vDer(derived, 'GOLD_SMA200');
+  const fib382 = vDer(derived, 'GOLD_FIB_382');
+  const fib500 = vDer(derived, 'GOLD_FIB_500');
+  const fib618 = vDer(derived, 'GOLD_FIB_618');
+  const goldZone = vDer(derived, 'GOLD_FIB_ZONE');
+
+  let action: ExecutionAction = 'HOLD';
+  let reason = '조건 대기';
+  const stages: ExecutionStage[] = [];
+  let stopPrice: number | null = null;
+  let stopCond = '';
+  let takePrice: number | null = null;
+  let takeCond = '';
+
+  if (signal.signal === 'STRONG_BUY') {
+    action = 'BUY_NOW';
+    reason = `STRONG_BUY — 실질금리/DXY/CB매수 3축 이상 충족`;
+    stages.push({ stage: 1, weightPct: 40, triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: 30, triggerCondition: 'FIB 0.382 되돌림 시', triggerPrice: fib382 ?? undefined, status: 'pending' });
+    stages.push({ stage: 3, weightPct: 30, triggerCondition: 'FIB 0.5 or 0.618 도달 시', triggerPrice: fib500 ?? undefined, status: 'pending' });
+    if (sma200) { stopPrice = round(sma200 * 0.9); stopCond = '200DMA × 0.90 이탈 (실질금리 급등 시)'; }
+  } else if (signal.signal === 'BUY') {
+    action = 'SCALE_IN';
+    reason = `BUY — 실질금리 하락 또는 DXY 약세 확인`;
+    stages.push({ stage: 1, weightPct: 60, triggerCondition: '현재가 또는 FIB 0.382', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: 40, triggerCondition: 'FIB 0.5 도달 + DXY 약세', triggerPrice: fib500 ?? undefined, status: 'pending' });
+    if (sma200) { stopPrice = round(sma200 * 0.92); stopCond = '200DMA × 0.92 이탈'; }
+  } else if (signal.signal === 'REDUCE') {
+    action = 'TAKE_PROFIT';
+    reason = '실질금리 상승 또는 DXY 강세 — 단기 익절';
+    stages.push({ stage: 1, weightPct: 30, triggerCondition: '부분 익절 30%', status: 'ready' });
+  } else if (goldZone === 3) {
+    action = 'BUY_NOW';
+    reason = 'FIB 0.618 하회 강한 바닥권 — 분할매수 적기';
+    stages.push({ stage: 1, weightPct: 50, triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: 50, triggerCondition: '추가 하락 -3% 시', status: 'pending' });
+  } else {
+    action = 'HOLD';
+    reason = 'HOLD — 진입 조건 미형성';
+  }
+
+  return {
+    asset: 'GOLD',
+    action,
+    actionLabel: actionLabel(action),
+    currentPrice: price,
+    targetAllocationPct: alloc,
+    stages,
+    stopLoss: { price: stopPrice, condition: stopCond || '— ' },
+    takeProfit: { price: takePrice, condition: takeCond || '— ' },
+    validityDays: 60,
+    primaryReason: reason,
+  };
+}
+
+/** KOSPI 플레이북 — 환율 게이트·외국인 수급·W반등 */
+function kospiPlan(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
+  signal: AssetSignal,
+  alloc: number,
+): ExecutionPlan {
+  const price = vRaw(raw, 'KOSPI');
+  const sma200 = vDer(derived, 'KOSPI_SMA200');
+  const fxGreen = vDer(derived, 'KRW_FX_GREEN');
+  const fxRed = vDer(derived, 'KRW_FX_RED');
+  const foreignStreak = vDer(derived, 'KOSPI_FOREIGN_BUY_STREAK');
+  const foreignSell = vDer(derived, 'KOSPI_FOREIGN_SELL_STREAK');
+  const wBottom = vDer(derived, 'KOSPI_W_BOTTOM');
+  const atm = vDer(derived, 'KOSPI_ATM_WARNING');
+
+  let action: ExecutionAction = 'HOLD';
+  let reason = '조건 대기';
+  const stages: ExecutionStage[] = [];
+  let stopPrice: number | null = null;
+  let stopCond = '';
+  let takeCond = '';
+
+  if (fxRed === 1 && signal.signal !== 'STRONG_BUY') {
+    action = 'AVOID';
+    reason = '환율 1500 레드 게이트 — 외국인 매도 압력 임계';
+  } else if (signal.signal === 'STRONG_BUY' || (signal.signal === 'BUY' && wBottom === 1)) {
+    action = 'BUY_NOW';
+    reason = wBottom === 1 ? 'W 반등 확정 — 영상5 3차 매수 트리거' : 'STRONG_BUY 조건 충족';
+    stages.push({ stage: 1, weightPct: 50, triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: 30, triggerCondition: '환율 1470 하단 + 외국인 매수 지속', status: fxGreen === 1 ? 'ready' : 'pending' });
+    stages.push({ stage: 3, weightPct: 20, triggerCondition: 'W 반등 저점 또는 거래량 확인', status: wBottom === 1 ? 'triggered' : 'pending' });
+    if (sma200) { stopPrice = round(sma200 * 0.92); stopCond = '200DMA × 0.92 이탈 또는 환율 1500+ 재진입'; }
+    takeCond = '추세선 이탈 또는 월봉 소진 경고';
+  } else if (signal.signal === 'BUY') {
+    action = 'SCALE_IN';
+    reason = 'BUY — 환율·외국인 수급 우호, 분할 진입';
+    stages.push({ stage: 1, weightPct: 50, triggerCondition: '현재가에서 1차', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: 30, triggerCondition: '환율 1470 이하 + 외국인 5일 연속 매수', status: fxGreen === 1 && foreignStreak !== null && foreignStreak >= 5 ? 'ready' : 'pending' });
+    stages.push({ stage: 3, weightPct: 20, triggerCondition: 'W 반등 또는 강한 하락', status: 'pending' });
+    if (sma200) { stopPrice = round(sma200 * 0.95); stopCond = '200DMA × 0.95 이탈'; }
+  } else if (signal.signal === 'REDUCE' || signal.signal === 'SELL') {
+    action = signal.signal === 'SELL' ? 'EXIT' : 'TAKE_PROFIT';
+    reason = signal.signal === 'SELL' ? 'SELL — 환율 1500+ AND 200DMA 하회 극단' : 'REDUCE — 부분 익절';
+    stages.push({ stage: 1, weightPct: signal.signal === 'SELL' ? 100 : 30, triggerCondition: '현재가에서 청산', status: 'ready' });
+  } else if (atm === 1) {
+    action = 'BUY_NOW';
+    reason = 'ATM 과매도 반발 조기신호 (영상5 §112)';
+    stages.push({ stage: 1, weightPct: 30, triggerCondition: '소량 선진입', status: 'ready' });
+  } else if (foreignSell !== null && foreignSell >= 5) {
+    action = 'AVOID';
+    reason = '외국인 5일 연속 순매도 — 구조적 이탈 확인 후 재검토';
+  }
+
+  return {
+    asset: 'KOSPI',
+    action,
+    actionLabel: actionLabel(action),
+    currentPrice: price,
+    targetAllocationPct: alloc,
+    stages,
+    stopLoss: { price: stopPrice, condition: stopCond || '— ' },
+    takeProfit: { price: null, condition: takeCond || '— ' },
+    validityDays: 45,
+    primaryReason: reason,
+  };
+}
+
+/** LEVERAGE 플레이북 — 이격도 -25% / VIX 35 / ICSA 30만 3조건 */
+function leveragePlan(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
+  signal: AssetSignal,
+  alloc: number,
+): ExecutionPlan {
+  const price = vRaw(raw, 'NASDAQ'); // 참조 가격
+  const disparity = vDer(derived, 'NASDAQ_DISPARITY');
+
+  let action: ExecutionAction = 'HOLD';
+  let reason = '3조건 미충족 — 진입 금지';
+  const stages: ExecutionStage[] = [];
+  let stopCond = '';
+  let takeCond = '';
+
+  if (signal.signal === 'BUY') {
+    action = 'BUY_NOW';
+    reason = '이격도 -25% + VIX 35 + ICSA 30만 미만 — 3조건 동시 충족 (영상1 §전략C)';
+    stages.push({ stage: 1, weightPct: 70, triggerCondition: '즉시 진입 (최대 15% 상한)', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: 30, triggerCondition: '-3% 추가 하락 시', status: 'pending' });
+    stopCond = '진입가 -5% (영상1 "짧게")';
+    takeCond = '+20% 수익 또는 이격도 -10% 복귀 시 전량';
+  } else if (signal.signal === 'REDUCE') {
+    action = 'EXIT';
+    reason = '이격도 복귀 또는 시간 만료 — 익절';
+    stages.push({ stage: 1, weightPct: 100, triggerCondition: '즉시 전량 청산', status: 'ready' });
+  } else {
+    action = 'AVOID';
+    reason = `3조건 미충족 (이격도 ${disparity?.toFixed(1) ?? '?'})`;
+  }
+
+  return {
+    asset: 'LEVERAGE',
+    action,
+    actionLabel: actionLabel(action),
+    currentPrice: price,
+    targetAllocationPct: alloc,
+    stages,
+    stopLoss: { price: null, condition: stopCond || '— ' },
+    takeProfit: { price: null, condition: takeCond || '— ' },
+    validityDays: 60,  // 영상1 "2~3개월 짧게"
+    primaryReason: reason,
+  };
+}
+
+/** 단순 자산(SILVER/COPPER) 플레이북 — signal 기반 generic */
+function genericAssetPlan(
+  asset: string,
+  raw: Record<string, MarketDataPoint>,
+  signal: AssetSignal,
+  alloc: number,
+  rawKey: string,
+): ExecutionPlan {
+  const price = vRaw(raw, rawKey);
+  let action: ExecutionAction = 'HOLD';
+  let reason = `${signal.signal} (${signal.conditionsMet}/${signal.conditionsTotal})`;
+  const stages: ExecutionStage[] = [];
+
+  if (signal.signal === 'STRONG_BUY') {
+    action = 'BUY_NOW';
+    stages.push({ stage: 1, weightPct: 50, triggerCondition: '현재가에서 1차', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: 30, triggerCondition: '-3% 추가 하락 시', status: 'pending' });
+    stages.push({ stage: 3, weightPct: 20, triggerCondition: '-7% 추가 하락 또는 W반등 저점', status: 'pending' });
+    reason = `STRONG_BUY — 메인조건 전부 충족`;
+  } else if (signal.signal === 'BUY') {
+    action = 'SCALE_IN';
+    stages.push({ stage: 1, weightPct: 60, triggerCondition: '현재가에서 1차', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: 40, triggerCondition: '-5% 추가 하락 시', status: 'pending' });
+  } else if (signal.signal === 'REDUCE') {
+    action = 'TAKE_PROFIT';
+    stages.push({ stage: 1, weightPct: 30, triggerCondition: '부분 익절', status: 'ready' });
+  } else if (signal.signal === 'SELL') {
+    action = 'EXIT';
+    stages.push({ stage: 1, weightPct: 100, triggerCondition: '전량 청산', status: 'ready' });
+  }
+
+  return {
+    asset,
+    action,
+    actionLabel: actionLabel(action),
+    currentPrice: price,
+    targetAllocationPct: alloc,
+    stages,
+    stopLoss: { price: null, condition: '— ' },
+    takeProfit: { price: null, condition: '— ' },
+    validityDays: 45,
+    primaryReason: reason,
+  };
+}
+
+export function computeExecutionPlans(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
+  signals: AssetSignal[],
+  allocation: AllocationPlan,
+  _regime: RegimeState,
+): ExecutionPlan[] {
+  const allocMap = allocation.allocations;
+  const plans: ExecutionPlan[] = [];
+
+  for (const sig of signals) {
+    const allocKey = ASSET_ALLOC_KEY[sig.asset];
+    const alloc = allocKey ? allocMap[allocKey] ?? 0 : 0;
+
+    if (sig.asset === 'NASDAQ') plans.push(nasdaqPlan(raw, derived, sig, alloc));
+    else if (sig.asset === 'KOSPI') plans.push(kospiPlan(raw, derived, sig, alloc));
+    else if (sig.asset === 'GOLD') plans.push(goldPlan(raw, derived, sig, alloc));
+    else if (sig.asset === 'LEVERAGE') plans.push(leveragePlan(raw, derived, sig, alloc));
+    else if (sig.asset === 'SILVER') plans.push(genericAssetPlan('SILVER', raw, sig, alloc, 'SILVER'));
+    else if (sig.asset === 'COPPER') plans.push(genericAssetPlan('COPPER', raw, sig, alloc, 'COPPER'));
+    // CASH 는 플레이북 없음 (보조 자산)
+  }
+
+  return plans;
+}

@@ -8,6 +8,7 @@ import { HISTORY_GUARANTEE } from './history-store';
 import { computeAutoManualInputs } from '../collectors/auto-manual';
 import { fetchInsiderSummary } from '../collectors/smart-money';
 import { fetchEconomicCalendar } from '../collectors/calendar';
+import { computeExecutionPlans } from '../engines/execution_plan';
 import { getUSPriceSource } from '../utils/market-hours';
 
 export const DEFAULT_PROFILE: UserProfile = {
@@ -79,6 +80,7 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
   const regime = classifyRegime({ raw, derived, manualInputs: effectiveInputs, smartMoneyScore: smartMoney?.score ?? 0 });
   const signals = computeSignals(raw, derived, regime, effectiveProfile);
   const allocation = computeAllocation(regime.regime, regime.score, signals, derived, raw, effectiveProfile.investmentHorizon);
+  const executionPlans = computeExecutionPlans(raw, derived, signals, allocation, regime);
   const fetchedAt = new Date().toISOString();
 
   return {
@@ -112,6 +114,7 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
       staleness: computeStaleness(raw),
       smartMoney,
       calendar,
+      executionPlans,
     },
   };
 }
