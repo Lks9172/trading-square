@@ -18,6 +18,7 @@ import { MultiTimeframePanel } from "./MultiTimeframePanel";
 import { ExecutionPlanPanel } from "./ExecutionPlanPanel";
 import { LensPanel } from "./LensPanel";
 import { OptionsVolatilityPanel } from "./OptionsVolatilityPanel";
+import { SentimentPanel } from "./SentimentPanel";
 import { formatKstDateTime } from "@/lib/format";
 
 interface Props {
@@ -98,6 +99,8 @@ export function Dashboard({ snapshot }: Props) {
       <MultiTimeframePanel derived={currentSnapshot.derived} />
 
       <OptionsVolatilityPanel raw={currentSnapshot.raw} derived={currentSnapshot.derived} />
+
+      <SentimentPanel raw={currentSnapshot.raw} derived={currentSnapshot.derived} />
 
       <ManualInputsPanel
         initial={manualInputs}
