@@ -26,6 +26,7 @@ const YAHOO_SYMBOLS: Record<string, string> = {
   XLY: 'XLY',
   SOXX: 'SOXX',  // 반도체 ETF (영상2·5 AI·헬륨 반도체 특화)
   SMH: 'SMH',    // 반도체 ETF (더 좁은 대형주 중심)
+  TQQQ: 'TQQQ',  // 2x/3x 레버리지 ETF — 백테스트 leverage 비중 실현 수익률 계산용
   NQ_FUTURES: 'NQ=F',
   ES_FUTURES: 'ES=F',
   // 옵션·변동성 지수 (자산제곱 대시보드 gap 보완)
