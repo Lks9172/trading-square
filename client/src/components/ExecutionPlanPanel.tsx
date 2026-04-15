@@ -136,6 +136,24 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
     [refresh],
   );
 
+  const resetAsset = useCallback(
+    async (asset: string) => {
+      if (!confirm(`${ASSET_LABEL[asset] || asset} 의 집행 기록을 전부 초기화할까요?`)) return;
+      setPendingAsset(`${asset}-reset`);
+      try {
+        await fetch(`/api/execution-plan/tranche/${encodeURIComponent(asset)}`, {
+          method: 'DELETE',
+        });
+        await refresh();
+      } catch {
+        /* noop */
+      } finally {
+        setPendingAsset(null);
+      }
+    },
+    [refresh],
+  );
+
   if (!plans || plans.length === 0) return null;
 
   return (
@@ -197,6 +215,17 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
                   <div className="text-[10px] text-[var(--muted)]">
                     유효 {p.validityDays}일
                   </div>
+                  {executedSet.size > 0 && (
+                    <button
+                      type="button"
+                      disabled={pendingAsset === `${p.asset}-reset`}
+                      onClick={() => resetAsset(p.asset)}
+                      className="mt-1 text-[10px] px-1.5 py-0.5 rounded border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20 disabled:opacity-40"
+                      title="이 자산의 집행 기록 전부 초기화"
+                    >
+                      {pendingAsset === `${p.asset}-reset` ? '…' : '집행 취소'}
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -216,7 +245,8 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
                           checked={executed}
                           readOnly
                           aria-label={`${s.stage}차 집행 상태`}
-                          className="mt-0.5 shrink-0 accent-green-500"
+                          title={executed ? '집행됨' : '미집행 — 우측 집행 버튼 사용'}
+                          className="mt-0.5 shrink-0 accent-green-500 cursor-default"
                         />
                         <span className={`${si.color} shrink-0`} title={si.text}>
                           {si.icon}
