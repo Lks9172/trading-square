@@ -566,6 +566,43 @@ export async function computeDerived(
     }
   }
 
+  // === 은 아웃퍼폼 2조건 복합 (영상2 §금은비 "60~80 이상 + 경기 회복 동반 확인") ===
+  const gsr = d.GOLD_SILVER_RATIO?.value;
+  const ismVal = d.ISM_PROXY?.value;
+  if (gsr !== undefined && gsr !== null && ismVal !== undefined && ismVal !== null) {
+    const highRatio = gsr >= 70;
+    const expansionConfirmed = ismVal >= 50;
+    const setup = highRatio && expansionConfirmed;
+    d.SILVER_OUTPERFORM_SETUP = {
+      name: 'silver_outperform_setup',
+      value: setup ? 1 : 0,
+      date: dt,
+      formula: `금은비 ${gsr.toFixed(1)}(≥70: ${highRatio ? 'Y' : 'N'}) AND ISM ${ismVal.toFixed(1)}(≥50: ${expansionConfirmed ? 'Y' : 'N'}) → 은 아웃퍼폼 구조 (영상2)`,
+    };
+  }
+
+  // === 구리 3조건 강매수 복합 (영상2 §닥터코퍼 ISM + 금구리비 + ICSA 동시) ===
+  const cgr = d.COPPER_GOLD_RATIO?.value;
+  const icsaRaw = val(raw, 'ICSA');
+  if (ismVal !== undefined && ismVal !== null && cgr !== undefined && cgr !== null && icsaRaw !== null) {
+    const ismOk = ismVal >= 50;
+    const cgrOk = cgr > 0.00125;
+    const icsaOk = icsaRaw < 250000;
+    const metCount = [ismOk, cgrOk, icsaOk].filter(Boolean).length;
+    d.COPPER_STRONG_SETUP = {
+      name: 'copper_strong_setup',
+      value: metCount === 3 ? 1 : 0,
+      date: dt,
+      formula: `ISM≥50(${ismOk?'Y':'N'}) + 금구리비>0.00125(${cgrOk?'Y':'N'}) + ICSA<250K(${icsaOk?'Y':'N'}) 동시 → 구리 강매수 복합 플래그 (영상2)`,
+    };
+    d.COPPER_SETUP_COUNT = {
+      name: 'copper_setup_count',
+      value: metCount,
+      date: dt,
+      formula: `구리 강매수 3조건 중 충족 개수 (0~3)`,
+    };
+  }
+
   // === 유가 → CPI 2~3개월 지연 (영상5 §7m7s "유가 하락도 공급망 충격은 2~3개월 뒤 CPI") ===
   // 60일 전 대비 현재 WTI 변화율 → 향후 2~3개월 CPI 지연 반영 방향 프록시.
   // 음수: 유가 하락 → 2~3개월 뒤 CPI 완화 기대

@@ -286,6 +286,10 @@ function silverSignal(
   if (xli !== null && xli > 0) { auxMet++; reasons.push(`XLI 산업재 +${xli.toFixed(1)}% → 경기회복 동반 (보조조건)`); }
   else if (xli !== null) { unmetReasons.push(`XLI 산업재 ${xli.toFixed(1)}% → 경기민감섹터 약세 (보조조건)`); }
 
+  // 영상2 명시적 복합 플래그 (금은비 ≥70 + ISM ≥50) — STRONG_BUY 승격에 참고
+  const outperformSetup = dv(derived, 'SILVER_OUTPERFORM_SETUP');
+  if (outperformSetup === 1) reasons.push('은 아웃퍼폼 2조건 복합 (금은비≥70 + ISM≥50) 충족 — 영상2 명시 (보조조건)');
+
   let signal: Signal;
   if (met === 2 && auxMet >= 2) signal = 'STRONG_BUY';
   else if (met === 2) signal = 'BUY';
@@ -344,6 +348,10 @@ function copperSignal(
   if (xle !== null && xle > 5) { unmetReasons.push(`XLE 에너지 +${xle.toFixed(1)}% → 유가/전쟁 주도 가능성 (보조조건)`); }
 
   if (reasons.length === 0) reasons.push('조건 미충족, 대기');
+
+  // 영상2 명시적 3조건 동시 충족 복합 플래그
+  const strongSetup = dv(derived, 'COPPER_STRONG_SETUP');
+  if (strongSetup === 1) reasons.push('🟢🟢 구리 강매수 3조건 복합 (ISM+금구리비+ICSA) 전부 충족 — 영상2 명시');
 
   let signal: Signal;
   if (met >= 3) signal = 'STRONG_BUY';
