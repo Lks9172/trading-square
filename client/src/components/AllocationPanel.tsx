@@ -43,16 +43,18 @@ interface Props {
 
 export function AllocationPanel({ allocation, overheated }: Props) {
   void overheated; // 향후 과열 배너용 예약 (현재 UI 렌더에는 영향 없음)
-  const entries = Object.entries(allocation.allocations)
-    .filter(([, pct]) => pct > 0)
+  // 전체 자산을 항상 나열 — 0% 자산도 "0%" 라고 명시해야 사용자가
+  // "빠진 건지 / 의도적 0 인지" 판단 가능. 막대는 > 0 만, 리스트는 전체.
+  const allEntries = Object.entries(allocation.allocations)
     .sort((a, b) => b[1] - a[1]);
+  const barEntries = allEntries.filter(([, pct]) => pct > 0);
 
   return (
     <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
       <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">포트폴리오 비중 제안</h3>
 
       <div className="w-full h-5 sm:h-6 rounded-full overflow-hidden flex mb-3 sm:mb-4">
-        {entries.map(([asset, pct]) => (
+        {barEntries.map(([asset, pct]) => (
           <div
             key={asset}
             style={{
@@ -65,18 +67,33 @@ export function AllocationPanel({ allocation, overheated }: Props) {
       </div>
 
       <div className="space-y-1.5 sm:space-y-2">
-        {entries.map(([asset, pct]) => (
-          <div key={asset} className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-              <div
-                className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-sm shrink-0"
-                style={{ backgroundColor: ASSET_COLORS[asset] || "#525252" }}
-              />
-              <span className="text-xs sm:text-sm truncate">{ASSET_LABELS[asset] || asset}</span>
+        {allEntries.map(([asset, pct]) => {
+          const isZero = pct === 0;
+          return (
+            <div
+              key={asset}
+              className={`flex items-center justify-between ${isZero ? "opacity-50" : ""}`}
+            >
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                <div
+                  className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-sm shrink-0"
+                  style={{
+                    backgroundColor: ASSET_COLORS[asset] || "#525252",
+                    opacity: isZero ? 0.3 : 1,
+                  }}
+                />
+                <span className="text-xs sm:text-sm truncate">{ASSET_LABELS[asset] || asset}</span>
+              </div>
+              <span
+                className={`text-xs sm:text-sm font-mono font-semibold shrink-0 ml-2 ${
+                  isZero ? "text-[var(--muted)]" : ""
+                }`}
+              >
+                {pct}%
+              </span>
             </div>
-            <span className="text-xs sm:text-sm font-mono font-semibold shrink-0 ml-2">{pct}%</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-[var(--card-border)] space-y-2">
