@@ -382,11 +382,22 @@ function silverSignal(
   const outperformSetup = dv(derived, 'SILVER_OUTPERFORM_SETUP');
   if (outperformSetup === 1) reasons.push('은 아웃퍼폼 2조건 복합 (금은비≥70 + ISM≥50) 충족 — 영상2 명시 (보조조건)');
 
-  let signal: Signal;
+  // Fix #6(2차 감사): REDUCE 분기 복구 — 기존에는 met=0 이어도 HOLD 만 부여하여 약세 강등이 없었다.
+  //   signalFromScore 로 전환: total=2 기준 {strongBuy:2, buy:1, hold:1, reduce:1, sell:0}.
+  //   여기에 이중 게이트(aux 보강) 유지: 메인 풀 충족 시 aux 2+ → STRONG_BUY 승격,
+  //   메인 1개 + aux 2+ → BUY 승격, aux 0 → BUY 차단 후 HOLD.
+  let signal: Signal = signalFromScore(met, total, {
+    sell: 0,
+    reduce: 1,
+    hold: total - 1, // 2-1=1
+    buy: total,       // 2
+    strongBuy: total, // 2 (기본)
+  });
+  // STRONG_BUY 승격은 aux 2+ 필요 (기존 이중 게이트 유지)
   if (met === 2 && auxMet >= 2) signal = 'STRONG_BUY';
   else if (met === 2) signal = 'BUY';
   else if (met === 1 && auxMet >= 2) { signal = 'BUY'; reasons.push('메인 1개 + 보조 2개 충족 → BUY 승격 (보조조건)'); }
-  else signal = 'HOLD';
+  // met=0 이면 signalFromScore 결과(REDUCE 또는 SELL) 유지.
 
   if (auxMet === 0 && signal === 'BUY') {
     signal = 'HOLD';
@@ -445,10 +456,16 @@ function copperSignal(
   const strongSetup = dv(derived, 'COPPER_STRONG_SETUP');
   if (strongSetup === 1) reasons.push('🟢🟢 구리 강매수 3조건 복합 (ISM+금구리비+ICSA) 전부 충족 — 영상2 명시');
 
-  let signal: Signal;
-  if (met >= 3) signal = 'STRONG_BUY';
-  else if (met >= 2) signal = 'BUY';
-  else signal = 'HOLD';
+  // Fix #6(2차 감사): REDUCE 분기 복구 — 기존 `met≥3 STRONG_BUY / met===2 BUY / else HOLD` 는
+  //   met=0(3조건 모두 미충족) 에서도 HOLD 로 약세 강등이 없었다. signalFromScore 로 통일:
+  //   total=3 기준 {strongBuy:3, buy:2, hold:1, reduce:0, sell:0} — 기존 BUY/STRONG_BUY 분기는 보존.
+  let signal: Signal = signalFromScore(met, total, {
+    sell: 0,
+    reduce: 0,
+    hold: 1,
+    buy: 2,
+    strongBuy: 3,
+  });
 
   return {
     asset: 'COPPER',
