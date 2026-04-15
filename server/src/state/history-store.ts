@@ -73,55 +73,288 @@ function buildRawForDate(date: string, histories: Record<string, HistoryPoint[]>
 }
 
 /**
- * 일자별 NASDAQ 파생지표를 저장된 히스토리에서 재구성.
- * computeDerived() 는 live Yahoo/FRED 를 fetch 하므로 과거 일자 기준 정확한 값을 줄 수 없다.
- * 이 헬퍼는 저장된 NASDAQ 히스토리(readHistory('yahoo','NASDAQ')) 만 사용해 date 시점의
- * SMA200/DISPARITY/DRAWDOWN/ABOVE_200DMA 를 계산해 후속 덮어쓰기용으로 반환.
+ * date 시점 시계열로 200DMA 기반 파생지표 (SMA200/DISPARITY/DRAWDOWN/ABOVE_200DMA) 와
+ * ±15% 구간 연속 일수(DISPARITY_STREAK_OVERHEATED/OVERSOLD) + CHASE_WARNING 까지 재구성.
+ *
+ * derived 의 라이브 동등 키 집합:
+ *   {PREFIX}_SMA200, {PREFIX}_DISPARITY, {PREFIX}_DRAWDOWN, {PREFIX}_ABOVE_200DMA,
+ *   {PREFIX}_DISPARITY_STREAK_OVERHEATED, {PREFIX}_DISPARITY_STREAK_OVERSOLD,
+ *   {PREFIX}_CHASE_WARNING.
  */
-function reconstructDateSpecificDerived(
+function reconstruct200DmaSuite(
   date: string,
-  nasdaqHistory: HistoryPoint[],
+  history: HistoryPoint[],
+  prefix: 'NASDAQ' | 'KOSPI',
 ): Record<string, DerivedIndicator> {
   const derived: Record<string, DerivedIndicator> = {};
-  const eligible = nasdaqHistory.filter((p) => dateToTime(p.date) <= dateToTime(date));
-  if (eligible.length >= 200) {
-    const latest200 = eligible.slice(-200);
-    const sma200 = latest200.reduce((sum, p) => sum + p.value, 0) / latest200.length;
-    const current = eligible[eligible.length - 1].value;
-    const allTimeHigh = Math.max(...eligible.map((p) => p.value));
-    derived.NASDAQ_SMA200 = { name: 'nasdaq_sma200', value: sma200, date, formula: 'SMA200' };
-    derived.NASDAQ_DISPARITY = { name: 'nasdaq_disparity_200', value: ((current - sma200) / sma200) * 100, date, formula: '(P-SMA)/SMA*100' };
-    derived.NASDAQ_DRAWDOWN = { name: 'nasdaq_drawdown', value: ((current - allTimeHigh) / allTimeHigh) * 100, date, formula: '(P-ATH)/ATH*100' };
-    derived.NASDAQ_ABOVE_200DMA = { name: 'nasdaq_above_200dma', value: current > sma200 ? 1 : 0, date, formula: 'P>SMA200' };
+  const eligible = history.filter((p) => dateToTime(p.date) <= dateToTime(date));
+  if (eligible.length < 200) return derived;
+
+  const latest200 = eligible.slice(-200);
+  const sma200 = latest200.reduce((sum, p) => sum + p.value, 0) / latest200.length;
+  const current = eligible[eligible.length - 1].value;
+  const allTimeHigh = Math.max(...eligible.map((p) => p.value));
+  const lower = prefix.toLowerCase();
+
+  derived[`${prefix}_SMA200`] = { name: `${lower}_sma200`, value: sma200, date, formula: 'SMA200' };
+  derived[`${prefix}_DISPARITY`] = {
+    name: `${lower}_disparity_200`,
+    value: ((current - sma200) / sma200) * 100,
+    date,
+    formula: '(P-SMA)/SMA*100',
+  };
+  derived[`${prefix}_DRAWDOWN`] = {
+    name: `${lower}_drawdown`,
+    value: ((current - allTimeHigh) / allTimeHigh) * 100,
+    date,
+    formula: '(P-ATH)/ATH*100',
+  };
+  derived[`${prefix}_ABOVE_200DMA`] = {
+    name: `${lower}_above_200dma`,
+    value: current > sma200 ? 1 : 0,
+    date,
+    formula: 'P>SMA200',
+  };
+
+  // 이격률 ±15% 연속 유지일 (live derived.ts 의 computeDisparityStreak 동일 로직).
+  // 인덱스 0=최신 가정으로 작성된 라이브 함수 시그니처에 맞춰 reverse 시리즈 사용.
+  const closesNewestFirst = [...eligible.map((p) => p.value)].reverse();
+  let overStreak = 0;
+  let underStreak = 0;
+  for (const price of closesNewestFirst) {
+    const disp = ((price - sma200) / sma200) * 100;
+    if (disp >= 15) overStreak += 1;
+    else break;
+  }
+  for (const price of closesNewestFirst) {
+    const disp = ((price - sma200) / sma200) * 100;
+    if (disp <= -15) underStreak += 1;
+    else break;
+  }
+  if (overStreak > 0) {
+    derived[`${prefix}_DISPARITY_STREAK_OVERHEATED`] = {
+      name: `${lower}_disparity_streak_overheated`,
+      value: overStreak,
+      date,
+      formula: '이격률 ≥ +15% 연속 유지일 (200DMA 기준)',
+    };
+  }
+  if (underStreak > 0) {
+    derived[`${prefix}_DISPARITY_STREAK_OVERSOLD`] = {
+      name: `${lower}_disparity_streak_oversold`,
+      value: underStreak,
+      date,
+      formula: '이격률 ≤ -15% 연속 유지일 (200DMA 기준)',
+    };
+  }
+  if (overStreak >= 20 || underStreak >= 20) {
+    derived[`${prefix}_CHASE_WARNING`] = {
+      name: `${lower}_chase_warning`,
+      value: 1,
+      date,
+      formula: '이격률 ±15% 구간 20일 이상 지속 → 추격/투매 경고',
+    };
   }
   return derived;
 }
 
 /**
- * Fix #1+#2(2차 감사): 백필 derived 경로를 라이브 computeDerived 로 수렴.
+ * date 시점의 HYG/IEF 비율, 252일 z-score, CREDIT_STRESS_FLAG 재구성.
+ * HY OAS(BAMLH0A0HYM2) 가 raw 에 있으면 600bp 임계 OR z<=-2 로 flag 결정.
+ */
+function reconstructCreditStress(
+  date: string,
+  hygHist: HistoryPoint[],
+  iefHist: HistoryPoint[],
+  hyOasRawValue: number | undefined,
+): Record<string, DerivedIndicator> {
+  const derived: Record<string, DerivedIndicator> = {};
+  const target = dateToTime(date);
+
+  // HY OAS bp 환산 (라이브 로직과 동일).
+  let hyOasBp: number | null = null;
+  if (hyOasRawValue !== undefined) {
+    hyOasBp = hyOasRawValue > 50 ? hyOasRawValue : hyOasRawValue * 100;
+    derived.CREDIT_HY_OAS_BP = {
+      name: 'credit_hy_oas_bp',
+      value: parseFloat(hyOasBp.toFixed(1)),
+      date,
+      formula: 'BAMLH0A0HYM2 (ICE BofA US HY OAS) — bp 환산',
+    };
+  }
+
+  // HYG/IEF 비율 시리즈를 date 까지로 잘라 252일 z-score 계산.
+  const iefMap = new Map<string, number>();
+  for (const p of iefHist) {
+    if (dateToTime(p.date) <= target) iefMap.set(p.date, p.value);
+  }
+  const ratios: number[] = [];
+  let latestRatio: number | null = null;
+  for (const h of hygHist) {
+    if (dateToTime(h.date) > target) break;
+    const ief = iefMap.get(h.date);
+    if (ief && ief > 0 && h.value > 0) {
+      const r = h.value / ief;
+      ratios.push(r);
+      latestRatio = r;
+    }
+  }
+
+  let hygIefZ: number | null = null;
+  if (latestRatio !== null) {
+    derived.CREDIT_HYG_IEF_RATIO = {
+      name: 'credit_hyg_ief_ratio',
+      value: parseFloat(latestRatio.toFixed(4)),
+      date,
+      formula: 'Yahoo HYG 종가 / IEF 종가',
+    };
+    if (ratios.length >= 252) {
+      const window = ratios.slice(-252);
+      const mean = window.reduce((s, v) => s + v, 0) / window.length;
+      const variance = window.reduce((s, v) => s + (v - mean) ** 2, 0) / window.length;
+      const stdev = Math.sqrt(variance);
+      if (stdev > 0) {
+        hygIefZ = (latestRatio - mean) / stdev;
+        derived.CREDIT_HYG_IEF_ZSCORE = {
+          name: 'credit_hyg_ief_zscore',
+          value: parseFloat(hygIefZ.toFixed(2)),
+          date,
+          formula: '(HYG/IEF 현재 - 252일 평균) / 252일 표준편차',
+        };
+      }
+    }
+  }
+
+  if (hyOasBp !== null || hygIefZ !== null) {
+    const stressHy = hyOasBp !== null && hyOasBp >= 600;
+    const stressZ = hygIefZ !== null && hygIefZ <= -2;
+    derived.CREDIT_STRESS_FLAG = {
+      name: 'credit_stress_flag',
+      value: stressHy || stressZ ? 1 : 0,
+      date,
+      formula: `HY OAS ≥ 600bp(${stressHy ? 'Y' : 'N'}) OR HYG/IEF z ≤ -2(${stressZ ? 'Y' : 'N'})`,
+    };
+  }
+  return derived;
+}
+
+/**
+ * date 시점의 WM2NS YoY%, 음→양 교차 후 경과일 재구성.
+ * 라이브 derived.ts === 동일 시그니처: M2_YOY_PCT, M2_YOY_DELTA_3M, M2_YOY_CROSS_DAYS.
+ */
+function reconstructM2Yoy(
+  date: string,
+  m2Hist: HistoryPoint[],
+): Record<string, DerivedIndicator> {
+  const derived: Record<string, DerivedIndicator> = {};
+  const target = dateToTime(date);
+  const eligible = m2Hist.filter((p) => dateToTime(p.date) <= target);
+  if (eligible.length < 60) return derived;
+
+  const yoySeries: { date: string; yoy: number }[] = [];
+  for (let i = 0; i < eligible.length; i += 1) {
+    const cur = eligible[i];
+    const targetDt = new Date(cur.date);
+    targetDt.setFullYear(targetDt.getFullYear() - 1);
+    const targetMs = targetDt.getTime();
+    let past: { date: string; value: number } | null = null;
+    for (let j = i - 1; j >= 0; j -= 1) {
+      if (new Date(eligible[j].date).getTime() <= targetMs) {
+        past = eligible[j];
+        break;
+      }
+    }
+    if (past && past.value > 0) {
+      yoySeries.push({ date: cur.date, yoy: (cur.value / past.value - 1) * 100 });
+    }
+  }
+  if (yoySeries.length === 0) return derived;
+  const latest = yoySeries[yoySeries.length - 1];
+  derived.M2_YOY_PCT = {
+    name: 'm2_yoy_pct',
+    value: parseFloat(latest.yoy.toFixed(2)),
+    date,
+    formula: 'WM2NS 현재 / 52주 전 - 1 (%)',
+  };
+  if (yoySeries.length >= 14) {
+    const past3m = yoySeries[yoySeries.length - 14];
+    derived.M2_YOY_DELTA_3M = {
+      name: 'm2_yoy_delta_3m',
+      value: parseFloat((latest.yoy - past3m.yoy).toFixed(2)),
+      date,
+      formula: 'M2 YoY 현재 - 약 13주 전 YoY (포인트)',
+    };
+  }
+  if (latest.yoy > 0) {
+    let crossDate: string | null = null;
+    for (let i = yoySeries.length - 1; i > 0; i -= 1) {
+      const prev = yoySeries[i - 1];
+      const cur = yoySeries[i];
+      if (prev.yoy < 0 && cur.yoy >= 0) {
+        crossDate = cur.date;
+        break;
+      }
+    }
+    if (crossDate) {
+      const daysElapsed = Math.floor(
+        (new Date(latest.date).getTime() - new Date(crossDate).getTime()) / 86400000,
+      );
+      derived.M2_YOY_CROSS_DAYS = {
+        name: 'm2_yoy_cross_days',
+        value: daysElapsed,
+        date,
+        formula: `WM2NS YoY 음→양 교차(${crossDate}) 이후 경과일`,
+      };
+    } else {
+      derived.M2_YOY_CROSS_DAYS = {
+        name: 'm2_yoy_cross_days',
+        value: null,
+        date,
+        formula: '히스토리 내 음→양 교차 미확인',
+      };
+    }
+  } else {
+    derived.M2_YOY_CROSS_DAYS = {
+      name: 'm2_yoy_cross_days',
+      value: null,
+      date,
+      formula: '현재 YoY 음수 — 교차 미발생',
+    };
+  }
+  return derived;
+}
+
+/**
+ * Fix(3차 감사): cachedLiveDerived 과거 일자 오염 차단.
  *
- * 1차 감사에서 추가된 STAGFLATION/BOND_VIGILANTE/OVERHEATED/CREDIT_STRESS_FLAG/PSYCH_SUBSCORE/MTF 등이
- * 히스토리에 반영되지 않던 원인: buildDerivedForDate 가 NASDAQ 4개 필드 + 2개 비율만 채웠기 때문.
+ * 변경 전: 라이브 derived 를 shallow clone 후 NASDAQ/비율만 덮어써 STAGFLATION/MTF/PSYCH 등
+ * 11개+ 단발 snapshot 지표가 1,258일 전체에 오늘 값으로 주입 → 과거 신호 왜곡.
  *
- * 해법: 히스토리에서 raw 를 재구성 → computeDerived(raw) 직접 호출해 라이브 경로와 **동일 시그니처** 로
- * 풀 derived 획득. 그 위에 reconstructDateSpecificDerived 로 NASDAQ 날짜별 재계산치를 덮어써 일자별
- * 변동이 보존되도록 한다.
- *
- * 성능 주의: computeDerived 는 내부에서 Yahoo/FRED 를 live fetch 한다. 10년 백필 × 전체 재계산은
- * 매우 무거우므로 **실행 경로 당 한 번만** 호출하고 (모듈 스코프 캐시) 자산 가격 비율(GSR/CGR/REAL_YIELD)
- * 과 NASDAQ 날짜 의존 필드만 raw/date 로 오버라이드해 재사용한다.
- * 캐시 로직은 refreshComputedHistories 안에서 지역 상수로 구현.
+ * 변경 후:
+ * - todayIso === date 일 때만 cachedLiveDerived 를 전체 사용 (오늘 스냅샷은 라이브와 동일).
+ * - 과거 일자에는 cachedLiveDerived 를 사용하지 않고 빈 맵에서 시작.
+ * - date-aware 재계산 가능한 지표 (NASDAQ/KOSPI 200DMA suite, 가격 비율, HYG/IEF/CREDIT,
+ *   M2 YoY, USDKRW 채널 등) 만 채움. 단발 snapshot 지표 (STAGFLATION/BOND_VIGILANTE/
+ *   OVERHEATED/MTF/PSYCH_SUBSCORE/RRP_DIRECTION/GLOBAL_M2_PROXY/SECTOR_xxx/
+ *   SMART_MONEY_xxx/KRX_xxx/FISCAL_STRESS 등) 는 명시적으로 null 유지 → signals.ts 가 null 가드로 깔끔히 스킵.
  */
 export async function recomputeFullDerivedForDate(
   date: string,
   raw: Record<string, MarketDataPoint>,
   nasdaqHistory: HistoryPoint[],
   cachedLiveDerived: Record<string, DerivedIndicator>,
+  ctx?: {
+    todayIso: string;
+    kospiHistory: HistoryPoint[];
+    hygHistory: HistoryPoint[];
+    iefHistory: HistoryPoint[];
+    m2Wm2nsHistory: HistoryPoint[];
+  },
 ): Promise<Record<string, DerivedIndicator>> {
-  // 라이브 derived 를 shallow clone — 과거 일자별로 NASDAQ·비율만 덮어쓰고 나머지는 최신 상태 유지.
-  // (MTF/STAGFLATION/PSYCH_SUBSCORE 등은 과거 정확한 값을 복원하기 어려워 현 시점 값으로 합의.
-  //  라이브와 **같은 시그니처·키 집합** 을 히스토리에 남기는 것이 Fix #1+#2 의 목적.)
-  const derived: Record<string, DerivedIndicator> = { ...cachedLiveDerived };
+  // 오늘 날짜 anchor 면 라이브 derived 를 그대로 사용 (NEW: 단일 스냅샷 신선도 보존).
+  // 그 외 모든 과거 일자는 빈 맵에서 시작 — cachedLiveDerived 를 일부러 무시한다.
+  const isToday = ctx?.todayIso === date;
+  const derived: Record<string, DerivedIndicator> = isToday ? { ...cachedLiveDerived } : {};
 
   // 가격 비율 — raw 가 있으면 date 시점으로 재계산.
   const dgs10 = raw.DGS10?.value;
@@ -139,9 +372,29 @@ export async function recomputeFullDerivedForDate(
     derived.COPPER_GOLD_RATIO = { name: 'copper_gold_ratio', value: copper / gold, date, formula: 'COPPER / GOLD' };
   }
 
-  // NASDAQ 날짜 의존 필드 — 저장된 히스토리로 as-of-date 재계산 + 덮어쓰기.
-  const dateSpecific = reconstructDateSpecificDerived(date, nasdaqHistory);
-  for (const [k, v] of Object.entries(dateSpecific)) derived[k] = v;
+  // NASDAQ 날짜 의존 필드 + 이격 streak.
+  for (const [k, v] of Object.entries(reconstruct200DmaSuite(date, nasdaqHistory, 'NASDAQ'))) {
+    derived[k] = v;
+  }
+
+  if (ctx) {
+    // KOSPI 200DMA suite (오늘이 아닌 일자는 위 빈 맵에서 시작했으므로 여기서 채움).
+    if (ctx.kospiHistory.length >= 200) {
+      for (const [k, v] of Object.entries(reconstruct200DmaSuite(date, ctx.kospiHistory, 'KOSPI'))) {
+        derived[k] = v;
+      }
+    }
+    // 크레딧 스트레스 (HY OAS + HYG/IEF z-score).
+    for (const [k, v] of Object.entries(
+      reconstructCreditStress(date, ctx.hygHistory, ctx.iefHistory, raw.BAMLH0A0HYM2?.value),
+    )) {
+      derived[k] = v;
+    }
+    // M2 YoY 방향 전환.
+    for (const [k, v] of Object.entries(reconstructM2Yoy(date, ctx.m2Wm2nsHistory))) {
+      derived[k] = v;
+    }
+  }
 
   return derived;
 }
@@ -157,10 +410,17 @@ function signalValue(signal: string) {
 export async function refreshComputedHistories() {
   const histories: Record<string, HistoryPoint[]> = {};
   const keys = ['NASDAQ', 'GOLD', 'SILVER', 'COPPER', 'SP500', 'WTI', 'USDKRW', 'DXY', 'DGS10', 'T10YIE', 'T10Y2Y', 'VIXCLS', 'BAMLH0A0HYM2', 'STLFSI4', 'ICSA', 'UNRATE'];
+  const yahooKeys = new Set(['NASDAQ', 'GOLD', 'SILVER', 'COPPER', 'SP500', 'WTI', 'USDKRW', 'DXY']);
   for (const key of keys) {
-    if (['NASDAQ', 'GOLD', 'SILVER', 'COPPER', 'SP500', 'WTI', 'USDKRW', 'DXY'].includes(key)) histories[`yahoo:${key}`] = await readHistory('yahoo', key);
+    if (yahooKeys.has(key)) histories[`yahoo:${key}`] = await readHistory('yahoo', key);
     else histories[`fred:${key}`] = await readHistory('fred', key);
   }
+
+  // Fix(3차 감사): date-aware 재계산 확장에 필요한 보조 히스토리. 없으면 빈 배열 → 해당 지표 null.
+  const kospiHistory = await readHistory('yahoo', 'KOSPI');
+  const hygHistory = await readHistory('yahoo', 'HYG');
+  const iefHistory = await readHistory('yahoo', 'IEF');
+  const m2Wm2nsHistory = await readHistory('fred', 'WM2NS');
 
   const base = histories['yahoo:NASDAQ'] || [];
   const computed: Record<string, HistoryPoint[]> = {
@@ -187,9 +447,26 @@ export async function refreshComputedHistories() {
     cachedLiveDerived = {};
   }
 
+  // 커버리지 통계 — 최근 1년 평균 재구성 키 수 점검 용도.
+  const todayIso = new Date().toISOString().split('T')[0];
+  const oneYearAgoMs = Date.now() - 365 * 86400 * 1000;
+  let recentCoveragePoints = 0;
+  let recentCoverageSum = 0;
+
   for (const anchor of base) {
     const raw = buildRawForDate(anchor.date, histories);
-    const derived = await recomputeFullDerivedForDate(anchor.date, raw, base, cachedLiveDerived);
+    const derived = await recomputeFullDerivedForDate(anchor.date, raw, base, cachedLiveDerived, {
+      todayIso,
+      kospiHistory,
+      hygHistory,
+      iefHistory,
+      m2Wm2nsHistory,
+    });
+    if (dateToTime(anchor.date) >= oneYearAgoMs) {
+      const nonNullKeys = Object.values(derived).filter((d) => d.value !== null).length;
+      recentCoverageSum += nonNullKeys;
+      recentCoveragePoints += 1;
+    }
     // smartMoneyScore: 히스토리에는 smart-money 시계열이 없으므로 0 을 명시적으로 전달.
     //   라이브 경로와 동일 시그니처 유지가 이 Fix 의 핵심.
     const regime = classifyRegime({
@@ -216,6 +493,14 @@ export async function refreshComputedHistories() {
   await writeHistory('signal', 'GOLD', computed.GOLD);
   await writeHistory('signal', 'SILVER', computed.SILVER);
   await writeHistory('signal', 'COPPER', computed.COPPER);
+
+  if (recentCoveragePoints > 0) {
+    const avg = recentCoverageSum / recentCoveragePoints;
+    console.log(
+      `[history] 재구성 커버리지: 최근 1년 평균 ${avg.toFixed(1)} non-null derived keys/일자 (${recentCoveragePoints}일 기준). ` +
+      `단발 snapshot 지표 (STAGFLATION/MTF/PSYCH/RRP_DIRECTION/SECTOR_*/KRX_* 등) 는 정책상 null 유지.`
+    );
+  }
 }
 
 export async function readHistory(source: string, key: string): Promise<HistoryPoint[]> {
