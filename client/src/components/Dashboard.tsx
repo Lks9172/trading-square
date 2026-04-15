@@ -16,6 +16,7 @@ import { SmartMoneyPanel } from "./SmartMoneyPanel";
 import { CalendarPanel } from "./CalendarPanel";
 import { MultiTimeframePanel } from "./MultiTimeframePanel";
 import { ExecutionPlanPanel } from "./ExecutionPlanPanel";
+import { LensPanel } from "./LensPanel";
 import { OptionsVolatilityPanel } from "./OptionsVolatilityPanel";
 import { formatKstDateTime } from "@/lib/format";
 
@@ -75,6 +76,8 @@ export function Dashboard({ snapshot }: Props) {
       </header>
 
       <RegimeHeader regime={currentSnapshot.regime} />
+
+      <LensPanel raw={currentSnapshot.raw} derived={currentSnapshot.derived} meta={currentSnapshot.meta} />
 
       <RealtimePanel raw={currentSnapshot.raw} derived={currentSnapshot.derived} timestamp={currentSnapshot.timestamp} usPriceSource={currentSnapshot?.meta?.usPriceSource} />
 
