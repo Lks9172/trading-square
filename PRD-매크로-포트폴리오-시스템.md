@@ -1273,6 +1273,41 @@ client/src/app/api/execution-plan/tranche/[asset]/route.ts
 
 ---
 
+### 6.8.3 API 계약 명시 (3차 감사 Fix #5)
+
+GET `/api/execution-plan/tranche` 응답의 `summary` 필드는 **항상 배열** 이며 각 원소는 `AssetTrancheSummary` 구조를 따른다.
+
+**응답 스키마:**
+
+```typescript
+interface AssetTrancheSummary {
+  asset: string;                 // 자산명 (NASDAQ, KOSPI, GOLD, ...)
+  executedStages: number[];      // 집행된 단계 배열 (e.g., [1, 2])
+  nextStage: number | null;      // 다음 예정 단계
+  latestRegime: string | null;   // 마지막 집행 시 국면
+  latestExecutedAt: string | null; // 최신 집행 시각 (ISO 8601)
+}
+
+GET /api/execution-plan/tranche
+Response: {
+  entries: TrancheEntry[],
+  summary: AssetTrancheSummary[]  // ← 항상 Array<T>, null 아님
+}
+```
+
+**방어적 파싱 (클라이언트):**
+
+UI에서 summary 를 사용할 때 Array.isArray() + asset 타입 가드로 null/비배열 fallback 처리:
+
+```typescript
+const summary = response.summary ?? [];
+const validSummary = Array.isArray(summary) 
+  ? summary.filter(s => typeof s.asset === 'string')
+  : [];
+```
+
+---
+
 ## 6.9 캔들 형태 분석 (Candle Shape Analysis)
 
 영상 3·4·5 "월봉 → 주봉 → 일봉" 위계적 판단을 자동화한다.
@@ -1336,6 +1371,54 @@ client/src/app/api/execution-plan/tranche/[asset]/route.ts
 
 약 50개 이상의 파생지표를 자동 계산해 국면·신호·실행계획에 활용한다.
 
+### 지표 분류 및 히스토리 정책 (3차 감사 Fix #2/#3/#4)
+
+#### 원자적 쓰기 정책
+
+히스토리 저장(`writeHistory`)은 임시 파일 → rename 패턴으로 **원자적** 을 보장한다.
+부분 쓰기 상태에서 프로세스 강제 종료 시에도 마지막 완성된 버전이 유지된다.
+
+```typescript
+// server/src/state/history-store.ts
+const tmpPath = historyFile + '.tmp';
+await fs.writeFile(tmpPath, JSON.stringify(combined, null, 2));
+await fs.rename(tmpPath, historyFile); // ← 원자적 (OS 레벨)
+```
+
+#### 증분 재계산 규칙 (REFRESH_FULL 강제 플래그)
+
+`refreshComputedHistories` 는 성능 최적화를 위해 다음 조건을 확인한다.
+
+```
+IF signal-REGIME 의 마지막 기록 >= 오늘 날짜 (KST):
+  → 당일 재계산 완료된 상태. full backfill SKIP.
+  → REFRESH_FULL=false 면 backfill 없음.
+ELSE:
+  → 계산 미완료. 과거 일자 전체 재계산 수행.
+  → REFRESH_FULL=true 면 항상 full backfill (강제).
+```
+
+이를 통해 매 5분 스냅샷 시 불필요한 히스토리 재계산을 피하면서,
+필요할 때만(시작 또는 강제) 과거 데이터를 정확히 복원한다.
+
+#### Sentiment 실패 관측성
+
+CNN F&G, P/C Ratio, AAII, NAAIM 수집 실패 시 silent skip 대신 **명시적 로깅** :
+
+```typescript
+// server/src/engines/sentiment.ts
+if (!data) {
+  logger.warn(`[sentiment] 수집 실패: source=${source}, key=${key}, date=${date}, reason=...`);
+  // append skip — null 저장 금지 (멱등성 유지)
+}
+```
+
+- **모니터링 가능**: 서버 로그에서 `[sentiment]` 필터로 실패 추적.
+- **멱등성**: 같은 (source, key, date) 조합은 1회만 append. 재시도 시 스킵.
+- **신호 정상화**: 결측 지표는 `signalEngine` 의 `dv()` 가드로 자동 제외 (met 카운트 왜곡 없음).
+
+---
+
 ### 지표 분류
 
 **가격 관련:**
@@ -1384,6 +1467,12 @@ client/src/app/api/execution-plan/tranche/[asset]/route.ts
 - NAAIM_EXPOSURE (NAAIM Exposure Index: 기관 리스크 노출도)
 - PSYCH_SUBSCORE (F&G·PC·AAII·NAAIM 가중평균: null 시 재정규화)
 
+**스마트머니 점수** (8차 추가):
+- SMART_MONEY_SCORE (Insider+Dataroma 합성 점수: regime.components.smartMoney와 동일값 publish)
+- SMART_MONEY_INSIDER_BUY_RATIO (OpenInsider 매수 비율)
+- SMART_MONEY_DATAROMA_SCORE (Dataroma 포트폴리오 점수)
+- SMART_MONEY_DATAROMA_NET_FLOW (Dataroma 순유입)
+
 **다중 타임프레임:**
 - NASDAQ_MONTHLY_EXHAUSTION (3개월 연속 장대양봉 + 아래꼬리 없음)
 - NASDAQ_WEEKLY_REVERSAL (주봉 반전 신호)
@@ -1407,7 +1496,7 @@ client/src/app/api/execution-plan/tranche/[asset]/route.ts
 - ISM_PROXY (ISM 제조업 PMI 프록시)
 - CHASE_NASDAQ / CHASE_KOSPI (20일 상승률 → 추격매수 주의)
 
-### 6.10.1 히스토리 백필 경로 (2차 감사 Fix #1+#2)
+### 6.10.2 히스토리 백필 경로 (2차 감사 Fix #1+#2)
 
 백필 파이프라인(`server/src/state/history-store.ts` → `refreshComputedHistories`)은
 라이브 스냅샷과 **같은 시그니처** 로 derived 를 재계산한다:
@@ -1471,7 +1560,7 @@ snapshot 지표가 시계열 신호를 왜곡 (HOLD 되어야 할 날이 REDUCE 
 **검증 — 커버리지 로그:** `refreshComputedHistories` 종료 시 최근 1년 평균 non-null
 derived 키 수를 출력. 회귀 시 이 수치를 기준으로 데이터 손실 여부 점검.
 
-### 6.10.2 SILVER/COPPER REDUCE 분기 (2차 감사 Fix #6)
+### 6.10.3 SILVER/COPPER REDUCE 분기 (2차 감사 Fix #6)
 
 SILVER/COPPER 신호는 `signalFromScore` 기반 임계로 통일:
 
@@ -1483,7 +1572,7 @@ SILVER/COPPER 신호는 `signalFromScore` 기반 임계로 통일:
 - **COPPER** (total=3): `{strongBuy:3, buy:2, hold:1, reduce:0, sell:0}`.
   - 기존 `met>=3 STRONG_BUY / met===2 BUY / else HOLD` 수치는 보존하고 met=0 → REDUCE 복구.
 
-### 6.10.3 스케줄 timezone (2차 감사 Fix #5)
+### 6.10.4 스케줄 timezone (2차 감사 Fix #5)
 
 모든 `cron.schedule(...)` 호출에 `{ timezone: 'Asia/Seoul' }` 옵션 명시. 일일 히스토리
 append cron 은 `0 22 * * *` (UTC) → `0 7 * * *` (KST) 로 표기만 변경 — 실제 실행 시각
