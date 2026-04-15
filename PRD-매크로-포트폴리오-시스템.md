@@ -1427,6 +1427,40 @@ client/src/app/api/execution-plan/tranche/[asset]/route.ts
 경로에도 정확히 반영된다 — 기존 `buildDerivedForDate` 는 NASDAQ 4개 필드 + 2개 비율만
 채웠기 때문에 발생하던 "1차 Fix 성과 히스토리 미반영" 문제 해소.
 
+**3차 감사 보강 — `cachedLiveDerived` 과거 일자 오염 차단 (날짜 의존 재계산 정책):**
+
+2차 감사 이후 tracer 분석으로 확인된 추가 결함: shallow-clone 된 `cachedLiveDerived` 가
+1,258 과거 일자 전체에 오늘 값으로 주입되어 STAGFLATION/MTF/PSYCH_SUBSCORE 등 11개+ 단발
+snapshot 지표가 시계열 신호를 왜곡 (HOLD 되어야 할 날이 REDUCE 로 기록되는 등).
+
+수정 정책:
+- **오늘 일자(`todayIso === date`)** 만 `cachedLiveDerived` 를 그대로 사용. 라이브 스냅샷과
+  완전 동일 시그니처 보장.
+- **과거 일자**에는 빈 derived 맵에서 시작. `cachedLiveDerived` 는 일부러 무시.
+- **date-aware 재계산 가능 지표 (history 만으로 복원 가능)** 만 채움:
+  - `REAL_YIELD`, `GOLD_SILVER_RATIO`, `COPPER_GOLD_RATIO` (raw 가격 비율)
+  - `NASDAQ_SMA200`/`DISPARITY`/`DRAWDOWN`/`ABOVE_200DMA`/`DISPARITY_STREAK_OVERHEATED`/
+    `DISPARITY_STREAK_OVERSOLD`/`CHASE_WARNING` (yahoo:NASDAQ history)
+  - `KOSPI_SMA200`/`DISPARITY`/`DRAWDOWN`/`ABOVE_200DMA`/`DISPARITY_STREAK_*`/`CHASE_WARNING`
+    (yahoo:KOSPI history)
+  - `CREDIT_HY_OAS_BP`, `CREDIT_HYG_IEF_RATIO`, `CREDIT_HYG_IEF_ZSCORE`, `CREDIT_STRESS_FLAG`
+    (FRED BAMLH0A0HYM2 raw + Yahoo HYG/IEF history)
+  - `M2_YOY_PCT`, `M2_YOY_DELTA_3M`, `M2_YOY_CROSS_DAYS` (FRED WM2NS history)
+- **단발 snapshot 지표 (history 미저장 → 과거 복원 불가)** 는 과거 일자에서 명시적으로
+  null 유지 (= derived 맵에서 키 자체가 없음). signals.ts 의 `dv()` 가 null 가드로 깔끔히
+  스킵하므로 met 카운트 왜곡이 발생하지 않음. 해당 지표:
+  - `RRP_DIRECTION`, `TGA_DIRECTION`, `MMF_DIRECTION`, `GLOBAL_M2_PROXY` (raw snapshot)
+  - `PSYCH_SUBSCORE`, `MTF_EXHAUSTION`, `NASDAQ_MONTHLY_*`, `KOSPI_MONTHLY_*`,
+    `NASDAQ_WEEKLY_REVERSAL`, `KOSPI_WEEKLY_REVERSAL`
+  - `STAGFLATION_WARNING`/`SCORE`, `BOND_VIGILANTE_WARNING`/`SCORE`, `FISCAL_STRESS`/`HARD`,
+    `OVERHEATED`
+  - `SECTOR_*`, `SMART_MONEY_*`, `KRX_*`/`KOSPI_FOREIGN_*`, `USDKRW_WEEKLY_CHANNEL_*`
+- 향후 단발 snapshot 지표를 history 에 보존하려면 해당 collectors 에 별도 history append
+  (현 라이브 호출 결과를 daily snapshot 으로 기록) 가 필요. 이는 별도 PRD 작업으로 분리.
+
+**검증 — 커버리지 로그:** `refreshComputedHistories` 종료 시 최근 1년 평균 non-null
+derived 키 수를 출력. 회귀 시 이 수치를 기준으로 데이터 손실 여부 점검.
+
 ### 6.10.2 SILVER/COPPER REDUCE 분기 (2차 감사 Fix #6)
 
 SILVER/COPPER 신호는 `signalFromScore` 기반 임계로 통일:
