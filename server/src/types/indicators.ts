@@ -38,7 +38,10 @@ export interface AssetSignal {
   signal: Signal;
   conditionsMet: number;
   conditionsTotal: number;
+  weightedScore: number;
+  weightedMaxScore: number;
   reasons: string[];
+  unmetReasons: string[];
   date: string;
 }
 
@@ -55,13 +58,15 @@ export interface AllocationPlan {
 // ── 사용자 설정 ──
 export interface UserProfile {
   riskTolerance: 'conservative' | 'moderate' | 'aggressive';
+  investmentHorizon: 'short' | 'medium' | 'long';
   leverageEnabled: boolean;
   includeCrypto: boolean;
   includeKR: boolean;
   manualInputs: {
-    policyDirection: number;   // -2 ~ +2
-    geoRisk: number;           // 0 ~ 4
+    policyDirection: number;
+    geoRisk: number;
     cbBuying: boolean;
+    ismPmi: number | null | undefined;
   };
 }
 
@@ -73,4 +78,25 @@ export interface SystemSnapshot {
   regime: RegimeState;
   signals: AssetSignal[];
   allocation: AllocationPlan;
+  meta: {
+    fetchedAt: string;
+    cacheTtlMs: number;
+    nextRefreshAt: string;
+    usPriceSource: 'spot' | 'futures';
+    sourceFrequencies: Record<string, string>;
+    latestDates: Record<string, string>;
+    historyGuarantee: Record<string, string>;
+    profile: UserProfile;
+    autoInputs: { policyDirection: number; geoRisk: number; cbBuying: boolean; ismPmi: number | null } | null;
+    inputMode: 'auto' | 'manual';
+    staleness: Record<string, { date: string; daysAgo: number; frequency: string }>;
+    smartMoney?: { insiderBuyRatio: number; recentInsiderBuys: number; recentInsiderSells: number; score: number; lastUpdated: string } | null;
+    calendar?: Array<{
+      date: string;
+      name: string;
+      category: 'FOMC' | 'CPI' | 'NFP' | 'PCE' | 'GDP' | 'OTHER';
+      daysUntil: number;
+      importance: 'high' | 'medium';
+    }>;
+  };
 }

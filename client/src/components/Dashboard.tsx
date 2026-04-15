@@ -13,6 +13,7 @@ import { SectorPanel } from "./SectorPanel";
 import { StalenessPanel } from "./StalenessPanel";
 import { RealtimePanel } from "./RealtimePanel";
 import { SmartMoneyPanel } from "./SmartMoneyPanel";
+import { CalendarPanel } from "./CalendarPanel";
 import { OptionsVolatilityPanel } from "./OptionsVolatilityPanel";
 import { formatKstDateTime } from "@/lib/format";
 
@@ -100,6 +101,8 @@ export function Dashboard({ snapshot }: Props) {
       <BacktestPanel />
 
       <SmartMoneyPanel />
+
+      <CalendarPanel events={currentSnapshot?.meta?.calendar} />
 
       <StalenessPanel staleness={currentSnapshot?.meta?.staleness} />
 
