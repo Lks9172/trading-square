@@ -93,9 +93,44 @@ async function detectCBBuying(): Promise<boolean> {
 }
 
 /**
- * ISM proxy: FRED 기반 복합 지표.
+ * investing.com economic calendar 의 ISM Manufacturing PMI 페이지에서 최신 공식 Actual 값.
+ * URL 고정(event-id=173), 월 1회 갱신이라 레이아웃 변경 리스크 낮음.
+ * 실패 시 null → 호출부에서 FRED proxy fallback.
  *
- * 기존 TradingEconomics HTML 스크래핑은 페이지 레이아웃 변경에 취약해 제거.
+ * 파싱 타겟:
+ *   <tr><td>Apr 01, 2026 (Mar)</td><td>14:00</td><td>52.7</td>...
+ */
+async function fetchISMFromInvesting(): Promise<{ value: number; asOf: string } | null> {
+  const UA =
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  try {
+    const { data: html } = await axios.get<string>(
+      'https://www.investing.com/economic-calendar/ism-manufacturing-pmi-173',
+      {
+        headers: {
+          'User-Agent': UA,
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          Referer: 'https://www.investing.com/',
+        },
+        timeout: 15000,
+      },
+    );
+    // 첫 번째 매치 = 최신 발표치
+    const m = html.match(
+      /<tr[^>]*>\s*<td[^>]*>([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\s*\([^)]+\))<\/td>\s*<td[^>]*>[^<]*<\/td>\s*<td[^>]*>([0-9]+\.[0-9]+)<\/td>/,
+    );
+    if (!m) return null;
+    const value = parseFloat(m[2]);
+    if (!Number.isFinite(value) || value < 20 || value > 80) return null;
+    return { value, asOf: m[1] };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ISM proxy: FRED 기반 복합 지표 (공식 소스 실패 시 fallback).
+ *
  * INDPRO(산업생산) MoM + ICSA(실업수당) 추세 + PAYEMS(비농업고용) MoM 을 조합해
  * PMI 50 을 중심으로 ±20 범위의 proxy 값을 산출.
  */
@@ -147,17 +182,26 @@ async function fetchISMProxy(apiKey: string): Promise<number | null> {
 }
 
 export async function computeAutoManualInputs(apiKey: string): Promise<AutoManualInputs> {
-  const [gpr, policyDirection, cbBuying, ismProxy] = await Promise.allSettled([
+  const [gpr, policyDirection, cbBuying, ismOfficial, ismProxy] = await Promise.allSettled([
     fetchGPR(),
     computePolicyDirection(apiKey),
     detectCBBuying(),
+    fetchISMFromInvesting(),
     fetchISMProxy(apiKey),
   ]);
+
+  // 공식 값 우선 → 실패 시 proxy fallback
+  let ismPmi: number | null = null;
+  if (ismOfficial.status === 'fulfilled' && ismOfficial.value) {
+    ismPmi = ismOfficial.value.value;
+  } else if (ismProxy.status === 'fulfilled') {
+    ismPmi = ismProxy.value;
+  }
 
   return {
     geoRisk: gpr.status === 'fulfilled' ? gprToGeoRisk(gpr.value) : 2,
     policyDirection: policyDirection.status === 'fulfilled' ? policyDirection.value : 0,
     cbBuying: cbBuying.status === 'fulfilled' ? cbBuying.value : true,
-    ismPmi: ismProxy.status === 'fulfilled' ? ismProxy.value : null,
+    ismPmi,
   };
 }
