@@ -57,7 +57,8 @@ export interface AllocationPlan {
   score: number;
   allocations: Record<string, number>; // asset → percentage
   leverageAllowed: boolean;
-  buyStage: 0 | 1 | 2 | 3;
+  // Fix #6: 결측(`NASDAQ_ABOVE_200DMA` 없음) 은 null 로 명시. UI 는 "데이터 없음" 표시.
+  buyStage: 0 | 1 | 2 | 3 | null;
   date: string;
 }
 

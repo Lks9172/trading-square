@@ -48,11 +48,14 @@ const SIGNAL_ASSET_MAP: Record<string, string> = {
 function determineBuyStage(
   derived: Record<string, DerivedIndicator>,
   raw: Record<string, MarketDataPoint>
-): 0 | 1 | 2 | 3 {
+): 0 | 1 | 2 | 3 | null {
   const disparity = derived.NASDAQ_DISPARITY?.value ?? null;
-  const above200 = derived.NASDAQ_ABOVE_200DMA?.value ?? 1;
+  // Fix #6: NASDAQ_ABOVE_200DMA 결측 시 `?? 1` 은 "암묵 상승추세" 로 가정해 stage 0 반환 →
+  // 실제 불확실을 HOLD 로 위장한다. null 유지하고 호출부/타입에서 '결측' 을 표현.
+  const above200 = derived.NASDAQ_ABOVE_200DMA?.value ?? null;
   const vix = raw.VIXCLS?.value ?? null;
 
+  if (above200 === null) return null;
   if (above200 === 1) return 0;
 
   if (disparity !== null && disparity <= -25 && vix !== null && vix >= 35) return 3;
@@ -114,15 +117,20 @@ export function computeAllocation(
   // 포지션을 사실상 소멸시킴. 영상5는 "환율이 방향의 70% 결정"이라고 했지만,
   // 동시에 "외국인 복귀 시 반발 가능성"도 시사했으므로 최소한의 포지션은 쥐고 있어야 한다.
   // → 삭감률 30% 로 완화 (base 10 → 7). 환율 -2(1550원 초과) 에서는 50% 적용으로 강화.
-  const fxLevel = derived.KRW_FX_LEVEL?.value ?? 0;
-  if (fxLevel <= -2) {
-    const cut = base.korea * 0.5;
-    base.korea -= cut;
-    base.cash += cut;
-  } else if (fxLevel <= -1) {
-    const cut = base.korea * 0.3;
-    base.korea -= cut;
-    base.cash += cut;
+  //
+  // Fix #6: 결측 시 `?? 0` 은 "환율 중립" 으로 간주해 아무 보정도 하지 않는 효과라
+  // 동작은 같지만 의도가 모호했다. null 명시 가드로 교체 — 결측이면 FX 보정 블록 전체 skip.
+  const fxLevel = derived.KRW_FX_LEVEL?.value ?? null;
+  if (fxLevel !== null) {
+    if (fxLevel <= -2) {
+      const cut = base.korea * 0.5;
+      base.korea -= cut;
+      base.cash += cut;
+    } else if (fxLevel <= -1) {
+      const cut = base.korea * 0.3;
+      base.korea -= cut;
+      base.cash += cut;
+    }
   }
 
   // === 재정 리스크 보정 (FISCAL_STRESS=1, 영상4 §07 채권 자경단) ===

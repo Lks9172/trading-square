@@ -795,9 +795,15 @@ export async function computeDerived(
         formula: 'DGS30 20영업일 변화폭 (%p)',
       };
       // Fiscal stress: 30년 20일에 +0.2%p 이상 급등 AND 현재 레벨 4.5%+
-      const yieldCurve = val(raw, 'T10Y2Y') ?? 0;
+      // Fix #6: `?? 0` 은 결측이면 "수익률곡선 평탄" 을 암묵 가정해 curveSteepening=false 확정 →
+      // FISCAL_STRESS_HARD 발동이 T10Y2Y 결측 시에도 내부 상수처럼 false 로 고정되지만, 이는
+      // "알 수 없음" 과 "평탄" 을 동일 취급해 신호에 거짓 안정성을 주입. null 을 명시적으로 유지하고
+      // curveSteepening 평가 시 null 은 false 로 간주 (의도 명확화 + 주석).
+      const yieldCurve = val(raw, 'T10Y2Y');
       const fiscalStress = (delta20 >= 0.2 && cur >= 4.5) || (delta20 >= 0.3);
-      const curveSteepening = yieldCurve > 0.1;
+      // yieldCurve === null → 곡선 정보 없음 → 스티프닝 판단 불가 → false.
+      //   (false 는 HARD 발동 차단 쪽이라 방어적 디폴트)
+      const curveSteepening = yieldCurve !== null && yieldCurve > 0.1;
       d.FISCAL_STRESS = {
         name: 'fiscal_stress',
         value: fiscalStress ? 1 : 0,

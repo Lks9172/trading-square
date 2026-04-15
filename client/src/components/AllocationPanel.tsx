@@ -35,7 +35,8 @@ interface Props {
     score: number;
     allocations: Record<string, number>;
     leverageAllowed: boolean;
-    buyStage: number;
+    // Fix #6: NASDAQ_ABOVE_200DMA 결측 시 null. UI 는 "데이터 없음" 표시.
+    buyStage: number | null;
   };
 }
 
@@ -85,8 +86,10 @@ export function AllocationPanel({ allocation }: Props) {
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-0 text-xs sm:text-sm">
           <span className="text-[var(--muted)]">분할매수</span>
-          <span className={`${allocation.buyStage > 0 ? "text-blue-400 font-semibold" : "text-[var(--muted)]"} text-right`}>
-            {BUY_STAGE_LABELS[allocation.buyStage] || ""}
+          <span className={`${(allocation.buyStage ?? 0) > 0 ? "text-blue-400 font-semibold" : "text-[var(--muted)]"} text-right`}>
+            {allocation.buyStage === null
+              ? "데이터 없음 (NASDAQ 200DMA 수집 실패)"
+              : BUY_STAGE_LABELS[allocation.buyStage] || ""}
           </span>
         </div>
       </div>
