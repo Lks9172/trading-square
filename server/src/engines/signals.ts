@@ -187,9 +187,28 @@ function nasdaqSignal(
   // Fix #1: 기존 3단계 [3,4,5] 에 REDUCE/SELL 하한을 명시해 저점에서도 실제 강등 가능하게 복구.
   //   strongBuy=5 (기존 유지), buy=4 (기존 유지), hold=3 (기존 유지)
   //   reduce=2 (total-5, 1~2개만 충족 시 약세), sell=0 (아무것도 충족 없음)
+  let signal = signalFromScore(met, total, { sell: 0, reduce: 2, hold: 3, buy: 4, strongBuy: 5 });
+
+  // Fix #2: NASDAQ 과열 REDUCE override.
+  // 4개 체크 중 2개 이상 발동 시 met 와 무관하게 REDUCE 강등(영상1 §추격매수 금지).
+  //   a) 이격도 ≥ +25%  (200DMA 대비 과열)
+  //   b) F&G ≥ 85       (극단 탐욕)
+  //   c) VIX < 16       (변동성 방심)
+  //   d) NASDAQ_CHASE_WARNING === 1  (이격률 ±15% 20일 지속)
+  const overheatFlags: string[] = [];
+  if (disparity !== null && disparity >= 25) overheatFlags.push(`이격도 +${disparity.toFixed(1)}% ≥ 25%`);
+  if (fng !== null && fng >= 85) overheatFlags.push(`F&G ${fng} ≥ 85 극탐욕`);
+  if (vix !== null && vix < 16) overheatFlags.push(`VIX ${vix.toFixed(1)} < 16 방심`);
+  const chaseWarning = dv(derived, 'NASDAQ_CHASE_WARNING');
+  if (chaseWarning === 1) overheatFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
+  if (overheatFlags.length >= 2 && signal !== 'SELL') {
+    signal = 'REDUCE';
+    unmetReasons.push(`과열 REDUCE override: ${overheatFlags.join(' · ')}`);
+  }
+
   return {
     asset: 'NASDAQ',
-    signal: signalFromScore(met, total, { sell: 0, reduce: 2, hold: 3, buy: 4, strongBuy: 5 }),
+    signal,
     conditionsMet: met,
     conditionsTotal: total,
     weightedScore: met,
@@ -661,6 +680,22 @@ function kospiSignal(
   if (trendConfirmCount === 0 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
     signal = 'HOLD';
     reasons.push(`추세전환 3조건 전부 미충족 → HOLD 상한 (보조조건)`);
+  }
+
+  // Fix #2: KOSPI 과열 REDUCE override.
+  // 3개 체크 중 2개 이상 발동 시 REDUCE 강등(영상5 "환율 5% 상승 대비 외인 매도 2배 과잉" 경고 포함).
+  //   a) 이격도 ≥ +20%
+  //   b) KOSPI_CHASE_WARNING === 1  (이격률 ±15% 20일 지속)
+  //   c) KOSPI_FX_ELASTICITY_DEVIATION ≥ 2  (외인 실매도가 환율 기대 대비 2배 이상)
+  const kOverheatFlags: string[] = [];
+  if (disparity !== null && disparity >= 20) kOverheatFlags.push(`코스피 이격도 +${disparity.toFixed(1)}% ≥ 20%`);
+  const kChaseWarning = dv(derived, 'KOSPI_CHASE_WARNING');
+  if (kChaseWarning === 1) kOverheatFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
+  const fxElasticity = dv(derived, 'KOSPI_FX_ELASTICITY_DEVIATION');
+  if (fxElasticity !== null && fxElasticity >= 2) kOverheatFlags.push(`FX_ELASTICITY_DEVIATION ${fxElasticity.toFixed(2)} ≥ 2 (외인 과매도 ATM화)`);
+  if (kOverheatFlags.length >= 2 && signal !== 'SELL') {
+    signal = 'REDUCE';
+    unmetReasons.push(`과열 REDUCE override: ${kOverheatFlags.join(' · ')}`);
   }
 
   return {
