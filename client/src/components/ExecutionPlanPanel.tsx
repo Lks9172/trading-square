@@ -99,6 +99,7 @@ function stageStatusInfo(s: string): StageStatusInfo {
 export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
   const [summaries, setSummaries] = useState<Record<string, TrancheSummary>>({});
   const [pendingAsset, setPendingAsset] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -138,7 +139,6 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
 
   const resetAsset = useCallback(
     async (asset: string) => {
-      if (!confirm(`${ASSET_LABEL[asset] || asset} 의 집행 기록을 전부 초기화할까요?`)) return;
       setPendingAsset(`${asset}-reset`);
       try {
         await fetch(`/api/execution-plan/tranche/${encodeURIComponent(asset)}`, {
@@ -149,6 +149,7 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
         /* noop */
       } finally {
         setPendingAsset(null);
+        setConfirmReset(null);
       }
     },
     [refresh],
@@ -219,7 +220,7 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
                     <button
                       type="button"
                       disabled={pendingAsset === `${p.asset}-reset`}
-                      onClick={() => resetAsset(p.asset)}
+                      onClick={() => setConfirmReset(p.asset)}
                       className="mt-1 text-[10px] px-1.5 py-0.5 rounded border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20 disabled:opacity-40"
                       title="이 자산의 집행 기록 전부 초기화"
                     >
@@ -313,6 +314,52 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
           );
         })}
       </div>
+
+      {/* 커스텀 확인 모달 (native confirm 대체 — 디자인 통일) */}
+      {confirmReset && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => setConfirmReset(null)}
+        >
+          <div
+            className="max-w-sm w-full rounded-xl border border-[var(--card-border)] bg-[var(--card)] shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-[var(--card-border)] flex items-center gap-2">
+              <span className="text-red-400">🗑️</span>
+              <h4 className="text-sm font-semibold">집행 기록 초기화</h4>
+            </div>
+            <div className="px-4 py-4 space-y-2 text-sm">
+              <p>
+                <span className="font-semibold text-white">
+                  {ASSET_LABEL[confirmReset] || confirmReset}
+                </span>
+                <span className="text-[var(--muted)]"> 의 집행 기록을 전부 초기화할까요?</span>
+              </p>
+              <p className="text-[11px] text-[var(--muted)]">
+                되돌릴 수 없습니다. 진입 단계 체크와 추격 경고가 모두 리셋됩니다.
+              </p>
+            </div>
+            <div className="px-4 py-3 border-t border-[var(--card-border)] flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmReset(null)}
+                className="text-xs px-3 py-1.5 rounded-lg border border-[var(--card-border)] bg-transparent text-[var(--muted)] hover:bg-white/5"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                disabled={pendingAsset === `${confirmReset}-reset`}
+                onClick={() => resetAsset(confirmReset)}
+                className="text-xs px-3 py-1.5 rounded-lg border border-red-500/40 bg-red-500/15 text-red-200 hover:bg-red-500/25 disabled:opacity-40 font-semibold"
+              >
+                {pendingAsset === `${confirmReset}-reset` ? '처리 중…' : '초기화'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
