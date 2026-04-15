@@ -819,38 +819,79 @@ export async function computeDerived(
         };
       }
 
-      // === 채권 자경단 합성 지수 (영상4 §137-147 "재정적자 + 장기금리↑ + 달러↓ 3박자") ===
-      // DGS30 상승 + DXY 약세 + HY 스프레드 확대 동시 충족 시 '정책 실패 프리커서' 단계적 경보.
+      // === 채권 자경단 합성 지수 (영상4 §137-147 "재정적자 + 장기금리↑ + 달러↓ + HY 확대") ===
+      // Fix #FE2: 본래 정의 4축 복원.
+      //   1) 30y-10y 스티프닝: (DGS30 - DGS10) > 0.4 %p — 장기 불안 반영
+      //   2) 장기금리 레벨   : DGS30 >= 4.8% — "채권자경단이 돌아왔다" 절대 임계
+      //   3) DXY 약세        : DXY < 100 OR DXY 20D 추세 < -2%
+      //   4) HY 확대         : HY OAS >= 500bp OR HYG/IEF z <= -1.5
+      // 각 축 충족 시 +1, SCORE 0~4. WARNING 은 3축 이상 (기존 2 에서 상향 — 4축 정의상 더 엄격).
       const dxyVal = val(raw, 'DXY');
       const dxyTrendLong = d.DXY_TREND_LONG?.value;
-      const hySpread = val(raw, 'BAMLH0A0HYM2');
-      const dxyWeak = (dxyTrendLong !== undefined && dxyTrendLong !== null && dxyTrendLong < -1)
-                  || (dxyVal !== null && dxyVal < 100);
-      const yieldRising = delta20 >= 0.15;  // 20일 +0.15%p 이상
-      const hyWidening = hySpread !== null && hySpread >= 4.5; // 4.5% 이상 위험 스프레드
+      const hyOasBp = d.CREDIT_HY_OAS_BP?.value ?? null;
+      const hygIefZ = d.CREDIT_HYG_IEF_ZSCORE?.value ?? null;
+      const dgs10Val = val(raw, 'DGS10');
+
+      // 축 1: 30y-10y 스티프닝
+      const steepening30y10y = (dgs10Val !== null && cur !== null) ? (cur - dgs10Val) : null;
+      const axisSteepening = steepening30y10y !== null && steepening30y10y > 0.4;
+
+      // 축 2: 장기금리 레벨
+      const axisLongYieldLevel = cur >= 4.8;
+
+      // 축 3: DXY 약세 — 레벨 또는 추세 둘 중 하나
+      const axisDxyWeak =
+        (dxyTrendLong !== undefined && dxyTrendLong !== null && dxyTrendLong < -2) ||
+        (dxyVal !== null && dxyVal < 100);
+
+      // 축 4: HY 확대 — OAS 레벨 또는 HYG/IEF z-score 둘 중 하나
+      const axisHyWidening =
+        (hyOasBp !== null && hyOasBp >= 500) ||
+        (hygIefZ !== null && hygIefZ <= -1.5);
+
       const vigilanteScore =
-        (yieldRising ? 1 : 0) +
-        (dxyWeak ? 1 : 0) +
-        (hyWidening ? 1 : 0);
+        (axisSteepening ? 1 : 0) +
+        (axisLongYieldLevel ? 1 : 0) +
+        (axisDxyWeak ? 1 : 0) +
+        (axisHyWidening ? 1 : 0);
+
+      const missingAxes: string[] = [];
+      if (!axisSteepening) {
+        missingAxes.push(steepening30y10y === null
+          ? '30y-10y 결측'
+          : `30y-10y=${steepening30y10y.toFixed(2)}p ≤ 0.4`);
+      }
+      if (!axisLongYieldLevel) missingAxes.push(`DGS30=${cur.toFixed(2)}% < 4.8`);
+      if (!axisDxyWeak) {
+        missingAxes.push(dxyVal === null && (dxyTrendLong === undefined || dxyTrendLong === null)
+          ? 'DXY 결측'
+          : `DXY lvl=${dxyVal ?? 'n/a'} / 추세=${dxyTrendLong ?? 'n/a'}`);
+      }
+      if (!axisHyWidening) {
+        missingAxes.push(hyOasBp === null && hygIefZ === null
+          ? 'HY 결측'
+          : `HY OAS=${hyOasBp ?? 'n/a'}bp / HYG/IEF z=${hygIefZ ?? 'n/a'}`);
+      }
+
       d.BOND_VIGILANTE_SCORE = {
         name: 'bond_vigilante_score',
         value: vigilanteScore,
         date: dt,
-        formula: `장기금리↑${yieldRising ? 'Y' : 'N'} + DXY약세${dxyWeak ? 'Y' : 'N'} + HY확대${hyWidening ? 'Y' : 'N'} → 3축 동시 확인 시 채권자경단 경보 (영상4 §137)`,
+        formula: `4축 [스티프닝${axisSteepening ? 'Y' : 'N'} · 장기금리레벨${axisLongYieldLevel ? 'Y' : 'N'} · DXY약세${axisDxyWeak ? 'Y' : 'N'} · HY확대${axisHyWidening ? 'Y' : 'N'}] 합계 (영상4 §137-147)`,
       };
-      if (vigilanteScore >= 2) {
+      if (vigilanteScore >= 3) {
         d.BOND_VIGILANTE_WARNING = {
           name: 'bond_vigilante_warning',
           value: 1,
           date: dt,
-          formula: `채권 자경단 2축+ 충족 (${vigilanteScore}/3) — 정책 신뢰 이탈 프리커서`,
+          formula: `채권 자경단 3축+ 충족 (${vigilanteScore}/4) — 정책 신뢰 이탈 프리커서 (영상4 §137-147)`,
         };
       } else {
         d.BOND_VIGILANTE_WARNING = {
           name: 'bond_vigilante_warning',
           value: 0,
           date: dt,
-          formula: `3축 중 ${vigilanteScore}개만 충족 — 경보 미발동`,
+          formula: `4축 중 ${vigilanteScore}개만 충족 — 경보 미발동. 미충족: ${missingAxes.join(' / ') || '-'}`,
         };
       }
     }
