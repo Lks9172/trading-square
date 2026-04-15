@@ -97,7 +97,11 @@ function nasdaqSignal(
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
   let met = 0;
-  const total = 7;
+  // Fix #3(2차 감사): PSYCH 보너스를 "추가 조건" 으로 승격해 발동 시 met/total 동시 +1.
+  //   이전: met 만 ++ → met/total 비율이 100% 초과로 UI 왜곡(최대 8/7 = 114%) + 절대 임계치
+  //         `{5,4,3,2}` 가 total 변화에 무관해 보너스 발동이 임계치를 붕괴시킴.
+  //   수정: total 시작은 7 유지, psych 발동 시에만 total++ 동기화 → 비율 정상, 임계 상대화.
+  let total = 7;
 
   // --- 저점 카테고리 (5) ---
   const above200 = dv(derived, 'NASDAQ_ABOVE_200DMA');
@@ -121,12 +125,14 @@ function nasdaqSignal(
   if (fng !== null && fng < 25) { met++; reasons.push(`F&G ${fng} < 25 (가중치 1.0)`); }
   else { unmetReasons.push('Fear & Greed 25 미만 조건 미충족 (가중치 1.0 미충족)'); }
 
-  // Fix #4: PSYCH_SUBSCORE 소비 — F&G · PC Ratio 10D · AAII · NAAIM 가중평균이 극공포(≤0.2) 면 +1 보너스.
-  // 저점 확인 카테고리 보강. total 을 증가시키진 않아 BUY/STRONG_BUY 기준은 그대로지만 저점 매수 가점이 된다.
+  // Fix #4: PSYCH_SUBSCORE 소비 — F&G · PC Ratio 10D · AAII · NAAIM 가중평균이 극공포(≤0.2) 면 보너스.
+  // Fix #3(2차 감사): met++ 만 하던 것을 total++ 와 동기화 — "추가 조건 충족" 으로 승격.
+  //   → met/total 비율 정상 유지, 임계치는 total 상대값(아래)으로 재정의해 보너스가 임계 붕괴를 유발하지 않도록.
   const psych = dv(derived, 'PSYCH_SUBSCORE');
   if (psych !== null && psych <= 0.2) {
     met++;
-    reasons.push(`심리 서브스코어 ${psych.toFixed(2)} ≤ 0.20 → 극공포 저점 가점 (보조 +1)`);
+    total++;
+    reasons.push(`심리 서브스코어 ${psych.toFixed(2)} ≤ 0.20 → 극공포 저점 가점 (+1 조건 추가)`);
   }
 
   // --- 유동성 카테고리 (1) ---
@@ -191,11 +197,17 @@ function nasdaqSignal(
     };
   }
 
-  // total=7 기준 등급 경계 — STRONG_BUY 는 "저점 대부분 + 유동성 or 정책" 수준.
-  // Fix #1: 기존 3단계 [3,4,5] 에 REDUCE/SELL 하한을 명시해 저점에서도 실제 강등 가능하게 복구.
-  //   strongBuy=5 (기존 유지), buy=4 (기존 유지), hold=3 (기존 유지)
-  //   reduce=2 (total-5, 1~2개만 충족 시 약세), sell=0 (아무것도 충족 없음)
-  let signal = signalFromScore(met, total, { sell: 0, reduce: 2, hold: 3, buy: 4, strongBuy: 5 });
+  // Fix #3(2차 감사): thresholds 를 total 상대값으로 복원.
+  //   base(total=7) 기준 {strongBuy:5, buy:4, hold:3, reduce:2} 는 기존과 동일한 수치.
+  //   PSYCH 보너스로 total=8 이 되면 모든 임계가 +1 shift → 보너스가 임계를 붕괴시키지 않음.
+  //   수식: strongBuy = total-2, buy = total-3, hold = total-4, reduce = total-5, sell = 0.
+  let signal = signalFromScore(met, total, {
+    sell: 0,
+    reduce: Math.max(0, total - 5),
+    hold: Math.max(0, total - 4),
+    buy: Math.max(0, total - 3),
+    strongBuy: Math.max(0, total - 2),
+  });
 
   // Fix #2: NASDAQ 과열 REDUCE override.
   // 4개 체크 중 2개 이상 발동 시 met 와 무관하게 REDUCE 강등(영상1 §추격매수 금지).
