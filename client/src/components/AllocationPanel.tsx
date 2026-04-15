@@ -38,9 +38,11 @@ interface Props {
     // Fix #6: NASDAQ_ABOVE_200DMA 결측 시 null. UI 는 "데이터 없음" 표시.
     buyStage: number | null;
   };
+  overheated?: boolean;
 }
 
-export function AllocationPanel({ allocation }: Props) {
+export function AllocationPanel({ allocation, overheated }: Props) {
+  void overheated; // 향후 과열 배너용 예약 (현재 UI 렌더에는 영향 없음)
   const entries = Object.entries(allocation.allocations)
     .filter(([, pct]) => pct > 0)
     .sort((a, b) => b[1] - a[1]);
