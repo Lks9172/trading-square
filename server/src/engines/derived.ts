@@ -1023,8 +1023,38 @@ export async function computeDerived(
           const curFx = usdkrwHist[usdkrwHist.length - 1].value;
           const oldFx = usdkrwHist[usdkrwHist.length - 20].value;
           const fxChangePct = ((curFx - oldFx) / oldFx) * 100;
-          const expectedSell = fxChangePct * -30000; // 환율 1% 상승당 기대 매도 -3조 (음수)
+          const expectedSell = fxChangePct * -30000; // 환율 1% 상승당 기대 매도 -3조 (음수, 억원 단위)
           const actualNet = summary.foreignNet20D;
+          // stt_kospi 회귀: 환율 1% 상승당 외국인 ~3조(=30000억) 순매도 경향
+          d.KOSPI_FX_20D_CHANGE_PCT = {
+            name: 'kospi_fx_20d_change_pct',
+            value: parseFloat(fxChangePct.toFixed(3)),
+            date: summary.latestDate,
+            formula: 'USD/KRW 20영업일 변화율(%). +는 원화 약세 → 외국인 매도 압력',
+          };
+          d.KOSPI_FOREIGN_EXPECTED_SELL_KRW = {
+            name: 'kospi_foreign_expected_sell_krw',
+            value: parseFloat(expectedSell.toFixed(0)),
+            date: summary.latestDate,
+            formula: 'FX20D × -30000 (억원). stt_kospi 회귀: 환율 1% 상승당 외국인 ~3조 순매도',
+          };
+          d.KOSPI_FOREIGN_ACTUAL_SELL_KRW = {
+            name: 'kospi_foreign_actual_sell_krw',
+            value: parseFloat(actualNet.toFixed(0)),
+            date: summary.latestDate,
+            formula: '최근 20영업일 외국인 순매수 실제합 (억원). 음수 = 매도',
+          };
+          // 탄력성 편차: |실제매도| / |기대매도|. >1.5 = 과매도, <0.5 = 과소매도
+          const absExpected = Math.abs(expectedSell);
+          const absActual = Math.abs(actualNet);
+          const elasticityDeviation = absExpected > 1 ? absActual / absExpected : null;
+          d.KOSPI_FX_ELASTICITY_DEVIATION = {
+            name: 'kospi_fx_elasticity_deviation',
+            value: elasticityDeviation !== null ? parseFloat(elasticityDeviation.toFixed(2)) : null,
+            date: summary.latestDate,
+            formula: '|실제20D외인순매도| / |기대매도(FX×3조)|. >1.5=과매도(반발후보), <0.5=과소매도',
+          };
+          // 기존 divergence 유지 (부호 포함 비율 — 방향성 확인용)
           const divergence = expectedSell !== 0 ? actualNet / expectedSell : 0;
           d.KOSPI_FX_FOREIGN_DIVERGENCE = {
             name: 'kospi_fx_foreign_divergence',
@@ -1032,7 +1062,17 @@ export async function computeDerived(
             date: summary.latestDate,
             formula: `실제 외국인20D 순매수 / 기대매도(환율상승×-3조). 2+ 는 과매도 ATM화(반발 후보), <0.5 는 정상/매수`,
           };
-          if (divergence >= 2 && fxChangePct > 0) {
+          // ATM 경고: 편차 ≥2 AND FX 상승이면 강화 경고 (기존 divergence 조건 병행 평가)
+          const atmStrong = elasticityDeviation !== null && elasticityDeviation >= 2 && fxChangePct > 0;
+          const atmMild = divergence >= 2 && fxChangePct > 0;
+          if (atmStrong) {
+            d.KOSPI_ATM_WARNING = {
+              name: 'kospi_atm_warning',
+              value: 2,
+              date: summary.latestDate,
+              formula: `FX +${fxChangePct.toFixed(2)}% 대비 실제 외국인 매도가 기대치 ${elasticityDeviation?.toFixed(1)}배 — 강한 과매도 반발 조기신호 (영상5 §112)`,
+            };
+          } else if (atmMild) {
             d.KOSPI_ATM_WARNING = {
               name: 'kospi_atm_warning',
               value: 1,

@@ -9,7 +9,7 @@ export interface MarketDataPoint {
 // ── 파생 지표 ──
 export interface DerivedIndicator {
   name: string;
-  value: number;
+  value: number | null;
   date: string;
   formula: string;
 }
