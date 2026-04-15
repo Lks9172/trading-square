@@ -114,6 +114,12 @@ export interface InvestorFlowSummary {
   pensionNet5D: number;
   /** 외국인 최근5일 평균 vs 6~20일 평균 차이 — 양수면 추세 가속 */
   foreignTrend: number;
+  /** 외국인 연속 순매수 일수 (최신일부터 역산) */
+  foreignBuyStreak: number;
+  /** 외국인 연속 순매도 일수 */
+  foreignSellStreak: number;
+  /** 20일 누적 순매수 극단 이벤트: +30000(3조)↑ 과열 / -30000↓ 과매도 */
+  foreignExtreme: 'overheated' | 'oversold' | 'neutral';
   days: InvestorFlowDay[];
 }
 
@@ -132,6 +138,27 @@ export function summarizeInvestorFlow(
   const avg = (arr: InvestorFlowDay[], k: keyof InvestorFlowDay) =>
     arr.length > 0 ? sum(arr, k) / arr.length : 0;
 
+  // 외국인 연속 일수 (최신일부터 역산)
+  let buyStreak = 0;
+  let sellStreak = 0;
+  for (let i = days.length - 1; i >= 0; i -= 1) {
+    const v = days[i].foreign;
+    if (v > 0) {
+      if (sellStreak > 0) break;
+      buyStreak += 1;
+    } else if (v < 0) {
+      if (buyStreak > 0) break;
+      sellStreak += 1;
+    } else {
+      break;
+    }
+  }
+
+  // 20일 누적 극단 이벤트 — 영상5 "45~60조 매도" 맥락에서 3조 기준 선제 경고
+  const net20 = sum(last20, 'foreign');
+  const extreme: InvestorFlowSummary['foreignExtreme'] =
+    net20 >= 30000 ? 'overheated' : net20 <= -30000 ? 'oversold' : 'neutral';
+
   return {
     market,
     latestDate: latest.date,
@@ -142,6 +169,9 @@ export function summarizeInvestorFlow(
     institutionNet5D: parseFloat(sum(last5, 'institution').toFixed(0)),
     pensionNet5D: parseFloat(sum(last5, 'pension').toFixed(0)),
     foreignTrend: parseFloat((avg(last5, 'foreign') - avg(prev15, 'foreign')).toFixed(1)),
+    foreignBuyStreak: buyStreak,
+    foreignSellStreak: sellStreak,
+    foreignExtreme: extreme,
     days: last20,
   };
 }

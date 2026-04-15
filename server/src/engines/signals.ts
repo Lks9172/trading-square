@@ -540,15 +540,31 @@ function kospiSignal(
   // 외국인 수급 축 (영상5 "환율·추세·거래량·외국인수급" 4축 중 마지막)
   const foreignNet20D = dv(derived, 'KOSPI_FOREIGN_NET_20D');
   const foreignTrend = dv(derived, 'KOSPI_FOREIGN_TREND');
+  const foreignBuyStreak = dv(derived, 'KOSPI_FOREIGN_BUY_STREAK');
+  const foreignSellStreak = dv(derived, 'KOSPI_FOREIGN_SELL_STREAK');
+  const foreignExtreme = dv(derived, 'KOSPI_FOREIGN_EXTREME');
   if (foreignNet20D !== null && foreignNet20D > 0) {
     met++;
     const trendTag = foreignTrend !== null && foreignTrend > 0 ? ' + 추세 가속' : '';
-    reasons.push(`외국인 20일 순매수 ${foreignNet20D >= 0 ? '+' : ''}${Math.round(foreignNet20D).toLocaleString('en-US')}억${trendTag} (가중치 1.0)`);
+    const streakTag = foreignBuyStreak !== null && foreignBuyStreak >= 5 ? ` · ${foreignBuyStreak}일 연속 매수` : '';
+    reasons.push(`외국인 20일 순매수 ${foreignNet20D >= 0 ? '+' : ''}${Math.round(foreignNet20D).toLocaleString('en-US')}억${trendTag}${streakTag} (가중치 1.0)`);
   } else if (foreignNet20D !== null) {
     unmetReasons.push(`외국인 20일 순매도 ${Math.round(foreignNet20D).toLocaleString('en-US')}억 → 매수 기반 부족 (가중치 1.0 미충족)`);
   } else {
     unmetReasons.push('외국인 수급 데이터 없음 (가중치 1.0 미충족)');
   }
+  // 극단 이벤트 보조 경고
+  if (foreignExtreme === 1) unmetReasons.push(`⚠️ 외국인 20일 누적 +3조 초과 — 단기 과열 구간 (보조조건)`);
+  else if (foreignExtreme === -1) reasons.push(`외국인 20일 누적 -3조 초과 — 과매도 반등 후보 (보조조건)`);
+  if (foreignSellStreak !== null && foreignSellStreak >= 5) {
+    unmetReasons.push(`⚠️ 외국인 ${foreignSellStreak}일 연속 순매도 → 구조적 이탈 경고 (보조조건)`);
+  }
+
+  // 영상5 이중 게이트: 환율 1480↓ 그린 / 1500↑ 레드 (단일 KRW_FX_LEVEL 보완 보조조건)
+  const fxGreen = dv(derived, 'KRW_FX_GREEN');
+  const fxRed = dv(derived, 'KRW_FX_RED');
+  if (fxGreen === 1) reasons.push(`환율 ≤1480 그린 게이트 — 외국인 복귀 우호 (보조조건, 영상5 §3-1)`);
+  if (fxRed === 1) unmetReasons.push(`⚠️ 환율 ≥1500 레드 게이트 — 외국인 매도 압력 임계 (보조조건, 영상5 §3-1)`);
 
   const usdkrw = v(raw, 'USDKRW');
   if (usdkrw !== null && usdkrw >= 1500 && above200 === 0) {

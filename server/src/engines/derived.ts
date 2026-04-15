@@ -8,6 +8,7 @@ import {
   detectClimaxExhaustion,
   detectWeeklyReversal,
   monthlyPositionScore,
+  detectOutsideBar,
 } from './candles';
 
 function val(raw: Record<string, MarketDataPoint>, key: string): number | null {
@@ -264,6 +265,21 @@ export async function computeDerived(
       value: fxLevel,
       date: dt,
       formula: '≤1400:+2, ≤1480:+1, ≤1500:0, ≤1550:-1, >1550:-2',
+    };
+
+    // 영상5 §3-1 코스피 핵심 결론: "1480 이하 녹색 / 1500 이상 적색" 이중 게이트.
+    // 단일 레벨 점수보다 이 두 임계 돌파 여부가 외국인 수급·매수시점을 70% 결정.
+    d.KRW_FX_GREEN = {
+      name: 'krw_fx_green',
+      value: usdkrw <= 1480 ? 1 : 0,
+      date: dt,
+      formula: 'USDKRW ≤ 1480 → 한국 매수 우호 환경 (영상5 그린 게이트)',
+    };
+    d.KRW_FX_RED = {
+      name: 'krw_fx_red',
+      value: usdkrw >= 1500 ? 1 : 0,
+      date: dt,
+      formula: 'USDKRW ≥ 1500 → 외국인 매도 압력 임계 (영상5 레드 게이트)',
     };
   }
 
@@ -523,6 +539,44 @@ export async function computeDerived(
     }
   }
 
+  // === 채권 자경단 / 재정 리스크 (영상4 §07 "30년 4.93% 돌파, 미국 재정 리스크 노출") ===
+  // DGS30 20일 변화율 + T10Y2Y 스티프닝(장기금리 상승 vs 단기 stable) 동시 시 자경단 신호.
+  const dgs30 = val(raw, 'DGS30');
+  try {
+    const dgs30Hist = await fetchFredHistory('DGS30', apiKey, 25);
+    if (dgs30 !== null && dgs30Hist.length >= 20) {
+      const cur = dgs30Hist[0].value;
+      const past = dgs30Hist[Math.min(19, dgs30Hist.length - 1)].value;
+      const delta20 = cur - past;
+      d.DGS30_20D_CHANGE = {
+        name: 'dgs30_20d_change',
+        value: parseFloat(delta20.toFixed(3)),
+        date: dt,
+        formula: 'DGS30 20영업일 변화폭 (%p)',
+      };
+      // Fiscal stress: 30년 20일에 +0.2%p 이상 급등 AND 현재 레벨 4.5%+
+      const yieldCurve = val(raw, 'T10Y2Y') ?? 0;
+      const fiscalStress = (delta20 >= 0.2 && cur >= 4.5) || (delta20 >= 0.3);
+      const curveSteepening = yieldCurve > 0.1;
+      d.FISCAL_STRESS = {
+        name: 'fiscal_stress',
+        value: fiscalStress ? 1 : 0,
+        date: dt,
+        formula: `DGS30 20일 변화 ${delta20.toFixed(2)}p (현 ${cur.toFixed(2)}%) + 수익률곡선 ${yieldCurve.toFixed(2)} · 1=재정리스크/채권자경단 경고`,
+      };
+      if (fiscalStress && curveSteepening) {
+        d.FISCAL_STRESS_HARD = {
+          name: 'fiscal_stress_hard',
+          value: 1,
+          date: dt,
+          formula: '재정리스크 + 수익률곡선 스티프닝 동시 → 채권 자경단 강경 신호 (영상4 §07)',
+        };
+      }
+    }
+  } catch {
+    /* DGS30 수집 실패는 다른 파이프라인 막지 않음 */
+  }
+
   const nasdaqDisparity = d.NASDAQ_DISPARITY?.value ?? null;
   const fng = val(raw, 'FEAR_GREED');
   const vixVal = val(raw, 'VIXCLS');
@@ -583,6 +637,36 @@ export async function computeDerived(
           date: latestMonthly.date,
           formula: `최근 월봉 아래꼬리 비율. <5 + 장대양봉 = 매수 압력 검증 없이 상승`,
         };
+        // Area Index (영상5 용어) + 핀바 플래그
+        d[`${prefix}_AREA_INDEX`] = {
+          name: `${prefix.toLowerCase()}_area_index`,
+          value: latestMonthly.shape.areaIndex,
+          date: latestMonthly.date,
+          formula: `아래꼬리/전체 비율 (Area Index). <10%=매수 소화도 경고 (영상5 §106)`,
+        };
+        d[`${prefix}_MONTHLY_PIN_BULLISH`] = {
+          name: `${prefix.toLowerCase()}_monthly_pin_bullish`,
+          value: latestMonthly.shape.isPinBarBullish ? 1 : 0,
+          date: latestMonthly.date,
+          formula: `월봉 하방 핀바 (매수 반전 후보). body<30 + 아래꼬리≥60 + 윗꼬리<10`,
+        };
+        d[`${prefix}_MONTHLY_PIN_BEARISH`] = {
+          name: `${prefix.toLowerCase()}_monthly_pin_bearish`,
+          value: latestMonthly.shape.isPinBarBearish ? 1 : 0,
+          date: latestMonthly.date,
+          formula: `월봉 상방 핀바 (매도 반전 후보). body<30 + 윗꼬리≥60 + 아래꼬리<10`,
+        };
+        // 아웃사이드 바 (영상3 §217 "2024 연봉이 2023 완전히 덮음")
+        if (mtf.monthly.length >= 2) {
+          const prev = mtf.monthly[mtf.monthly.length - 2];
+          const ob = detectOutsideBar(prev, latestMonthly);
+          d[`${prefix}_MONTHLY_OUTSIDE_BAR`] = {
+            name: `${prefix.toLowerCase()}_monthly_outside_bar`,
+            value: ob.isOutside ? (ob.direction === 'bullish' ? 1 : -1) : 0,
+            date: latestMonthly.date,
+            formula: `+1=상승 아웃사이드 / -1=하락 아웃사이드 / 0=해당없음 (이전 봉 완전 포섭)`,
+          };
+        }
       }
       if (latestWeekly) {
         d[`${prefix}_WEEKLY_BULLISH`] = {
@@ -632,6 +716,24 @@ export async function computeDerived(
         value: summary.institutionNet5D,
         date: summary.latestDate,
         formula: '최근 5영업일 기관계 순매수 합 (억원)',
+      };
+      d.KOSPI_FOREIGN_BUY_STREAK = {
+        name: 'kospi_foreign_buy_streak',
+        value: summary.foreignBuyStreak,
+        date: summary.latestDate,
+        formula: '최신일부터 역산한 외국인 연속 순매수 일수. 5+ 면 추세 확정 신호',
+      };
+      d.KOSPI_FOREIGN_SELL_STREAK = {
+        name: 'kospi_foreign_sell_streak',
+        value: summary.foreignSellStreak,
+        date: summary.latestDate,
+        formula: '최신일부터 역산한 외국인 연속 순매도 일수. 5+ 면 구조적 이탈 경고',
+      };
+      d.KOSPI_FOREIGN_EXTREME = {
+        name: 'kospi_foreign_extreme',
+        value: summary.foreignExtreme === 'overheated' ? 1 : summary.foreignExtreme === 'oversold' ? -1 : 0,
+        date: summary.latestDate,
+        formula: '20D 순매수 합 ≥+3조 → 과열(+1) / ≤-3조 → 과매도(-1) / 중립(0)',
       };
     }
   } catch {
