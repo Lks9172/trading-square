@@ -11,8 +11,10 @@ services:
       - BADGER_DIRECTORY_KEY=/badger/key
       - COLLECTOR_OTLP_ENABLED=true
     ports:
-      - "16686:16686"   # Jaeger UI
-      - "4318:4318"     # OTLP HTTP (server → jaeger)
+      - "16686:16686"   # Jaeger UI (외부 http://192.168.0.200:16686)
+    expose:
+      - "4318"          # OTLP HTTP — 컨테이너 네트워크 내부만 노출 (server→jaeger)
+                        # 호스트 4318 은 타 서비스가 선점 중이라 외부 매핑 생략
     volumes:
       - ./jaeger-data:/badger
     restart: unless-stopped
