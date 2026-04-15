@@ -9,6 +9,7 @@ import {
   detectWeeklyReversal,
   monthlyPositionScore,
   detectOutsideBar,
+  detectWBottom,
 } from './candles';
 
 function val(raw: Record<string, MarketDataPoint>, key: string): number | null {
@@ -823,6 +824,15 @@ export async function computeDerived(
           };
         }
       }
+      // W 반등 패턴 감지 (영상3·5) — 일봉 90일 창
+      const wBottom = detectWBottom(mtf.daily, 90);
+      d[`${prefix}_W_BOTTOM`] = {
+        name: `${prefix.toLowerCase()}_w_bottom`,
+        value: wBottom.detected ? 1 : 0,
+        date: dt,
+        formula: `W 반등 패턴 감지 (${wBottom.reason})`,
+      };
+
       if (latestWeekly) {
         d[`${prefix}_WEEKLY_BULLISH`] = {
           name: `${prefix.toLowerCase()}_weekly_bullish`,

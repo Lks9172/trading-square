@@ -76,6 +76,69 @@ export function detectOutsideBar(prev: OHLCCandle, cur: OHLCCandle): {
   return { isOutside: true, direction };
 }
 
+/**
+ * W 반등 패턴 감지 (영상3 §W자 / 영상5 §101 "3차 W자 반등 저점에서 매수")
+ *
+ * 알고리즘 (엄격):
+ *   1. 최근 lookback 일 내 두 개 local minimum (low1, low2) 찾기
+ *   2. 두 저점 사이 local maximum (peak)
+ *   3. low2 >= low1 × 0.97  (두번째 저점이 첫 저점 근처, 또는 약간 위)
+ *   4. peak >= low1 × 1.05  (중간 반등이 최소 5%)
+ *   5. 현재 close > peak × 1.005 (peak 돌파 확인 — neckline)
+ *   6. 현재 close > low2 × 1.05  (두번째 저점 대비 최소 5% 반등)
+ *
+ * 모든 조건 충족 시 강한 W 반등 확인.
+ */
+export function detectWBottom(
+  daily: OHLCCandle[],
+  lookback = 90,
+): { detected: boolean; low1?: number; low2?: number; peak?: number; breakout?: boolean; reason: string } {
+  if (daily.length < lookback) return { detected: false, reason: 'insufficient data' };
+  const slice = daily.slice(-lookback);
+  const closes = slice.map((c) => c.close);
+  const cur = closes[closes.length - 1];
+
+  // 간단한 local min 찾기 (좌우 5일 비교)
+  const window = 5;
+  const mins: Array<{ idx: number; value: number }> = [];
+  for (let i = window; i < closes.length - window; i += 1) {
+    const v = closes[i];
+    let isMin = true;
+    for (let j = i - window; j <= i + window; j += 1) {
+      if (j !== i && closes[j] < v) { isMin = false; break; }
+    }
+    if (isMin) mins.push({ idx: i, value: v });
+  }
+  if (mins.length < 2) return { detected: false, reason: `local mins ${mins.length}/2` };
+
+  // 마지막 2개 local min 사용
+  const low2Info = mins[mins.length - 1];
+  const low1Info = mins[mins.length - 2];
+  if (low2Info.idx - low1Info.idx < 10) return { detected: false, reason: 'mins too close' };
+
+  // 중간 peak 찾기
+  const between = closes.slice(low1Info.idx + 1, low2Info.idx);
+  if (between.length === 0) return { detected: false, reason: 'no between' };
+  const peak = Math.max(...between);
+
+  const low1 = low1Info.value;
+  const low2 = low2Info.value;
+  const ratioCond = low2 >= low1 * 0.97;
+  const peakCond = peak >= low1 * 1.05;
+  const neckBreak = cur > peak * 1.005;
+  const reboundCond = cur > low2 * 1.05;
+
+  const detected = ratioCond && peakCond && neckBreak && reboundCond;
+  return {
+    detected,
+    low1, low2, peak,
+    breakout: neckBreak,
+    reason: detected
+      ? `W bottom confirmed (low1=${low1.toFixed(2)}, low2=${low2.toFixed(2)}, peak=${peak.toFixed(2)}, cur=${cur.toFixed(2)})`
+      : `pattern incomplete (ratio=${ratioCond}, peak=${peakCond}, neck=${neckBreak}, rebound=${reboundCond})`,
+  };
+}
+
 export interface MultiTimeframeSnapshot {
   symbol: string;
   daily: Array<OHLCCandle & { shape: CandleShape }>;
