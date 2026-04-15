@@ -10,6 +10,7 @@ import {
   monthlyPositionScore,
   detectOutsideBar,
   detectWBottom,
+  linearRegressionChannel,
 } from './candles';
 
 function val(raw: Record<string, MarketDataPoint>, key: string): number | null {
@@ -832,6 +833,37 @@ export async function computeDerived(
         date: dt,
         formula: `W 반등 패턴 감지 (${wBottom.reason})`,
       };
+
+      // 15년 장기 상승채널 평행선 (영상3 §71/155 — NASDAQ 만 해당)
+      if (prefix === 'NASDAQ') {
+        const ch = linearRegressionChannel(mtf.monthly, 180);
+        if (ch && ch.position !== null) {
+          d.NASDAQ_CHANNEL_POSITION = {
+            name: 'nasdaq_channel_position',
+            value: parseFloat((ch.position * 100).toFixed(1)),
+            date: dt,
+            formula: `장기(최대 15년) 회귀채널 내 위치(%). 0=하단(매수강도↑) / 50=중단 / 100=상단(저항)`,
+          };
+          d.NASDAQ_CHANNEL_UPPER = {
+            name: 'nasdaq_channel_upper',
+            value: ch.upperBand,
+            date: dt,
+            formula: `장기 회귀채널 상단 (mid + 1σ)`,
+          };
+          d.NASDAQ_CHANNEL_MID = {
+            name: 'nasdaq_channel_mid',
+            value: ch.midLine,
+            date: dt,
+            formula: `장기 회귀선 (월봉 OLS)`,
+          };
+          d.NASDAQ_CHANNEL_LOWER = {
+            name: 'nasdaq_channel_lower',
+            value: ch.lowerBand,
+            date: dt,
+            formula: `장기 회귀채널 하단 (mid - 1σ). 영상3 '매수 강도 강해지는 경향'`,
+          };
+        }
+      }
 
       if (latestWeekly) {
         d[`${prefix}_WEEKLY_BULLISH`] = {

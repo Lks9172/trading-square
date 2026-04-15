@@ -206,6 +206,65 @@ export function detectWeeklyReversal(weekly: Array<OHLCCandle & { shape: CandleS
   };
 }
 
+/**
+ * 장기 선형 회귀 채널 (영상3 §71/155 "나스닥은 15년 이상 장기 평행 채널 안에서 움직임").
+ *
+ * 월봉 N개 종가에 ordinary least squares 로 회귀선 + 표준편차 밴드 계산.
+ * 현재 종가의 채널 내 위치 (0=하단, 0.5=중단, 1=상단) 반환.
+ * 영상 원칙: "하단 지지선에서 매수 강도 강해지는 경향".
+ */
+export function linearRegressionChannel(
+  monthly: OHLCCandle[],
+  lookback = 180, // 15년 ≈ 180개월
+): {
+  position: number | null;
+  slope: number;
+  intercept: number;
+  upperBand: number;
+  midLine: number;
+  lowerBand: number;
+  curPrice: number;
+} | null {
+  if (monthly.length < Math.min(lookback, 60)) return null;
+  const slice = monthly.slice(-lookback);
+  const n = slice.length;
+  const xs = slice.map((_, i) => i);
+  const ys = slice.map((c) => c.close);
+  const meanX = xs.reduce((a, b) => a + b, 0) / n;
+  const meanY = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n; i += 1) {
+    num += (xs[i] - meanX) * (ys[i] - meanY);
+    den += (xs[i] - meanX) ** 2;
+  }
+  const slope = den === 0 ? 0 : num / den;
+  const intercept = meanY - slope * meanX;
+  // 잔차 표준편차
+  let sq = 0;
+  for (let i = 0; i < n; i += 1) {
+    const pred = slope * xs[i] + intercept;
+    sq += (ys[i] - pred) ** 2;
+  }
+  const std = Math.sqrt(sq / n);
+  const curX = n - 1;
+  const midLine = slope * curX + intercept;
+  const upperBand = midLine + std;
+  const lowerBand = midLine - std;
+  const curPrice = ys[n - 1];
+  let position = (curPrice - lowerBand) / (upperBand - lowerBand);
+  position = Math.max(0, Math.min(1, position));
+  return {
+    position: parseFloat(position.toFixed(3)),
+    slope,
+    intercept,
+    upperBand: parseFloat(upperBand.toFixed(2)),
+    midLine: parseFloat(midLine.toFixed(2)),
+    lowerBand: parseFloat(lowerBand.toFixed(2)),
+    curPrice,
+  };
+}
+
 /** 월봉 기준 위치 지수: 최근 월봉의 종가가 최근 12개월 고점 대비 몇 % 위치 (0~1) */
 export function monthlyPositionScore(monthly: Array<OHLCCandle & { shape: CandleShape }>): number | null {
   if (monthly.length < 2) return null;
