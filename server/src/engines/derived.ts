@@ -94,6 +94,20 @@ export async function computeDerived(
         date: dt,
         formula: 'PRICE > SMA200 ? 1 : 0',
       };
+
+      // 멀티 MA 이격도 (영상1 §263 "기준선이 어느 MA인지 모호" 해소 — 사용자 판단용)
+      for (const period of [20, 60, 120]) {
+        if (closes.length >= period) {
+          const sma = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+          const disp = ((currentPrice - sma) / sma) * 100;
+          d[`NASDAQ_DISPARITY_${period}`] = {
+            name: `nasdaq_disparity_${period}`,
+            value: parseFloat(disp.toFixed(2)),
+            date: dt,
+            formula: `(PRICE - SMA${period}) / SMA${period} * 100`,
+          };
+        }
+      }
     }
   } catch {
     void 0;
@@ -128,6 +142,19 @@ export async function computeDerived(
         date: dt,
         formula: '(KOSPI - ATH) / ATH * 100',
       };
+      // 멀티 MA 이격도
+      for (const period of [20, 60, 120]) {
+        if (closes.length >= period) {
+          const sma = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+          const disp = ((currentPrice - sma) / sma) * 100;
+          d[`KOSPI_DISPARITY_${period}`] = {
+            name: `kospi_disparity_${period}`,
+            value: parseFloat(disp.toFixed(2)),
+            date: dt,
+            formula: `(KOSPI - SMA${period}) / SMA${period} * 100`,
+          };
+        }
+      }
       d.KOSPI_ABOVE_200DMA = {
         name: 'kospi_above_200dma',
         value: currentPrice > sma200 ? 1 : 0,
@@ -539,6 +566,60 @@ export async function computeDerived(
     }
   }
 
+  // === ICSA × 200DMA 2x2 매트릭스 (영상3 §174 "200DMA + 실업수당 조합 필터") ===
+  // 200DMA 상회/하회 × ICSA 낮음(20만대)/높음(30만+) 조합의 4구획 레짐 라벨.
+  const icsaVal = val(raw, 'ICSA');
+  const nasdaqAbove = d.NASDAQ_ABOVE_200DMA?.value;
+  if (icsaVal !== null && nasdaqAbove !== undefined) {
+    const highICSA = icsaVal >= 300000;
+    const lowICSA = icsaVal < 250000;
+    const above = nasdaqAbove === 1;
+    let label = 'NEUTRAL';
+    let score = 0;
+    if (above && lowICSA) { label = 'HEALTHY_EXPANSION'; score = 2; }           // 안정 확장
+    else if (above && highICSA) { label = 'MOMENTUM_WARNING'; score = -1; }     // 모멘텀 둔화 경고
+    else if (!above && lowICSA) { label = 'CORRECTION_OPPORTUNITY'; score = 1; } // 조정 매수 기회
+    else if (!above && highICSA) { label = 'STRUCTURAL_RISK'; score = -2; }     // 구조적 위험
+    d.ICSA_REGIME_LABEL = {
+      name: 'icsa_regime_label',
+      value: score,
+      date: dt,
+      formula: `${label} (200DMA ${above ? '상회' : '하회'} × ICSA ${Math.round(icsaVal / 1000)}K). 영상3 §174 매트릭스 — 조정 vs 붕괴 구분`,
+    };
+  }
+
+  // === 유동성 방향 종합 점수 (영상4 §120 "총량 아닌 방향") ===
+  // RRP 감소 / TGA 감소 / MMF 감소 / WRESBAL 증가 / Global M2 YoY > 0 → 각 +1.
+  // 반대 방향은 -1. 총 -5 ~ +5.
+  let liqScore = 0;
+  const liqParts: string[] = [];
+  const rrpDir = d.RRP_DIRECTION?.value;
+  if (rrpDir !== undefined && rrpDir !== null) {
+    if (rrpDir < 0) { liqScore += 1; liqParts.push('RRP↓'); }
+    else if (rrpDir > 0) { liqScore -= 1; liqParts.push('RRP↑'); }
+  }
+  const tgaDir = d.TGA_DIRECTION?.value;
+  if (tgaDir !== undefined && tgaDir !== null) {
+    if (tgaDir < 0) { liqScore += 1; liqParts.push('TGA↓'); }
+    else if (tgaDir > 0) { liqScore -= 1; liqParts.push('TGA↑'); }
+  }
+  const mmfDir = d.MMF_DIRECTION?.value;
+  if (mmfDir !== undefined && mmfDir !== null) {
+    if (mmfDir < 0) { liqScore += 1; liqParts.push('MMF↓'); }
+    else if (mmfDir > 0) { liqScore -= 1; liqParts.push('MMF↑'); }
+  }
+  const m2 = d.GLOBAL_M2_PROXY?.value;
+  if (m2 !== undefined && m2 !== null) {
+    if (m2 > 0) { liqScore += 1; liqParts.push(`M2 YoY ${m2.toFixed(1)}%`); }
+    else if (m2 < 0) { liqScore -= 1; liqParts.push(`M2 YoY ${m2.toFixed(1)}%`); }
+  }
+  d.LIQUIDITY_DIRECTION = {
+    name: 'liquidity_direction',
+    value: liqScore,
+    date: dt,
+    formula: `RRP/TGA/MMF 감소 + M2 YoY 양수 = 각 +1. -5~+5 범위. 현재: ${liqParts.join(' · ')}`,
+  };
+
   // === 채권 자경단 / 재정 리스크 (영상4 §07 "30년 4.93% 돌파, 미국 재정 리스크 노출") ===
   // DGS30 20일 변화율 + T10Y2Y 스티프닝(장기금리 상승 vs 단기 stable) 동시 시 자경단 신호.
   const dgs30 = val(raw, 'DGS30');
@@ -675,6 +756,27 @@ export async function computeDerived(
           date: latestWeekly.date,
           formula: `최근 주봉 양봉 여부`,
         };
+        // 주봉 20MA 돌파 트리거 (영상2:258, 영상3:184 "장기투자자 진입 기준")
+        if (mtf.weekly.length >= 20) {
+          const closes20 = mtf.weekly.slice(-20).map((c) => c.close);
+          const sma20w = closes20.reduce((a, b) => a + b, 0) / 20;
+          const prevClose = mtf.weekly.length >= 2 ? mtf.weekly[mtf.weekly.length - 2].close : null;
+          const curClose = latestWeekly.close;
+          const crossedUp = prevClose !== null && prevClose <= sma20w && curClose > sma20w;
+          const above = curClose > sma20w;
+          d[`${prefix}_WEEKLY_20MA`] = {
+            name: `${prefix.toLowerCase()}_weekly_20ma`,
+            value: parseFloat(sma20w.toFixed(2)),
+            date: latestWeekly.date,
+            formula: `최근 20주 종가 평균 (장기투자자 진입 기준)`,
+          };
+          d[`${prefix}_WEEKLY_20MA_RECOVERY`] = {
+            name: `${prefix.toLowerCase()}_weekly_20ma_recovery`,
+            value: crossedUp ? 1 : above ? 0.5 : 0,
+            date: latestWeekly.date,
+            formula: `1=이번 주 20MA 상향 돌파, 0.5=유지(상회), 0=하회`,
+          };
+        }
       }
     } catch {
       /* 멀티 타임프레임 수집 실패는 전체 파이프라인 막지 않음 */
@@ -735,6 +837,44 @@ export async function computeDerived(
         date: summary.latestDate,
         formula: '20D 순매수 합 ≥+3조 → 과열(+1) / ≤-3조 → 과매도(-1) / 중립(0)',
       };
+
+      // === 외국인-환율 괴리 (ATM화) 지수 (영상5 §112 "환율 5% 상승 대비 외국인 매도 2배 과잉") ===
+      // USDKRW 20일 변화율 × 예상매도 계수(3조/1% 상승) 로 기대 외국인 순매도 산출.
+      // 실제 순매도가 기대치의 절대값 대비 2배 이상이면 ATM화 (과잉) 경고 → 반발 조기신호.
+      try {
+        const usdkrwHist = await readHistory('yahoo', 'USDKRW');
+        if (usdkrwHist.length >= 20) {
+          const curFx = usdkrwHist[usdkrwHist.length - 1].value;
+          const oldFx = usdkrwHist[usdkrwHist.length - 20].value;
+          const fxChangePct = ((curFx - oldFx) / oldFx) * 100;
+          const expectedSell = fxChangePct * -30000; // 환율 1% 상승당 기대 매도 -3조 (음수)
+          const actualNet = summary.foreignNet20D;
+          const divergence = expectedSell !== 0 ? actualNet / expectedSell : 0;
+          d.KOSPI_FX_FOREIGN_DIVERGENCE = {
+            name: 'kospi_fx_foreign_divergence',
+            value: parseFloat(divergence.toFixed(2)),
+            date: summary.latestDate,
+            formula: `실제 외국인20D 순매수 / 기대매도(환율상승×-3조). 2+ 는 과매도 ATM화(반발 후보), <0.5 는 정상/매수`,
+          };
+          if (divergence >= 2 && fxChangePct > 0) {
+            d.KOSPI_ATM_WARNING = {
+              name: 'kospi_atm_warning',
+              value: 1,
+              date: summary.latestDate,
+              formula: `환율 +${fxChangePct.toFixed(2)}% 대비 외국인 매도가 기대치 ${divergence.toFixed(1)}배 — 과매도 반발 조기신호 (영상5 §112)`,
+            };
+          } else {
+            d.KOSPI_ATM_WARNING = {
+              name: 'kospi_atm_warning',
+              value: 0,
+              date: summary.latestDate,
+              formula: 'ATM화 조건 미충족',
+            };
+          }
+        }
+      } catch {
+        /* 괴리 계산 실패는 무시 */
+      }
     }
   } catch {
     /* 외국인 수급 수집 실패는 전체 파이프라인 막지 않음 */
