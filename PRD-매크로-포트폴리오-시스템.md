@@ -1841,6 +1841,7 @@ append cron 은 `0 22 * * *` (UTC) → `0 7 * * *` (KST) 로 표기만 변경 �
 | 배포 | Docker Compose 기반 홈서버 배포 완료 |
 | 5차 누적 | 신용 스트레드(CREDIT_HY_OAS/HYG/IEF), M2 YoY 방향(M2_YOY_PCT/DELTA/CROSS_DAYS), 은 이중 게이트(GSR≥70 AND ISM≥50/regime) |
 | 6차 누적 | 이격 streak(OVERHEATED/OVERSOLD/CHASE_WARNING), 트랑셰 영속화 + 추격 경고 배지, 심리 서브스코어(F&G/PC/AAII/NAAIM 가중평균) |
+| 7차 TOP3 | 센티먼트 4지표 UI(AAII/NAAIM/PCR/PSYCH 카드 + 임계 라벨 + 결측 "데이터 없음"), FX_FOREIGN_COMBO_ALERT 이중 게이트(환율×외인 streak, HARD=2/SOFT=1/WATCH=-1; HARD 시 EMERGING 30% cut), 분할매수 default 30/30/40 표준(execution_plan.DEFAULT_TRANCHE_WEIGHTS + POST tranche 시 weightPct 영속화) |
 
 ### 11.2 아직 미구현인 핵심 항목
 
