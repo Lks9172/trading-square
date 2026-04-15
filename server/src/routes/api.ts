@@ -117,14 +117,35 @@ router.get('/correlation', async (req: Request, res: Response) => {
 });
 
 // === Execution Plan 트랑셰 영속화 ===
+// Fix #7(2차 감사): tranche POST 입력 검증 강화.
+//   - asset: 허용된 자산 목록 내.
+//   - stage: 정수 1~5 (이전 1~3 → execution plan 은 최대 3단계지만 LEVERAGE 등 향후 확장 고려해 5 까지 허용).
+//   - priceAtEntry: 제공된 경우에 한해 finite 양수.
+const ALLOWED_TRANCHE_ASSETS = new Set([
+  'NASDAQ', 'KOSPI', 'GOLD', 'SILVER', 'COPPER', 'LEVERAGE', 'EMERGING',
+]);
+
 router.post('/execution-plan/tranche', async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const asset = String(body.asset || '').trim();
     const stage = Number(body.stage);
-    if (!asset || !Number.isFinite(stage) || stage < 1 || stage > 3) {
-      res.status(400).json({ error: 'asset(string) + stage(1~3) required' });
+    if (!ALLOWED_TRANCHE_ASSETS.has(asset)) {
+      res.status(400).json({
+        error: `invalid asset; must be one of ${Array.from(ALLOWED_TRANCHE_ASSETS).join(',')}`,
+      });
       return;
+    }
+    if (!Number.isInteger(stage) || stage < 1 || stage > 5) {
+      res.status(400).json({ error: 'invalid stage; integer 1..5 required' });
+      return;
+    }
+    if (body.priceAtEntry !== undefined && body.priceAtEntry !== null) {
+      const p = Number(body.priceAtEntry);
+      if (!Number.isFinite(p) || p <= 0) {
+        res.status(400).json({ error: 'invalid priceAtEntry; finite positive number required' });
+        return;
+      }
     }
 
     // 현재 snapshot 에서 regime/price 보강
