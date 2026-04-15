@@ -68,6 +68,8 @@ const DERIVED_LABELS: Record<string, { label: string; unit: string; desc: string
   KOSPI_WEEKLY_20MA:           { label: "코스피 주봉 20MA", unit: "pt", desc: "최근 20주 종가 평균", formula: "SMA(weekly close, 20)" },
   KOSPI_WEEKLY_20MA_RECOVERY:  { label: "코스피 주봉 20MA 회복", unit: "", desc: "1=이번 주 상향 돌파, 0.5=상회 유지, 0=하회", formula: "이번 주 close vs 20MA" },
   ICSA_REGIME_LABEL:           { label: "ICSA 매트릭스", unit: "", desc: "200DMA × ICSA 4구획. +2=안정확장 / +1=조정매수기회 / -1=모멘텀둔화 / -2=구조적위험 (영상3 §174)", formula: "200DMA 상/하회 × ICSA 20만대/30만+" },
+  WTI_60D_CHANGE:              { label: "유가 60일 변화",  unit: "%", desc: "WTI 60일 변화율. 2~3개월 뒤 CPI 지연 반영 방향 (영상5 §7m7s)", formula: "(cur - 60일전)/60일전 × 100" },
+  CPI_OIL_LAG_PRESSURE:        { label: "유가→CPI 압력",   unit: "", desc: "-2=강한 완화 / -1=완화 / 0=중립 / +1=상승 / +2=강한 상승 (2~3개월 뒤 CPI 전망)", formula: "WTI 60D 변화율 기반 구간 점수" },
   LIQUIDITY_DIRECTION:         { label: "유동성 방향", unit: "", desc: "RRP/TGA/MMF 감소 + M2 YoY 양수 합산. -5~+5. 영상4 §120 '총량 아닌 방향'", formula: "각 지표 방향 부호 합" },
   KOSPI_FX_FOREIGN_DIVERGENCE: { label: "외국인-환율 괴리", unit: "x", desc: "실제 외국인 20D 순매수 / 기대매도(환율상승×-3조). 2+ = 과매도 ATM화 반발 후보", formula: "actual / expected" },
   KOSPI_ATM_WARNING:           { label: "코스피 ATM 경고", unit: "", desc: "1=환율 상승 대비 외국인 매도 2배 이상 과잉 (영상5 §112 반발 조기신호)", formula: "divergence ≥ 2 AND fx↑" },

@@ -566,6 +566,43 @@ export async function computeDerived(
     }
   }
 
+  // === 유가 → CPI 2~3개월 지연 (영상5 §7m7s "유가 하락도 공급망 충격은 2~3개월 뒤 CPI") ===
+  // 60일 전 대비 현재 WTI 변화율 → 향후 2~3개월 CPI 지연 반영 방향 프록시.
+  // 음수: 유가 하락 → 2~3개월 뒤 CPI 완화 기대
+  // 양수: 유가 상승 → 2~3개월 뒤 CPI 상승 압력
+  try {
+    const wtiHist = await readHistory('yahoo', 'WTI');
+    if (wtiHist.length >= 60) {
+      const cur = wtiHist[wtiHist.length - 1].value;
+      const past60 = wtiHist[wtiHist.length - 60].value;
+      if (past60 > 0) {
+        const change60 = ((cur - past60) / past60) * 100;
+        d.WTI_60D_CHANGE = {
+          name: 'wti_60d_change',
+          value: parseFloat(change60.toFixed(2)),
+          date: dt,
+          formula: 'WTI 60일 변화율(%) — 2~3개월 뒤 CPI 지연 반영 방향 프록시 (영상5 §7m7s)',
+        };
+        // CPI 압력 프록시: |change| >= 10% 가면 지연 영향 크다
+        let pressure: 'high_down' | 'mild_down' | 'neutral' | 'mild_up' | 'high_up';
+        if (change60 <= -15) pressure = 'high_down';
+        else if (change60 <= -5) pressure = 'mild_down';
+        else if (change60 < 5) pressure = 'neutral';
+        else if (change60 < 15) pressure = 'mild_up';
+        else pressure = 'high_up';
+        const pressureScore = { high_down: -2, mild_down: -1, neutral: 0, mild_up: 1, high_up: 2 }[pressure];
+        d.CPI_OIL_LAG_PRESSURE = {
+          name: 'cpi_oil_lag_pressure',
+          value: pressureScore,
+          date: dt,
+          formula: `${pressure} — 유가 ${change60.toFixed(1)}% 기반 향후 2~3개월 CPI 압력 (-2 강한 완화 ~ +2 강한 상승)`,
+        };
+      }
+    }
+  } catch {
+    /* WTI 히스토리 실패 무시 */
+  }
+
   // === ICSA × 200DMA 2x2 매트릭스 (영상3 §174 "200DMA + 실업수당 조합 필터") ===
   // 200DMA 상회/하회 × ICSA 낮음(20만대)/높음(30만+) 조합의 4구획 레짐 라벨.
   const icsaVal = val(raw, 'ICSA');
