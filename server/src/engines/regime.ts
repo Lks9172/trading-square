@@ -192,6 +192,7 @@ export function classifyRegime(input: ScoringInput): RegimeState {
 
   const icsa = v(raw, 'ICSA');
   const overheated = dv(derived, 'OVERHEATED');
+  const creditStress = dv(derived, 'CREDIT_STRESS_FLAG');
   let regime: Regime;
 
   if (overheated === 1 && score >= 55) {
@@ -206,6 +207,18 @@ export function classifyRegime(input: ScoringInput): RegimeState {
     regime = 'CORRECTION';
   } else {
     regime = icsa !== null && icsa < 300000 ? 'PANIC_BUT_OK' : 'RECESSION_RISK';
+  }
+
+  // Fix #4: CREDIT_STRESS_FLAG 소비.
+  // HY OAS ≥ 600bp 또는 HYG/IEF z ≤ -2 발동 시 신용시장 스트레스.
+  // RISK_ON 은 위험을 감내하는 판단이므로 크레딧 경보가 울리면 NEUTRAL 로 강등.
+  // NEUTRAL 이하는 이미 방어적 톤이므로 단순 강등 대신 최소 CAUTION 수준을 보장.
+  if (creditStress === 1) {
+    if (regime === 'RISK_ON') {
+      regime = 'NEUTRAL';
+    } else if (regime === 'NEUTRAL') {
+      regime = 'CAUTION';
+    }
   }
 
   return {

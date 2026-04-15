@@ -123,7 +123,11 @@ export function computeAllocation(
 
   // === 재정 리스크 보정 (FISCAL_STRESS=1, 영상4 §07 채권 자경단) ===
   // 30년 금리 급등 + 높은 레벨 → 위험자산 축소, 금·현금 방어. OVERHEATED 와 별도로 발동 가능.
-  const fiscalStress = derived.FISCAL_STRESS?.value === 1;
+  // Fix #4: BOND_VIGILANTE_WARNING 소비 — 3축(장기금리↑·DXY약세·HY확대) 중 2+ 충족 시에도
+  // FISCAL_STRESS 와 동일 수준으로 재정 리스크 보정을 점화. 두 플래그는 OR 로 합성.
+  const fiscalStress =
+    derived.FISCAL_STRESS?.value === 1 ||
+    derived.BOND_VIGILANTE_WARNING?.value === 1;
   const fiscalStressHard = derived.FISCAL_STRESS_HARD?.value === 1;
   if (fiscalStress) {
     const amount = fiscalStressHard ? 15 : 8; // hard 는 더 강하게
@@ -164,6 +168,21 @@ export function computeAllocation(
     // 20:5 비율 유지 (cash:gold = 4:1)
     base.cash = (base.cash || 0) + actual * (20 / 25);
     base.gold = (base.gold || 0) + actual * (5 / 25);
+  }
+
+  // Fix #4: M2_YOY_CROSS_DAYS 소비 — 글로벌 유동성 음→양 교차 후 90일 이내면
+  // NASDAQ/LEVERAGE 에 +5% 쿠션(cash 에서 이관). 교차 직후의 유동성 랠리 초기 구간을 포착.
+  // 단 OVERHEATED=1 이면 비활성 — 과열 위에 쿠션 추가는 리스크 증폭이므로 금지.
+  const m2CrossDays = derived.M2_YOY_CROSS_DAYS?.value ?? null;
+  if (!overheated && m2CrossDays !== null && m2CrossDays >= 0 && m2CrossDays <= 90) {
+    const cushion = 5;
+    const cashAvail = base.cash || 0;
+    const actualCushion = Math.min(cashAvail, cushion);
+    if (actualCushion > 0) {
+      // NASDAQ 우선, 남으면 LEVERAGE 에 (단 leverageAllowed 는 아래에서 결정되므로 무조건 base 에 얹고 이후 차단 시 nasdaq 로 합산됨)
+      base.cash = cashAvail - actualCushion;
+      base.nasdaq = (base.nasdaq || 0) + actualCushion;
+    }
   }
 
   const leverageSignal = signals.find((s) => s.asset === 'LEVERAGE');

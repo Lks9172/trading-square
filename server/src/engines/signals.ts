@@ -121,6 +121,14 @@ function nasdaqSignal(
   if (fng !== null && fng < 25) { met++; reasons.push(`F&G ${fng} < 25 (가중치 1.0)`); }
   else { unmetReasons.push('Fear & Greed 25 미만 조건 미충족 (가중치 1.0 미충족)'); }
 
+  // Fix #4: PSYCH_SUBSCORE 소비 — F&G · PC Ratio 10D · AAII · NAAIM 가중평균이 극공포(≤0.2) 면 +1 보너스.
+  // 저점 확인 카테고리 보강. total 을 증가시키진 않아 BUY/STRONG_BUY 기준은 그대로지만 저점 매수 가점이 된다.
+  const psych = dv(derived, 'PSYCH_SUBSCORE');
+  if (psych !== null && psych <= 0.2) {
+    met++;
+    reasons.push(`심리 서브스코어 ${psych.toFixed(2)} ≤ 0.20 → 극공포 저점 가점 (보조 +1)`);
+  }
+
   // --- 유동성 카테고리 (1) ---
   // RRP 감소(시장 유동성 유입) OR 글로벌 M2 YoY 양수(글로벌 유동성 확장) 중 하나 이상.
   const rrpDir = dv(derived, 'RRP_DIRECTION');
@@ -602,6 +610,17 @@ function kospiSignal(
   const volumeConfirm = dv(derived, 'KOSPI_VOLUME_CONFIRM');
   if (volumeConfirm === 1) { met++; reasons.push('거래량 확인 (최근5일 평균 >= 20일 평균의 110%, 가중치 1.0)'); }
   else { unmetReasons.push('거래량 지속 조건 미충족 (가중치 1.0 미충족)'); }
+
+  // Fix #4: USDKRW_WEEKLY_CHANNEL_POSITION 소비 — 5년 주봉 회귀채널 내 위치(0~1).
+  // ≥ 0.9 (상단 근접) 이면 원화 약세 극단 → 외국인 매도 리스크 격상. FX 게이트 강화용.
+  // 이미 획득한 met 에서 1 차감(floor=0) 하고, 원화 강세 극단(≤0.1) 에서는 추가 가점 없이 reason 만.
+  const krwChannelPos = dv(derived, 'USDKRW_WEEKLY_CHANNEL_POSITION');
+  if (krwChannelPos !== null && krwChannelPos >= 0.9) {
+    met = Math.max(0, met - 1);
+    unmetReasons.push(`⚠️ USD/KRW 주봉채널 ${krwChannelPos.toFixed(2)} ≥ 0.9 → 원화 약세 극단, FX 게이트 강화 (met -1)`);
+  } else if (krwChannelPos !== null && krwChannelPos <= 0.1) {
+    reasons.push(`USD/KRW 주봉채널 ${krwChannelPos.toFixed(2)} ≤ 0.1 → 원화 강세 극단, 외국인 복귀 우호 (보조조건)`);
+  }
 
   // 멀티 타임프레임 경고 (영상5 코스피 연봉/월봉 "정상성" 판정)
   const kMtfExhaustion = dv(derived, 'KOSPI_MONTHLY_EXHAUSTION');
