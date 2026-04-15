@@ -67,9 +67,11 @@ interface CardProps {
   source: string;
   formula?: string;
   footer?: string;
+  /** 수집 차단 사유 (무료 소스 차단 등). missing 일 때 "데이터 없음" 아래 작게 표시. */
+  missingReason?: string;
 }
 
-function SentimentCard({ title, value, formatted, unit, badge, desc, source, formula, footer }: CardProps) {
+function SentimentCard({ title, value, formatted, unit, badge, desc, source, formula, footer, missingReason }: CardProps) {
   const missing = value === null;
   return (
     <div className="rounded-lg bg-[var(--background)] border border-[var(--card-border)] p-3 flex flex-col gap-1.5">
@@ -78,7 +80,14 @@ function SentimentCard({ title, value, formatted, unit, badge, desc, source, for
         <InfoTooltip title={title} description={desc} frequency="주간 (AAII/NAAIM) / 일일 (PCR)" source={source} />
       </div>
       {missing ? (
-        <div className="text-sm text-[var(--muted)] italic">데이터 없음</div>
+        <div className="flex flex-col gap-0.5">
+          <div className="text-sm text-[var(--muted)] italic">데이터 없음</div>
+          {missingReason && (
+            <div className="text-[9px] text-yellow-400/80 leading-tight" title={missingReason}>
+              ⚠ {missingReason}
+            </div>
+          )}
+        </div>
       ) : (
         <>
           <div className="flex items-baseline gap-1">
@@ -131,6 +140,7 @@ export function SentimentPanel({ raw, derived }: Props) {
           badge={aaii !== null ? aaiiLabel(aaii) : null}
           desc="AAII 개인투자자 설문 Bullish% - Bearish%. ≤-20 극공포(역발상), ≥20 탐욕."
           source={aaiiRaw?.source || (aaiiDer ? "자체 계산" : "AAII")}
+          missingReason="무료 소스 차단됨 (AAII xls 403 · stooq 유료화)"
         />
         <SentimentCard
           title="NAAIM Exposure"
@@ -149,6 +159,7 @@ export function SentimentPanel({ raw, derived }: Props) {
           badge={pcr !== null ? pcrLabel(pcr) : null}
           desc="CBOE Put/Call Ratio 10일 이동평균. ≥1.2 공포(역발상), ≤0.7 탐욕."
           source={pcrRaw?.source || (pcrDer ? "자체 계산" : "CBOE")}
+          missingReason="무료 소스 차단됨 (CBOE CSV 403 · Yahoo ^CPC 404)"
         />
         <SentimentCard
           title="PSYCH Subscore"
