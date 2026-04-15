@@ -22,6 +22,10 @@ function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
+// TODO(Fix #FE3): VIX 구간 컷 {40, 30, 20, 15} 근거 재확인 필요.
+//   - >40 = Panic (GFC/COVID 수준), >30 = Crisis, >20 = Elevated, >15 = 정상, ≤15 = 저변동.
+//   - "15" 경계는 영상4 §VIX 구간 — 필요 시 영상 원문 인용으로 근거 보강.
+//   - 현재 컷은 2008~2024 VIX 분포에서 대체로 합리적이나 백테스트 기반 sweep 은 미실시.
 function scoreVIX(vix: number | null): number {
   if (vix === null) return 0;
   if (vix > 40) return -2;
@@ -204,6 +208,10 @@ export function classifyRegime(input: ScoringInput): RegimeState {
     regime = 'STAGFLATION';
   } else if (bondVigilante === 1) {
     regime = 'BOND_VIGILANTE';
+  // TODO(Fix #FE3): score 컷 {75, 55, 40, 25} 근거 재확인.
+  //   Monte Carlo sweep + PRD §레짐 전환 구간 크로스체크 미실시. 현 컷은 0~100 score 를
+  //   5분위(80/60/40/20 근방)에 살짝 당겨 놓은 heuristic. 14개 component × 가중합 분포가
+  //   실제로 어떤 밴드에 분포하는지 backtest 로 관측 후 다시 결정 필요.
   } else if (overheated === 1 && score >= 55) {
     regime = 'CAUTION';
   } else if (score >= 75) {

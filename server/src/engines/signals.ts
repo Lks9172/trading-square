@@ -432,6 +432,10 @@ function copperSignal(
   else { unmetReasons.push('실업수당 감소 조건 미충족 (가중치 1.0 미충족)'); }
 
   const cgr = dv(derived, 'COPPER_GOLD_RATIO');
+  // TODO(Fix #FE3): CGR > 0.00125 임계 근거 불명.
+  //   영상2 원전은 "구리/금 비율 상승세" 만 언급 — 절대 0.00125 경계는 코드 상수로만 존재.
+  //   후보 개선: (a) 90일 z-score > 0 으로 상대 정규화, (b) 60일 추세 기울기 > 0 으로 방향 기반.
+  //   현 상수는 2015~2024 CGR 레벨 중앙값 근방이라 방향성은 얼추 맞지만 엄밀한 근거 없음.
   if (cgr !== null && cgr > 0.00125) { met++; reasons.push(`구리금비 ${cgr.toFixed(6)} 상승 우위 (가중치 1.0)`); }
   else if (cgr !== null) { unmetReasons.push(`구리금비 ${cgr.toFixed(6)} 아직 약함 (가중치 1.0 미충족)`); }
   else { unmetReasons.push('구리금비 데이터 없음 (가중치 1.0 미충족)'); }

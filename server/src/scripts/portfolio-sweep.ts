@@ -184,6 +184,34 @@ async function main() {
       const t = top5[i];
       console.log(`#${i + 1} score=${t.score.toFixed(2)} 1Y=${t.r1y.return_pct.toFixed(1)}% 3Y=${t.r3y.return_pct.toFixed(1)}% 5Y=${t.r5y.return_pct.toFixed(1)}% 10Y=${t.r10y.return_pct.toFixed(1)}%/${t.r10y.max_drawdown.toFixed(1)} → ${JSON.stringify(t.row)}`);
     }
+
+    // Fix #FE3: top-decile 평균 근거 출력.
+    //   상위 10% 샘플을 키별로 평균낸 뒤 100 으로 재정규화. BASE_ALLOCATIONS 교체 후보로 검토.
+    //   top1 대비 덜 sample-내 과적합이라 산출값이 top1 보다 보수적이면 교체 우선순위 高.
+    const decileSize = Math.max(1, Math.ceil(samples.length / 10));
+    const topDecile = samples.slice(0, decileSize);
+    const sumRow: Record<string, number> = {};
+    for (const s of topDecile) {
+      for (const [k, v] of Object.entries(s.row)) {
+        sumRow[k] = (sumRow[k] || 0) + v;
+      }
+    }
+    const meanRaw: Record<string, number> = {};
+    for (const [k, v] of Object.entries(sumRow)) meanRaw[k] = v / topDecile.length;
+    const meanSum = Object.values(meanRaw).reduce((a, b) => a + b, 0);
+    const meanRow: Record<string, number> = {};
+    for (const [k, v] of Object.entries(meanRaw)) {
+      meanRow[k] = Math.round((v / meanSum) * 100);
+    }
+    // 반올림 누적 오차 보정 — 최대 키에 잔차 더한다.
+    const meanTotal = Object.values(meanRow).reduce((a, b) => a + b, 0);
+    if (meanTotal !== 100) {
+      const maxKey = Object.entries(meanRow).sort((a, b) => b[1] - a[1])[0][0];
+      meanRow[maxKey] += 100 - meanTotal;
+    }
+    console.log(`[top-decile mean] N=${topDecile.length}/${samples.length} → ${JSON.stringify(meanRow)}`);
+    console.log(`[top1 vs decile diff] ${Object.keys(top5[0].row).map((k) => `${k}:${top5[0].row[k]}→${meanRow[k]}`).join(' ')}`);
+
     bestPerRegime[regime] = top5[0];
   }
 

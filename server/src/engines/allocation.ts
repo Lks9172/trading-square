@@ -11,6 +11,15 @@ import { ASSET_TO_ALLOC_KEY } from './asset-keys';
 //   * CAUTION/CORRECTION 에서 silver 0→7~8 로 편입 (영상2 "금은비 저평가 + 경기 확인" 정합)
 //   * cash 전반적으로 소폭 축소 (강세장 기간 수익 기여 극대화)
 // 효과: COMPOSED 10Y 225%→296% (+70%p), 5Y +17%p, 1Y +14%p (sweep 기준)
+//
+// TODO(Fix #FE3): **top1 → top-decile 평균 이관 필요**.
+//   현재 top1 은 N=40 샘플 내 최상값이라 전형적 sample-내 과적합 리스크. 상위 10% 평균을
+//   BASE 로 사용하면 데이터 기반 방향성은 유지하되 noise 민감도를 낮출 수 있음.
+//   작업 순서:
+//     1) portfolio-sweep.ts 에 `--top-decile` 모드 추가 (N 재조정, 아마 N≥100).
+//     2) 각 국면별 top 10% row 를 key-wise 평균 → 100 으로 재정규화.
+//     3) 현 top1 과 diff 를 본 커밋과 별개로 검토 → 백테스트 회귀 후 교체.
+//   본 커밋 스코프에서는 BASE 숫자 변경 없음 — TODO 주석만 명시.
 const BASE_ALLOCATIONS: Record<Regime, Record<string, number>> = {
   RISK_ON:        { cash: 8,  nasdaq: 32, leverage: 0,  gold: 7,  silver: 10, copper: 6,  korea: 18, emerging: 19 },
   NEUTRAL:        { cash: 8,  nasdaq: 38, leverage: 0,  gold: 14, silver: 8,  copper: 7,  korea: 14, emerging: 11 },
