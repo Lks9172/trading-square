@@ -1,6 +1,6 @@
 import axios from 'axios';
+import * as XLSX from 'xlsx';
 import { MarketDataPoint } from '../types/indicators';
-import { fetchYahooHistory } from './yahoo';
 
 export interface SentimentPoint {
   value: number | null;
@@ -17,185 +17,191 @@ const HEADERS = {
 
 const TIMEOUT_MS = 10000;
 
-// ---- CBOE Put/Call Ratio ------------------------------------------------
-// 1차: CBOE 공식 CSV 엔드포인트, 실패 시 Yahoo ^CPC / ^CPCE 로 폴백.
-// 최신값 + 10일 MA 를 함께 반환.
+// ---- CBOE Put/Call Ratio (자체 집계) -------------------------------------
+// 2026-04: CBOE 공식 PCR_ALL.csv 403, Yahoo ^CPC/^CPCE/^CPCI 404 로 모두 막힘.
+// 대안: CBOE delayed quotes options chain (_SPX + SPY + QQQ) 의 call/put volume
+// 을 직접 집계해 비율 계산. 당일 snapshot 값이고 10D MA 는 history rolling 으로.
+const CBOE_OPTION_TICKERS = ['_SPX', 'SPY', 'QQQ'];
+
 export async function fetchCBOEPutCall(): Promise<SentimentPoint> {
-  // 1) CBOE 공식 CSV
-  try {
-    const url = 'https://cdn.cboe.com/api/global/us_indices/daily_prices/PCR_ALL.csv';
-    const { data } = await axios.get<string>(url, {
-      headers: { ...HEADERS, Accept: 'text/csv' },
-      timeout: TIMEOUT_MS,
-      responseType: 'text',
-    });
-    const lines = data.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    // 헤더가 있는 CSV 가정 → 마지막 행이 최신
-    const rows: { date: string; value: number }[] = [];
-    for (const line of lines.slice(1)) {
-      const cols = line.split(',');
-      if (cols.length < 2) continue;
-      const d = cols[0].trim();
-      const v = parseFloat(cols[cols.length - 1]);
-      if (!Number.isFinite(v)) continue;
-      if (!/^\d{4}-\d{2}-\d{2}/.test(d)) continue;
-      rows.push({ date: d.slice(0, 10), value: v });
+  const urls = CBOE_OPTION_TICKERS.map(
+    (t) => `https://cdn.cboe.com/api/global/delayed_quotes/options/${t}.json`
+  );
+  const responses = await Promise.allSettled(
+    urls.map((url) =>
+      axios.get<{
+        timestamp?: string;
+        data?: { options?: Array<{ option: string; volume?: number }> };
+      }>(url, {
+        headers: { ...HEADERS, Accept: 'application/json', Referer: 'https://www.cboe.com/' },
+        timeout: TIMEOUT_MS,
+      })
+    )
+  );
+
+  let putVol = 0;
+  let callVol = 0;
+  let timestamp: string | null = null;
+  let successCount = 0;
+
+  for (const r of responses) {
+    if (r.status !== 'fulfilled') continue;
+    const opts = r.value.data?.data?.options;
+    if (!Array.isArray(opts)) continue;
+    successCount++;
+    if (!timestamp && r.value.data?.timestamp) timestamp = r.value.data.timestamp;
+    for (const o of opts) {
+      const sym = o.option ?? '';
+      const vol = o.volume ?? 0;
+      if (!Number.isFinite(vol)) continue;
+      if (/C\d{8}$/.test(sym)) callVol += vol;
+      else if (/P\d{8}$/.test(sym)) putVol += vol;
     }
-    if (rows.length >= 1) {
-      const latest = rows[rows.length - 1];
-      const last10 = rows.slice(-10).map((r) => r.value);
-      const ma10 = last10.reduce((a, b) => a + b, 0) / last10.length;
-      return {
-        value: parseFloat(latest.value.toFixed(3)),
-        asOf: latest.date,
-        source: 'CBOE',
-        extra: { ma10: parseFloat(ma10.toFixed(3)) },
-      };
-    }
-  } catch {
-    /* fallback to yahoo */
   }
 
-  // 2) Yahoo ^CPC (Total P/C) 폴백
-  try {
-    const hist = await fetchYahooHistory('^CPC', 20);
-    if (hist.length >= 1) {
-      // yahoo history 는 ASC 이므로 마지막이 최신
-      const closes = hist.map((h) => h.close).filter((x) => x > 0);
-      if (closes.length >= 1) {
-        const latest = closes[closes.length - 1];
-        const last10 = closes.slice(-10);
-        const ma10 = last10.reduce((a, b) => a + b, 0) / last10.length;
-        return {
-          value: parseFloat(latest.toFixed(3)),
-          asOf: hist[hist.length - 1].date,
-          source: 'YAHOO:^CPC',
-          extra: { ma10: parseFloat(ma10.toFixed(3)) },
-        };
-      }
-    }
-  } catch {
-    /* ignore */
+  if (successCount === 0 || callVol === 0) {
+    return {
+      value: null,
+      asOf: null,
+      source: 'CBOE:CHAIN',
+      error: 'CBOE delayed_quotes options chain 전부 실패 또는 callVol=0',
+    };
   }
 
+  const pcr = putVol / callVol;
+  const asOf = timestamp ? timestamp.slice(0, 10) : new Date().toISOString().slice(0, 10);
   return {
-    value: null,
-    asOf: null,
-    source: 'CBOE',
-    error: 'CBOE CSV + Yahoo ^CPC 모두 실패',
+    value: parseFloat(pcr.toFixed(3)),
+    asOf,
+    source: 'CBOE:CHAIN',
+    extra: {
+      putVol: Math.round(putVol),
+      callVol: Math.round(callVol),
+      tickers: successCount,
+    },
   };
 }
 
 // ---- AAII Bull/Bear Spread ---------------------------------------------
-// AAII 공식 CSV 는 로그인/제한이 있어 불안정 → stooq 미러 후보 포함.
-// 실패 시 null + error.
-export async function fetchAAIIBullBear(): Promise<SentimentPoint> {
-  const candidates = [
-    'https://www.aaii.com/files/surveys/sentiment.xls', // 원본(바이너리, 파싱 까다로움)
-    'https://stooq.com/q/d/l/?s=aaiibull&i=w', // stooq 주간 bull
-  ];
+// 2026-04 리서치: stooq 유료화 이후, AAII 공식 XLS 가 실제로는 200 OK (기존 코드
+// 주석이 403 으로 잘못 판단). SENTIMENT 시트 row 7~ 에서 Date(Excel serial) +
+// Bullish/Bearish/Spread(소수) 직접 파싱.
+const AAII_XLS_URL = 'https://www.aaii.com/files/surveys/sentiment.xls';
 
-  // stooq bull / bear 각각 가져와 spread 계산
+function excelSerialToISO(serial: number): string {
+  // Excel date serial: 1900-01-01 = 1, 단 1900 윤년 버그로 -25569 offset → UNIX ms 환산.
+  const ms = Math.round((serial - 25569) * 86400 * 1000);
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+export async function fetchAAIIBullBear(): Promise<SentimentPoint> {
   try {
-    const bullUrl = 'https://stooq.com/q/d/l/?s=aaiibull&i=w';
-    const bearUrl = 'https://stooq.com/q/d/l/?s=aaiibear&i=w';
-    const [bullRes, bearRes] = await Promise.all([
-      axios.get<string>(bullUrl, { headers: HEADERS, timeout: TIMEOUT_MS, responseType: 'text' }),
-      axios.get<string>(bearUrl, { headers: HEADERS, timeout: TIMEOUT_MS, responseType: 'text' }),
-    ]);
-    const parseLast = (csv: string): { date: string; value: number } | null => {
-      const lines = csv.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      for (let i = lines.length - 1; i >= 1; i -= 1) {
-        const cols = lines[i].split(',');
-        if (cols.length < 5) continue;
-        const d = cols[0];
-        const close = parseFloat(cols[4]);
-        if (Number.isFinite(close) && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-          return { date: d, value: close };
-        }
+    const { data } = await axios.get<ArrayBuffer>(AAII_XLS_URL, {
+      headers: { ...HEADERS, Accept: 'application/vnd.ms-excel' },
+      timeout: 20000,
+      responseType: 'arraybuffer',
+    });
+    const wb = XLSX.read(Buffer.from(data), { type: 'buffer' });
+    const ws = wb.Sheets['SENTIMENT'];
+    if (!ws) {
+      return { value: null, asOf: null, source: 'AAII', error: 'SENTIMENT 시트 없음' };
+    }
+    const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true }) as unknown[][];
+
+    // 최신 유효 행 역방향 탐색. Date serial 범위 40000~55000 (1999~2050) 내만 인정.
+    for (let i = rows.length - 1; i >= 7; i -= 1) {
+      const row = rows[i];
+      if (!Array.isArray(row) || row.length < 7) continue;
+      const serial = row[0];
+      if (typeof serial !== 'number' || serial < 40000 || serial > 55000) continue;
+
+      const bullish = row[1] as number;
+      const bearish = row[3] as number;
+      const spread = row[6] as number; // Bullish - Bearish, 소수 (0.0724 = 7.24%)
+
+      if (
+        !Number.isFinite(bullish) ||
+        !Number.isFinite(bearish) ||
+        !Number.isFinite(spread)
+      ) {
+        continue;
       }
-      return null;
-    };
-    const bull = parseLast(bullRes.data);
-    const bear = parseLast(bearRes.data);
-    if (bull && bear) {
-      const spread = bull.value - bear.value;
+
       return {
-        value: parseFloat(spread.toFixed(2)),
-        asOf: bull.date >= bear.date ? bull.date : bear.date,
-        source: 'STOOQ:AAII',
+        value: parseFloat((spread * 100).toFixed(2)), // -7.24 형태 (pp)
+        asOf: excelSerialToISO(serial),
+        source: 'AAII',
         extra: {
-          bull: parseFloat(bull.value.toFixed(2)),
-          bear: parseFloat(bear.value.toFixed(2)),
+          bull: parseFloat((bullish * 100).toFixed(2)),
+          bear: parseFloat((bearish * 100).toFixed(2)),
         },
       };
     }
-  } catch {
-    /* ignore */
+    return { value: null, asOf: null, source: 'AAII', error: '유효한 최신 행 없음' };
+  } catch (e) {
+    const msg = (e as { response?: { status?: number }; message?: string })?.response?.status || (e as Error)?.message;
+    return {
+      value: null,
+      asOf: null,
+      source: 'AAII',
+      error: `AAII XLS fetch 실패: ${msg}`,
+    };
   }
-
-  return {
-    value: null,
-    asOf: null,
-    source: 'AAII',
-    error: `AAII 접근 실패 (후보 ${candidates.length}개 모두 소스 제한)`,
-  };
 }
 
 // ---- NAAIM Exposure Index ----------------------------------------------
-// NAAIM 은 공식 페이지의 표/CSV 가 제공되며, 실패 시 null.
+// 2026-04 리서치: 기존 CSV URL 404. naaim.org/programs/naaim-exposure-index/
+// 페이지 HTML 테이블에 최신값 포함 — <tr><td>MM/DD/YYYY</td><td>숫자</td>...</tr>.
 export async function fetchNAAIM(): Promise<SentimentPoint> {
-  const urls = [
-    'https://www.naaim.org/wp-content/uploads/2023/11/NAAIM-Exposure-Index-Data.csv',
-    'https://www.naaim.org/programs/naaim-exposure-index/',
-  ];
+  const pageUrl = 'https://naaim.org/programs/naaim-exposure-index/';
+  try {
+    const { data } = await axios.get<string>(pageUrl, {
+      headers: { ...HEADERS, Accept: 'text/html' },
+      timeout: TIMEOUT_MS,
+      responseType: 'text',
+    });
 
-  for (const url of urls) {
-    try {
-      const { data } = await axios.get<string>(url, {
-        headers: { ...HEADERS, Accept: 'text/csv,text/html' },
-        timeout: TIMEOUT_MS,
-        responseType: 'text',
-      });
-      // CSV 경로
-      if (url.endsWith('.csv')) {
-        const lines = data.split(/\r?\n/).filter((l) => l.trim().length > 0);
-        for (let i = lines.length - 1; i >= 1; i -= 1) {
-          const cols = lines[i].split(',');
-          if (cols.length < 2) continue;
-          const d = cols[0].trim();
-          const mean = parseFloat(cols[cols.length - 1]);
-          if (Number.isFinite(mean)) {
-            const normalized = /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : d;
-            return {
-              value: parseFloat(mean.toFixed(2)),
-              asOf: normalized,
-              source: 'NAAIM',
-            };
-          }
-        }
-      } else {
-        // HTML 폴백: 본문에서 "Mean Value" 근처의 숫자 하나 긁는다
-        const match = data.match(/Mean[^0-9\-]*(-?\d+(?:\.\d+)?)/i);
-        if (match) {
-          return {
-            value: parseFloat(parseFloat(match[1]).toFixed(2)),
-            asOf: null,
-            source: 'NAAIM:HTML',
-          };
-        }
+    // HTML 테이블 행 순회 → 가장 최신(첫번째 매칭) 행의 date + value 추출.
+    const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+
+    for (const rowMatch of data.matchAll(rowRe)) {
+      const rowHtml = rowMatch[1];
+      const cells: string[] = [];
+      for (const cellMatch of rowHtml.matchAll(cellRe)) {
+        cells.push(cellMatch[1].replace(/<[^>]+>/g, '').trim());
       }
-    } catch {
-      /* try next */
-    }
-  }
+      if (cells.length < 2) continue;
 
-  return {
-    value: null,
-    asOf: null,
-    source: 'NAAIM',
-    error: 'NAAIM CSV/HTML 모두 실패',
-  };
+      const dateMatch = cells[0].match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (!dateMatch) continue;
+
+      const value = parseFloat(cells[1]);
+      if (!Number.isFinite(value)) continue;
+
+      const [, mm, dd, yyyy] = dateMatch;
+      return {
+        value: parseFloat(value.toFixed(2)),
+        asOf: `${yyyy}-${mm}-${dd}`,
+        source: 'NAAIM',
+      };
+    }
+
+    return {
+      value: null,
+      asOf: null,
+      source: 'NAAIM',
+      error: 'HTML 테이블에서 유효 행 미발견',
+    };
+  } catch (e) {
+    const msg = (e as { response?: { status?: number }; message?: string })?.response?.status || (e as Error)?.message;
+    return {
+      value: null,
+      asOf: null,
+      source: 'NAAIM',
+      error: `NAAIM 페이지 fetch 실패: ${msg}`,
+    };
+  }
 }
 
 // ---- 집계: 5분 스냅샷 cycle 에서 호출 ----------------------------------
