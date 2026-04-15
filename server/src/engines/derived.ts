@@ -23,6 +23,31 @@ function today(): string {
   return new Date().toISOString().split('T')[0];
 }
 
+// 최근부터 역순 순회하여 이격률이 threshold 를 연속으로 유지한 일수 반환.
+// direction='over' → disparity ≥ threshold 가 유지되는 구간
+// direction='under' → disparity ≤ threshold 가 유지되는 구간
+// history 는 '최근이 앞' (index 0 = 가장 최근) 이라는 기존 derived 컨벤션에 맞춘다.
+export function computeDisparityStreak(
+  history: number[],
+  current200MA: number,
+  threshold: number,
+  direction: 'over' | 'under' = 'over',
+): number | null {
+  if (!history || history.length === 0 || !Number.isFinite(current200MA) || current200MA <= 0) {
+    return null;
+  }
+  let streak = 0;
+  for (let i = 0; i < history.length; i += 1) {
+    const price = history[i];
+    if (!Number.isFinite(price) || price <= 0) break;
+    const disp = ((price - current200MA) / current200MA) * 100;
+    const inside = direction === 'over' ? disp >= threshold : disp <= threshold;
+    if (!inside) break;
+    streak += 1;
+  }
+  return streak;
+}
+
 export async function computeDerived(
   raw: Record<string, MarketDataPoint>
 ): Promise<Record<string, DerivedIndicator>> {
@@ -112,6 +137,34 @@ export async function computeDerived(
           };
         }
       }
+
+      // 200DMA 이격률이 ±15% 구간에 연속으로 머무른 일수 (추격/투매 피로 감지)
+      const overStreak = computeDisparityStreak(closes, sma200, 15, 'over');
+      const underStreak = computeDisparityStreak(closes, sma200, -15, 'under');
+      if (overStreak !== null) {
+        d.NASDAQ_DISPARITY_STREAK_OVERHEATED = {
+          name: 'nasdaq_disparity_streak_overheated',
+          value: overStreak,
+          date: dt,
+          formula: '이격률 ≥ +15% 연속 유지일 (200DMA 기준)',
+        };
+      }
+      if (underStreak !== null) {
+        d.NASDAQ_DISPARITY_STREAK_OVERSOLD = {
+          name: 'nasdaq_disparity_streak_oversold',
+          value: underStreak,
+          date: dt,
+          formula: '이격률 ≤ -15% 연속 유지일 (200DMA 기준)',
+        };
+      }
+      if ((overStreak ?? 0) >= 20 || (underStreak ?? 0) >= 20) {
+        d.NASDAQ_CHASE_WARNING = {
+          name: 'nasdaq_chase_warning',
+          value: 1,
+          date: dt,
+          formula: '이격률 ±15% 구간 20일 이상 지속 → 추격/투매 경고',
+        };
+      }
     }
   } catch {
     void 0;
@@ -165,6 +218,34 @@ export async function computeDerived(
         date: dt,
         formula: 'KOSPI > SMA200 ? 1 : 0',
       };
+
+      // 200DMA 이격률 ±15% 연속 일수 (추격/투매 피로)
+      const kospiOverStreak = computeDisparityStreak(closes, sma200, 15, 'over');
+      const kospiUnderStreak = computeDisparityStreak(closes, sma200, -15, 'under');
+      if (kospiOverStreak !== null) {
+        d.KOSPI_DISPARITY_STREAK_OVERHEATED = {
+          name: 'kospi_disparity_streak_overheated',
+          value: kospiOverStreak,
+          date: dt,
+          formula: '이격률 ≥ +15% 연속 유지일 (200DMA 기준)',
+        };
+      }
+      if (kospiUnderStreak !== null) {
+        d.KOSPI_DISPARITY_STREAK_OVERSOLD = {
+          name: 'kospi_disparity_streak_oversold',
+          value: kospiUnderStreak,
+          date: dt,
+          formula: '이격률 ≤ -15% 연속 유지일 (200DMA 기준)',
+        };
+      }
+      if ((kospiOverStreak ?? 0) >= 20 || (kospiUnderStreak ?? 0) >= 20) {
+        d.KOSPI_CHASE_WARNING = {
+          name: 'kospi_chase_warning',
+          value: 1,
+          date: dt,
+          formula: '이격률 ±15% 구간 20일 이상 지속 → 추격/투매 경고',
+        };
+      }
 
       const sma50 = closes.slice(0, 50).reduce((a, b) => a + b, 0) / 50;
       const trendRecovery = currentPrice > sma50 && sma50 > sma200 ? 1 : 0;

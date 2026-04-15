@@ -258,7 +258,8 @@ function goldSignal(
 
 function silverSignal(
   derived: Record<string, DerivedIndicator>,
-  raw: Record<string, MarketDataPoint>
+  raw: Record<string, MarketDataPoint>,
+  regime: RegimeState,
 ): AssetSignal {
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
@@ -269,10 +270,28 @@ function silverSignal(
   // 기존 임계 80은 상한선 기준이라 2021년 피크(~100) 같은 극단 구간에서만 점화.
   // 실제 영상 해석상 70 정도부터 시작해 저평가 신호로 간주 가능 → 70 메인,
   // 60~70 구간은 보조 가점.
+  // 6차 TOP3 Step 1B — 이중 게이트: 금은비 단독은 침체 초입에도 점화하므로
+  // 경기국면(ISM_PROXY 또는 regime) 동반 확인을 필수 게이트로 추가.
   const gsr = dv(derived, 'GOLD_SILVER_RATIO');
-  if (gsr !== null && gsr >= 70) { met++; reasons.push(`금은비 ${gsr.toFixed(1)} ≥ 70 (영상2 저평가 구간, 가중치 1.0)`); }
-  else if (gsr !== null && gsr >= 60) { reasons.push(`금은비 ${gsr.toFixed(1)} → 60~70 관찰 구간 (보조조건)`); }
-  else { unmetReasons.push(`금은비 ${gsr?.toFixed(1) ?? '?'} < 70 미충족 (가중치 1.0 미충족)`); }
+  const ismProxyForGate = dv(derived, 'ISM_PROXY') ?? v(raw, 'ISM_MANUFACTURING');
+  const regimeOk = regime.regime === 'RISK_ON' || regime.regime === 'NEUTRAL';
+  const ismOk = ismProxyForGate !== null && ismProxyForGate >= 50;
+  const contextOk = ismOk || regimeOk;
+  if (gsr !== null && gsr >= 70 && contextOk) {
+    met++;
+    const ctxLabel = ismOk
+      ? `ISM ${ismProxyForGate!.toFixed(1)} ≥ 50`
+      : `regime ${regime.regime}`;
+    reasons.push(`금은비 ${gsr.toFixed(1)} ≥ 70 + 경기국면 OK (${ctxLabel}, 가중치 1.0)`);
+  } else if (gsr !== null && gsr >= 70 && !contextOk) {
+    unmetReasons.push(
+      `금은비 ${gsr.toFixed(1)} ≥ 70 이지만 침체구간 GSR 진입 억제 (ISM ${ismProxyForGate?.toFixed(1) ?? '?'} < 50 AND regime=${regime.regime})`,
+    );
+  } else if (gsr !== null && gsr >= 60) {
+    reasons.push(`금은비 ${gsr.toFixed(1)} → 60~70 관찰 구간 (보조조건)`);
+  } else {
+    unmetReasons.push(`금은비 ${gsr?.toFixed(1) ?? '?'} < 70 미충족 (가중치 1.0 미충족)`);
+  }
 
   const icsa = v(raw, 'ICSA');
   if (icsa !== null && icsa < 250000) { met++; reasons.push('경기회복 신호 (실업수당 감소, 가중치 1.0)'); }
@@ -711,7 +730,7 @@ export function computeSignals(
     nasdaqSignal(raw, derived, profile),
     kospiSignal(raw, derived),
     goldSignal(raw, derived, profile),
-    silverSignal(derived, raw),
+    silverSignal(derived, raw, regime),
     copperSignal(derived, raw, profile),
     emergingSignal(raw, derived, profile),
     cashSignal(regime),
