@@ -1400,5 +1400,89 @@ export async function computeDerived(
     /* M2 YoY 계산 실패는 파이프라인 막지 않음 */
   }
 
+  // === 심리 서브스코어 (PSYCH_SUBSCORE) ===
+  // 6차 TOP3 Step 2 — F&G · P/C Ratio(10D) · AAII spread · NAAIM 가중평균(각 0.25).
+  // null 컴포넌트는 스킵하고 남은 가중치를 재정규화.
+  try {
+    const fng = val(raw, 'FEAR_GREED');
+    const pcr10 = val(raw, 'PC_RATIO_10D');
+    const aaii = val(raw, 'AAII_BULL_BEAR_SPREAD');
+    const naaim = val(raw, 'NAAIM_EXPOSURE');
+
+    // 패스스루 derived (대시보드/패널에서 참조)
+    if (pcr10 !== null) {
+      d.PC_RATIO_10D = {
+        name: 'pc_ratio_10d',
+        value: pcr10,
+        date: dt,
+        formula: 'CBOE Put/Call Ratio 10일 이동평균',
+      };
+    }
+    if (aaii !== null) {
+      d.AAII_BULL_BEAR_SPREAD = {
+        name: 'aaii_bull_bear_spread',
+        value: aaii,
+        date: dt,
+        formula: 'AAII Bullish% - Bearish% (주간)',
+      };
+    }
+    if (naaim !== null) {
+      d.NAAIM_EXPOSURE = {
+        name: 'naaim_exposure',
+        value: naaim,
+        date: dt,
+        formula: 'NAAIM Exposure Index (주간 평균)',
+      };
+    }
+
+    const components: { v: number | null; w: number }[] = [];
+
+    // F&G: 0~100 을 0~1 로 선형 정규화 (높을수록 탐욕)
+    if (fng !== null && Number.isFinite(fng)) {
+      components.push({ v: Math.max(0, Math.min(1, fng / 100)), w: 0.25 });
+    } else {
+      components.push({ v: null, w: 0.25 });
+    }
+
+    // PCR: 1.2+ = 극공포(=0), 0.7- = 극탐욕(=1) → 역정규화
+    if (pcr10 !== null && Number.isFinite(pcr10)) {
+      const clamped = Math.max(0.7, Math.min(1.2, pcr10));
+      const normalized = (1.2 - clamped) / (1.2 - 0.7); // 1.2→0, 0.7→1
+      components.push({ v: Math.max(0, Math.min(1, normalized)), w: 0.25 });
+    } else {
+      components.push({ v: null, w: 0.25 });
+    }
+
+    // AAII spread: -40(극공포) ~ +40(극탐욕)
+    if (aaii !== null && Number.isFinite(aaii)) {
+      const clamped = Math.max(-40, Math.min(40, aaii));
+      components.push({ v: (clamped + 40) / 80, w: 0.25 });
+    } else {
+      components.push({ v: null, w: 0.25 });
+    }
+
+    // NAAIM: 0~100 (이론상 -200~+200 이지만 실관측 0~100 범위 대부분)
+    if (naaim !== null && Number.isFinite(naaim)) {
+      const clamped = Math.max(0, Math.min(100, naaim));
+      components.push({ v: clamped / 100, w: 0.25 });
+    } else {
+      components.push({ v: null, w: 0.25 });
+    }
+
+    const valid = components.filter((c) => c.v !== null);
+    if (valid.length > 0) {
+      const totalW = valid.reduce((s, c) => s + c.w, 0);
+      const score = valid.reduce((s, c) => s + (c.v as number) * c.w, 0) / totalW;
+      d.PSYCH_SUBSCORE = {
+        name: 'psych_subscore',
+        value: parseFloat(score.toFixed(3)),
+        date: dt,
+        formula: `F&G·P/C 10D·AAII·NAAIM 가중평균 (가중 0.25 각, null 스킵 후 재정규화, ${valid.length}/4)`,
+      };
+    }
+  } catch {
+    /* 심리 서브스코어 실패는 파이프라인 막지 않음 */
+  }
+
   return d;
 }
