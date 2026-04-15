@@ -19,6 +19,11 @@ type Template = Record<Regime, Record<string, number>>;
 /**
  * 변형 정의. 각 국면의 비중 합은 100 을 유지 (gold 감소분은 nasdaq 에 우선 흡수).
  */
+// Fix #5: 레짐 8종 확장 — gold-backtest 는 STAGFLATION/BOND_VIGILANTE 탐색 대상 아님.
+// 모든 변형 동일 방어 비중으로 타입 만족.
+const DEFENSIVE_STAG = { cash: 25, nasdaq: 15, leverage: 0,  gold: 30, silver: 10, copper: 5,  korea: 8,  emerging: 7 };
+const DEFENSIVE_VIG  = { cash: 30, nasdaq: 10, leverage: 0,  gold: 35, silver: 8,  copper: 3,  korea: 7,  emerging: 7 };
+
 const VARIANTS: Record<string, Template> = {
   V0_current_PRD: {
     RISK_ON:        { cash: 10, nasdaq: 40, leverage: 0,  gold: 15, silver: 5, copper: 10, korea: 10, emerging: 10 },
@@ -27,6 +32,8 @@ const VARIANTS: Record<string, Template> = {
     CORRECTION:     { cash: 25, nasdaq: 30, leverage: 0,  gold: 25, silver: 0, copper: 5,  korea: 10, emerging: 5  },
     PANIC_BUT_OK:   { cash: 15, nasdaq: 35, leverage: 10, gold: 20, silver: 5, copper: 5,  korea: 5,  emerging: 5  },
     RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0, copper: 0,  korea: 5,  emerging: 5  },
+    STAGFLATION:    { ...DEFENSIVE_STAG },
+    BOND_VIGILANTE: { ...DEFENSIVE_VIG },
   },
   V1_lean_aggressive: {
     // gold: 5 / 12 / 20 / 22 / 15 / 28, 차액을 nasdaq + korea + emerging 에 분배
@@ -36,6 +43,8 @@ const VARIANTS: Record<string, Template> = {
     CORRECTION:     { cash: 25, nasdaq: 33, leverage: 0,  gold: 22, silver: 0, copper: 5,  korea: 10, emerging: 5  },
     PANIC_BUT_OK:   { cash: 15, nasdaq: 40, leverage: 10, gold: 15, silver: 5, copper: 5,  korea: 5,  emerging: 5  },
     RECESSION_RISK: { cash: 48, nasdaq: 14, leverage: 0,  gold: 28, silver: 0, copper: 0,  korea: 5,  emerging: 5  },
+    STAGFLATION:    { ...DEFENSIVE_STAG },
+    BOND_VIGILANTE: { ...DEFENSIVE_VIG },
   },
   V2_moderate: {
     // gold: 10 / 15 / 22 / 23 / 18 / 26
@@ -45,6 +54,8 @@ const VARIANTS: Record<string, Template> = {
     CORRECTION:     { cash: 25, nasdaq: 31, leverage: 0,  gold: 23, silver: 0, copper: 5,  korea: 11, emerging: 5  },
     PANIC_BUT_OK:   { cash: 15, nasdaq: 37, leverage: 10, gold: 18, silver: 5, copper: 5,  korea: 5,  emerging: 5  },
     RECESSION_RISK: { cash: 49, nasdaq: 15, leverage: 0,  gold: 26, silver: 0, copper: 0,  korea: 5,  emerging: 5  },
+    STAGFLATION:    { ...DEFENSIVE_STAG },
+    BOND_VIGILANTE: { ...DEFENSIVE_VIG },
   },
   V3_very_aggressive: {
     // gold: 3 / 10 / 18 / 20 / 12 / 25 (RECESSION 만 현 수준 유지)
@@ -54,6 +65,8 @@ const VARIANTS: Record<string, Template> = {
     CORRECTION:     { cash: 25, nasdaq: 35, leverage: 0,  gold: 20, silver: 0, copper: 5,  korea: 10, emerging: 5  },
     PANIC_BUT_OK:   { cash: 15, nasdaq: 43, leverage: 10, gold: 12, silver: 5, copper: 5,  korea: 5,  emerging: 5  },
     RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0, copper: 0,  korea: 5,  emerging: 5  },
+    STAGFLATION:    { ...DEFENSIVE_STAG },
+    BOND_VIGILANTE: { ...DEFENSIVE_VIG },
   },
   V4_mild: {
     // gold: 12 / 18 / 23 / 24 / 18 / 25 (현재보다 살짝만 낮춤)
@@ -63,6 +76,8 @@ const VARIANTS: Record<string, Template> = {
     CORRECTION:     { cash: 25, nasdaq: 31, leverage: 0,  gold: 24, silver: 0, copper: 5,  korea: 10, emerging: 5  },
     PANIC_BUT_OK:   { cash: 15, nasdaq: 37, leverage: 10, gold: 18, silver: 5, copper: 5,  korea: 5,  emerging: 5  },
     RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0, copper: 0,  korea: 5,  emerging: 5  },
+    STAGFLATION:    { ...DEFENSIVE_STAG },
+    BOND_VIGILANTE: { ...DEFENSIVE_VIG },
   },
 };
 

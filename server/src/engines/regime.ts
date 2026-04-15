@@ -193,9 +193,18 @@ export function classifyRegime(input: ScoringInput): RegimeState {
   const icsa = v(raw, 'ICSA');
   const overheated = dv(derived, 'OVERHEATED');
   const creditStress = dv(derived, 'CREDIT_STRESS_FLAG');
+  const stagflation = dv(derived, 'STAGFLATION_WARNING');
+  const bondVigilante = dv(derived, 'BOND_VIGILANTE_WARNING');
   let regime: Regime;
 
-  if (overheated === 1 && score >= 55) {
+  // Fix #5: STAGFLATION / BOND_VIGILANTE 최우선 override.
+  // 두 국면은 일반 score 분류보다 우선한다 — 플래그가 의미하는 구조적 신호는
+  // 0~100 점수에 완전히 매핑되지 않기 때문. 영상4 §137-147 / §145.
+  if (stagflation === 1) {
+    regime = 'STAGFLATION';
+  } else if (bondVigilante === 1) {
+    regime = 'BOND_VIGILANTE';
+  } else if (overheated === 1 && score >= 55) {
     regime = 'CAUTION';
   } else if (score >= 75) {
     regime = 'RISK_ON';
@@ -213,6 +222,7 @@ export function classifyRegime(input: ScoringInput): RegimeState {
   // HY OAS ≥ 600bp 또는 HYG/IEF z ≤ -2 발동 시 신용시장 스트레스.
   // RISK_ON 은 위험을 감내하는 판단이므로 크레딧 경보가 울리면 NEUTRAL 로 강등.
   // NEUTRAL 이하는 이미 방어적 톤이므로 단순 강등 대신 최소 CAUTION 수준을 보장.
+  // STAGFLATION / BOND_VIGILANTE 는 이미 방어적이므로 추가 강등하지 않는다.
   if (creditStress === 1) {
     if (regime === 'RISK_ON') {
       regime = 'NEUTRAL';

@@ -24,9 +24,13 @@ const CURRENT_PRD: Template = {
   CORRECTION:     { cash: 25, nasdaq: 30, leverage: 0,  gold: 25, silver: 0, copper: 5,  korea: 10, emerging: 5  },
   PANIC_BUT_OK:   { cash: 15, nasdaq: 35, leverage: 10, gold: 20, silver: 5, copper: 5,  korea: 5,  emerging: 5  },
   RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0, copper: 0,  korea: 5,  emerging: 5  },
+  // Fix #5: 레짐 8종 확장. gold-sweep 은 기존 6종 대상이므로 두 신규 레짐은 RECESSION_RISK 수준 방어 비중 사용.
+  STAGFLATION:    { cash: 25, nasdaq: 15, leverage: 0,  gold: 30, silver: 10, copper: 5,  korea: 8,  emerging: 7  },
+  BOND_VIGILANTE: { cash: 30, nasdaq: 10, leverage: 0,  gold: 35, silver: 8,  copper: 3,  korea: 7,  emerging: 7  },
 };
 
 const GOLD_CANDIDATES = [0, 5, 10, 15, 20, 25, 30, 35];
+// 기존 gold sweep 은 6종 한정. STAGFLATION/BOND_VIGILANTE 는 Fix #5 에서 추가된 방어 국면이라 스윕 대상 아님.
 const REGIMES: Regime[] = ['RISK_ON', 'NEUTRAL', 'CAUTION', 'CORRECTION', 'PANIC_BUT_OK', 'RECESSION_RISK'];
 
 /** 특정 국면의 gold 만 바꾸고 차액은 nasdaq 에 흡수한 변형 템플릿을 만든다. */

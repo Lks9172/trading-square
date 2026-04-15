@@ -15,13 +15,19 @@ export interface DerivedIndicator {
 }
 
 // ── 국면 ──
+// Fix #5: STAGFLATION / BOND_VIGILANTE 추가 (총 8종).
+// - STAGFLATION: 물가 압력 + 성장 둔화 동시 (영상4 §145). 금·은 방어, 위험자산 축소.
+// - BOND_VIGILANTE: 장기금리 급등 + DXY 약세 + HY 확대 (영상4 §137-147). 정책 실패 프리커서.
+// 두 분기는 STAGFLATION_WARNING / BOND_VIGILANTE_WARNING 플래그에 의해 최우선 override.
 export type Regime =
   | 'RISK_ON'
   | 'NEUTRAL'
   | 'CAUTION'
   | 'CORRECTION'
   | 'PANIC_BUT_OK'
-  | 'RECESSION_RISK';
+  | 'RECESSION_RISK'
+  | 'STAGFLATION'
+  | 'BOND_VIGILANTE';
 
 export interface RegimeState {
   regime: Regime;

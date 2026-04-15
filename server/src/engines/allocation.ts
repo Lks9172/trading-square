@@ -17,6 +17,10 @@ const BASE_ALLOCATIONS: Record<Regime, Record<string, number>> = {
   CORRECTION:     { cash: 13, nasdaq: 35, leverage: 0,  gold: 19, silver: 8,  copper: 5,  korea: 11, emerging: 9  },
   PANIC_BUT_OK:   { cash: 15, nasdaq: 35, leverage: 10, gold: 20, silver: 5,  copper: 5,  korea: 5,  emerging: 5  },
   RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0,  copper: 0,  korea: 5,  emerging: 5  },
+  // Fix #5: 스태그플레이션 — 물가↑ + 성장↓. 금·은 방어, 위험자산 축소. (영상4 §145)
+  STAGFLATION:    { cash: 25, nasdaq: 15, leverage: 0,  gold: 30, silver: 10, copper: 5,  korea: 8,  emerging: 7  },
+  // Fix #5: 채권 자경단 — 장기금리 급등 + DXY 약세 + HY 확대. 현금·금 극단 방어. (영상4 §137-147)
+  BOND_VIGILANTE: { cash: 30, nasdaq: 10, leverage: 0,  gold: 35, silver: 8,  copper: 3,  korea: 7,  emerging: 7  },
 };
 
 // 신호 배수는 PRD §6.3.2 스펙을 따른다.

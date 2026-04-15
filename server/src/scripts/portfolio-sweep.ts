@@ -24,6 +24,9 @@ const CURRENT_PRD: Template = {
   CORRECTION:     { cash: 25, nasdaq: 30, leverage: 0,  gold: 25, silver: 0, copper: 5,  korea: 10, emerging: 5  },
   PANIC_BUT_OK:   { cash: 15, nasdaq: 35, leverage: 10, gold: 20, silver: 5, copper: 5,  korea: 5,  emerging: 5  },
   RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0, copper: 0,  korea: 5,  emerging: 5  },
+  // Fix #5: 레짐 8종 확장 — portfolio-sweep 탐색 대상 아님, 타입 만족용 고정 방어 비중.
+  STAGFLATION:    { cash: 25, nasdaq: 15, leverage: 0,  gold: 30, silver: 10, copper: 5,  korea: 8,  emerging: 7  },
+  BOND_VIGILANTE: { cash: 30, nasdaq: 10, leverage: 0,  gold: 35, silver: 8,  copper: 3,  korea: 7,  emerging: 7  },
 };
 
 /** 각 국면의 자산별 [lo, hi] 제약. 영상/PRD 철학 최소 준수. */
@@ -34,8 +37,12 @@ const CONSTRAINTS: Record<Regime, Record<string, [number, number]>> = {
   CORRECTION:     { cash: [15, 40], nasdaq: [20, 45], leverage: [0, 0],   gold: [15, 35], silver: [0, 10], copper: [0, 10],  korea: [5, 20], emerging: [0, 15] },
   PANIC_BUT_OK:   { cash: [10, 25], nasdaq: [25, 55], leverage: [5, 15],  gold: [10, 30], silver: [0, 10], copper: [0, 10],  korea: [0, 15], emerging: [0, 15] },
   RECESSION_RISK: { cash: [40, 65], nasdaq: [5, 25],  leverage: [0, 0],   gold: [15, 40], silver: [0, 5],  copper: [0, 5],   korea: [0, 15], emerging: [0, 15] },
+  // Fix #5: STAGFLATION/BOND_VIGILANTE 는 탐색 대상 아님 — 고정 방어(스윕 비대상) 제약으로 통과.
+  STAGFLATION:    { cash: [25, 25], nasdaq: [15, 15], leverage: [0, 0],   gold: [30, 30], silver: [10, 10], copper: [5, 5],  korea: [8, 8],  emerging: [7, 7]  },
+  BOND_VIGILANTE: { cash: [30, 30], nasdaq: [10, 10], leverage: [0, 0],   gold: [35, 35], silver: [8, 8],   copper: [3, 3],  korea: [7, 7],  emerging: [7, 7]  },
 };
 
+// 스윕 대상은 원 6종 유지 (두 신규 국면은 데이터 부재로 탐색 의미 없음).
 const REGIMES: Regime[] = ['RISK_ON', 'NEUTRAL', 'CAUTION', 'CORRECTION', 'PANIC_BUT_OK', 'RECESSION_RISK'];
 const ASSETS = ['cash', 'nasdaq', 'leverage', 'gold', 'silver', 'copper', 'korea', 'emerging'];
 
