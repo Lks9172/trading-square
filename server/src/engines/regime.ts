@@ -7,6 +7,7 @@ interface ScoringInput {
     policyDirection: number;
     geoRisk: number;
   };
+  smartMoneyScore?: number;
 }
 
 function v(raw: Record<string, MarketDataPoint>, key: string): number | null {
@@ -84,6 +85,37 @@ function scoreDXYDirection(dxy: number | null): number {
   return 2;
 }
 
+function scoreWTI(wti: number | null): number {
+  if (wti === null) return 0;
+  if (wti > 100) return -2;
+  if (wti > 85) return -1;
+  if (wti > 65) return 0;
+  if (wti > 50) return 1;
+  return 2;
+}
+
+function scoreLiquidityDirection(derived: Record<string, DerivedIndicator>): number {
+  let score = 0;
+  let count = 0;
+  const rrp = derived.RRP_DIRECTION?.value;
+  const tga = derived.TGA_DIRECTION?.value;
+  const mmf = derived.MMF_DIRECTION?.value;
+  const gm2 = derived.GLOBAL_M2_PROXY?.value;
+
+  if (rrp !== undefined) { score += rrp < -1 ? 1 : rrp > 1 ? -1 : 0; count++; }
+  if (tga !== undefined) { score += tga < -10000 ? 1 : tga > 10000 ? -1 : 0; count++; }
+  if (mmf !== undefined) { score += mmf < -5 ? 1 : mmf > 5 ? -1 : 0; count++; }
+  if (gm2 !== undefined) { score += gm2 > 1 ? 1 : gm2 < -1 ? -1 : 0; count++; }
+
+  if (count === 0) return 0;
+  const avg = score / count;
+  if (avg >= 0.6) return 2;
+  if (avg > 0) return 1;
+  if (avg <= -0.6) return -2;
+  if (avg < 0) return -1;
+  return 0;
+}
+
 const WEIGHTS: Record<string, number> = {
   vix: 1.5,
   yieldCurve: 1.0,
@@ -92,12 +124,17 @@ const WEIGHTS: Record<string, number> = {
   nasdaqDisparity: 1.0,
   finStress: 1.0,
   dxy: 0.8,
+  liquidityDir: 1.0,
+  wti: 0.6,
+  globalM2: 0.7,
+  smartMoney: 0.6,
+  sectorMomentum: 0.8,
   policy: 0.5,
   geoRisk: 0.5,
 };
 
 export function classifyRegime(input: ScoringInput): RegimeState {
-  const { raw, derived, manualInputs } = input;
+  const { raw, derived, manualInputs, smartMoneyScore } = input;
 
   const components: Record<string, number> = {
     vix: scoreVIX(v(raw, 'VIXCLS')),
@@ -107,6 +144,37 @@ export function classifyRegime(input: ScoringInput): RegimeState {
     nasdaqDisparity: scoreNasdaqVs200DMA(dv(derived, 'NASDAQ_DISPARITY')),
     finStress: scoreFinStress(v(raw, 'STLFSI4')),
     dxy: scoreDXYDirection(v(raw, 'DXY')),
+    liquidityDir: scoreLiquidityDirection(derived),
+    wti: scoreWTI(v(raw, 'WTI')),
+    globalM2: (() => {
+      const gm2 = dv(derived, 'GLOBAL_M2_PROXY');
+      if (gm2 === null) return 0;
+      if (gm2 > 3) return 2;
+      if (gm2 > 1) return 1;
+      if (gm2 > -1) return 0;
+      if (gm2 > -3) return -1;
+      return -2;
+    })(),
+    smartMoney: clamp(smartMoneyScore ?? 0, -2, 2),
+    sectorMomentum: (() => {
+      const xlk = dv(derived, 'SECTOR_XLK');
+      const xli = dv(derived, 'SECTOR_XLI');
+      const xlv = dv(derived, 'SECTOR_XLV');
+      const xle = dv(derived, 'SECTOR_XLE');
+      let score = 0;
+      let count = 0;
+      if (xlk !== null) { score += xlk > 0 ? 1 : -1; count++; }
+      if (xli !== null) { score += xli > 0 ? 1 : -1; count++; }
+      if (xlv !== null) { score += xlv > 0 ? -0.5 : 0.5; count++; }
+      if (xle !== null) { score += xle > 0 ? -0.25 : 0.25; count++; }
+      if (count === 0) return 0;
+      const avg = score / count;
+      if (avg >= 0.75) return 2;
+      if (avg > 0.2) return 1;
+      if (avg <= -0.75) return -2;
+      if (avg < -0.2) return -1;
+      return 0;
+    })(),
     policy: clamp(manualInputs?.policyDirection ?? 0, -2, 2),
     geoRisk: clamp(2 - (manualInputs?.geoRisk ?? 2), -2, 2),
   };
@@ -123,9 +191,12 @@ export function classifyRegime(input: ScoringInput): RegimeState {
   const score = Math.round(clamp(normalized, 0, 100));
 
   const icsa = v(raw, 'ICSA');
+  const overheated = dv(derived, 'OVERHEATED');
   let regime: Regime;
 
-  if (score >= 75) {
+  if (overheated === 1 && score >= 55) {
+    regime = 'CAUTION';
+  } else if (score >= 75) {
     regime = 'RISK_ON';
   } else if (score >= 55) {
     regime = 'NEUTRAL';
