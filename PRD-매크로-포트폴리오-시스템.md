@@ -1629,12 +1629,64 @@ append cron 은 `0 22 * * *` (UTC) → `0 7 * * *` (KST) 로 표기만 변경 �
 
 | 소스 | 데이터 | 수집 방법 | 주기 |
 |---|---|---|---|
-| FRED | 금리, 유동성, 고용, 스트레스 등 20+ 시리즈 | REST API (무료, 키 필요) | 일간~월간 |
+| FRED | 금리, 유동성, 고용, 스트레스 등 20+ 시리즈 | REST API (무료, 키 필요) + retry/fallback | 일간~월간 |
 | Yahoo Finance | 가격 15+ 종목 | yfinance 라이브러리 | 일간 |
-| CBOE | VIX, SKEW, VVIX, OVX, PCR | 공개 데이터/Yahoo | 일간 |
+| CBOE | VIX, SKEW, VVIX, OVX, PCR | 공개 데이터/delayed_quotes options 직접 집계 | 일간 |
 | CNN | Fear & Greed Index | 비공식 API | 일간 |
+| AAII | Bull/Bear Sentiment Spread | 공식 XLS 직접 파싱 | 주간 |
+| NAAIM | Exposure Index | 페이지 HTML 테이블 파싱 | 주간 |
 | TradingEconomics | ISM, CPI, PCE (보조) | 스크래핑 또는 API | 월간 |
 | 사용자 입력 | 정책/지정학/스마트머니 | UI 입력 | 수시 |
+
+#### 7.1.1 FRED 수집 안정성: Retry + History Fallback
+
+22개 FRED 시리즈를 병렬 호출 시 transient 네트워크 실패(rate-limit, 일시 장애)로 일부가 누락되어,
+signal 조건(예: "실업수당 < 300K") 이 결측으로 불발되는 문제가 발생했다. 대책:
+
+1. **fetchSeries 1회 재시도** (내부):
+   - 초기 요청 실패 시 200~500ms jitter 백오프 후 1회 재시도.
+   - 2회 모두 실패 시 Error throw (호출자가 처리).
+
+2. **fetchAllFred 히스토리 fallback** (호출자):
+   - 22개 시리즈를 Promise.allSettled 로 병렬 호출.
+   - 실패한 시리즈(`rejected`) 또는 빈 결과(`[]`)에 대해 `readHistory('fred', key)` 로 마지막 저장값 로드.
+   - 원천 + 히스토리 모두 없을 때만 null (완전 결측 케이스).
+
+3. **명시적 실패 로깅**:
+   - 모든 실패 사유를 logger.warn 으로 기록 (silent drop 제거).
+   - 모니터링: 서버 로그에서 `[FRED]` 필터로 누락 추적 가능.
+
+**효과**: 당일 ICSA/UNRATE/IORB/WTREGEN/M2SL/M3_EURO 등이 누락되더라도, 신호 계산은 과거 값으로 진행되어
+signal 조건이 완전히 불발되는 사태는 회피. 실패 지표를 명시적으로 추적하여 데이터 품질 문제 조기 발견 가능.
+
+#### 7.1.2 센티먼트 소스 3종 교체 (2026-04)
+
+기존 경로 일부 차단으로 신규 무료 대안 3가지 도입:
+
+**Put/Call Ratio (PCR):**
+- 기존: CBOE `PCR_ALL.csv` (403), Yahoo `^CPC`/`^CPCE` (404) → 모두 차단.
+- **신규**: CBOE delayed_quotes options chain API (`_SPX`, `SPY`, `QQQ`) put/call volume 직접 집계.
+  ```
+  PCR = Σ(put_volume) / Σ(call_volume)
+  ```
+  당일 snapshot 값; 10일 MA는 history rolling (appendSentimentDaily 시 계산).
+
+**AAII Bull/Bear Spread:**
+- 기존: stooq 유료화로 접근 중단 (주석에 403 표기됨).
+- **신규**: AAII 공식 XLS 직접 파싱 (실제로 200 OK, 기존 판단 오류).
+  - URL: `https://www.aaii.com/files/surveys/sentiment.xls`
+  - SENTIMENT 시트 row 7~ : Date(Excel serial) + Bullish% + Bearish% + Spread(소수).
+
+**NAAIM Exposure Index:**
+- 기존: CSV 다운로드 404 → 접근 불가.
+- **신규**: 페이지 HTML 테이블 직접 파싱.
+  - 페이지에서 `<tr><td>MM/DD/YYYY</td><td>값</td></tr>` 패턴 검색.
+  - 최신 행의 exposure 값 사용.
+
+**심리 렌즈 (6.10 PSYCH) 4축 복원:**
+- F&G (CNN) + PCR (CBOE 직접 집계) + AAII (XLS 파싱) + NAAIM (HTML 파싱) 전부 가동.
+- 각 소스 실패 시 append skip (null 저장 금지, 멱등성 유지).
+- signalEngine 의 `dv()` 가드로 결측 지표 자동 제외 (met 카운트 왜곡 없음).
 
 ### 7.2 데이터 모델 (핵심 엔티티)
 
@@ -1851,9 +1903,9 @@ append cron 은 `0 22 * * *` (UTC) → `0 7 * * *` (KST) 로 표기만 변경 �
 | HYG 가격 | Yahoo `HYG` | 일간 | ✅ |
 | IEF 가격 | Yahoo `IEF` | 일간 | ✅ |
 | Fear & Greed | CNN 비공식 | 일간 | ⚠️ |
-| Put/Call Ratio | CBOE CSV | 일간 | ✅ |
-| AAII Bull/Bear | AAII 공식/stooq | 주간 | ⚠️ |
-| NAAIM Exposure | NAAIM 공식 | 주간 | ⚠️ |
+| Put/Call Ratio | CBOE delayed_quotes (_SPX+SPY+QQQ) | 일간 | ✅ |
+| AAII Bull/Bear | AAII 공식 XLS 파싱 | 주간 | ✅ |
+| NAAIM Exposure | 페이지 HTML 테이블 파싱 | 주간 | ✅ |
 | ISM PMI | TradingEcon/수동 | 월간 | ⚠️ |
 | CPI | FRED/BLS | 월간 | ✅ |
 | M2 (미국/유로/일본) | FRED `M2SL` / ECB / BOJ | 월간 | ✅ |
