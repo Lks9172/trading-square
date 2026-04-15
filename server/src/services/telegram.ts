@@ -1,5 +1,11 @@
 import axios from 'axios';
+import https from 'https';
 import { AssetSignal, RegimeState, AllocationPlan } from '../types/indicators';
+
+// IPv4 전용 소켓 강제. dns.setDefaultResultOrder('ipv4first') 는 해석 우선순위만
+// 바꾸고 IPv6 시도를 완전히 차단하진 않는다. httpsAgent 에 family: 4 를 지정하면
+// 소켓 단계에서 IPv4 only 로 못박아 Docker 브릿지 IPv6 라우팅 문제 우회.
+const ipv4Agent = new https.Agent({ family: 4, keepAlive: false });
 
 const SIGNAL_EMOJI: Record<string, string> = {
   STRONG_BUY: '🟢🟢',
@@ -157,7 +163,7 @@ export async function checkAndNotify(
     await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
       chat_id: chatId,
       text,
-    });
+    }, { timeout: 10000, httpsAgent: ipv4Agent });
   } catch (err: any) {
     console.error('Telegram notification failed:', err.message);
   }
@@ -182,7 +188,7 @@ export async function sendStartupSnapshot(signals: AssetSignal[], regime: Regime
       await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
         chat_id: chatId,
         text,
-      }, { timeout: 10000 });
+      }, { timeout: 10000, httpsAgent: ipv4Agent });
       console.log(`Startup telegram sent (attempt ${attempt})`);
       return true;
     } catch (err: any) {
@@ -205,7 +211,7 @@ export async function sendTestMessage() {
     await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
       chat_id: chatId,
       text: '✅ MacroSquare 텔레그램 알림 연결 완료!',
-    });
+    }, { timeout: 10000, httpsAgent: ipv4Agent });
     return true;
   } catch {
     return false;
