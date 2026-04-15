@@ -80,14 +80,25 @@ function formatSignalChange(
   const oldEmoji = SIGNAL_EMOJI[oldSignal] || '?';
   const newEmoji = SIGNAL_EMOJI[newSignal] || '?';
 
-  // 이전엔 없다가 지금 충족된 조건 (새로 켜진 근거)
+  // 이전 ↔ 현재 reasons diff — 양방향
   const prevSet = new Set(prevReasons);
-  const newlyMet = reasons.filter((r) => !prevSet.has(r));
-  // 신규 충족 조건이 있으면 우선 노출, 없으면 현재 상위 근거
-  const keyReasons = (newlyMet.length > 0 ? newlyMet : reasons).slice(0, 3);
-  const reasonLines = keyReasons.join('\n  • ');
-  const newTag = newlyMet.length > 0 ? '🆕 새로 충족' : '📌 주요 근거';
-  return `📊 ${label} 신호 변경\n${oldEmoji} ${oldSignal} → ${newEmoji} ${newSignal}\n\n${newTag}:\n  • ${reasonLines}`;
+  const curSet = new Set(reasons);
+  const newlyMet = reasons.filter((r) => !prevSet.has(r));      // 새로 켜진 근거
+  const newlyLost = prevReasons.filter((r) => !curSet.has(r));  // 사라진 근거
+
+  const sections: string[] = [];
+  if (newlyMet.length > 0) {
+    sections.push(`🆕 새로 충족:\n  • ${newlyMet.slice(0, 3).join('\n  • ')}`);
+  }
+  if (newlyLost.length > 0) {
+    sections.push(`❌ 사라진 근거:\n  • ${newlyLost.slice(0, 3).join('\n  • ')}`);
+  }
+  // 양쪽 다 비어있으면 (드물지만 가능) 현재 top 3 로 fallback
+  if (sections.length === 0) {
+    sections.push(`📌 현재 근거:\n  • ${reasons.slice(0, 3).join('\n  • ')}`);
+  }
+
+  return `📊 ${label} 신호 변경\n${oldEmoji} ${oldSignal} → ${newEmoji} ${newSignal}\n\n${sections.join('\n\n')}`;
 }
 
 function formatRegimeChange(
