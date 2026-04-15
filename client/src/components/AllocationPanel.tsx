@@ -47,9 +47,36 @@ interface Props {
     buyStage: number | null;
   };
   overheated?: boolean;
+  // 7차 TOP3 Fix #2: FX_FOREIGN_COMBO_ALERT (HARD=2, SOFT=1, WATCH=-1, null=해당 없음)
+  fxComboAlert?: number | null;
 }
 
-export function AllocationPanel({ allocation, overheated }: Props) {
+function FxComboBadge({ level }: { level: number }) {
+  if (level === 2) {
+    return (
+      <div className="mt-2 text-[10px] sm:text-xs text-red-200 bg-red-500/15 border border-red-500/40 rounded-lg p-2.5">
+        🔴 환율+외인 극단 경보 (HARD) — 원/달러 1500원 이상 + 외국인 5일+ 연속 순매도. 한국·신흥국 방어 강화.
+      </div>
+    );
+  }
+  if (level === 1) {
+    return (
+      <div className="mt-2 text-[10px] sm:text-xs text-yellow-200 bg-yellow-500/10 border border-yellow-500/40 rounded-lg p-2.5">
+        🟡 환율+외인 경고 (SOFT) — 원/달러 1480원 이상 + 외국인 3일+ 연속 순매도. 추격매수 주의.
+      </div>
+    );
+  }
+  if (level === -1) {
+    return (
+      <div className="mt-2 text-[10px] sm:text-xs text-green-200 bg-green-500/10 border border-green-500/40 rounded-lg p-2.5">
+        🟢 외인 복귀 유리 (WATCH) — 원/달러 1400원 이하 + 외국인 매도 streak 소멸. 분할 진입 호재.
+      </div>
+    );
+  }
+  return null;
+}
+
+export function AllocationPanel({ allocation, overheated, fxComboAlert }: Props) {
   const [totalAsset, setTotalAsset] = useState<string>("");
   const totalNum = parseInt(totalAsset.replace(/[^0-9]/g, ""), 10) || 0;
 
@@ -172,6 +199,7 @@ export function AllocationPanel({ allocation, overheated }: Props) {
             ⚠️ 과열 구간 감지: 현금 +20%, 금 +5%로 방어 강화. 나스닥/한국/신흥국/구리 비중이 자동 축소됨.
           </div>
         )}
+        {fxComboAlert !== null && fxComboAlert !== undefined && <FxComboBadge level={fxComboAlert} />}
       </div>
     </div>
   );

@@ -86,7 +86,11 @@ export function Dashboard({ snapshot }: Props) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         <SignalPanel signals={currentSnapshot.signals} />
-        <AllocationPanel allocation={currentSnapshot.allocation} overheated={currentSnapshot?.derived?.OVERHEATED?.value === 1} />
+        <AllocationPanel
+          allocation={currentSnapshot.allocation}
+          overheated={currentSnapshot?.derived?.OVERHEATED?.value === 1}
+          fxComboAlert={currentSnapshot?.derived?.FX_FOREIGN_COMBO_ALERT?.value ?? null}
+        />
       </div>
 
       <ExecutionPlanPanel

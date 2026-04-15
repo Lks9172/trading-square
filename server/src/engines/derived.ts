@@ -1490,5 +1490,40 @@ export async function computeDerived(
     /* 심리 서브스코어 실패는 파이프라인 막지 않음 */
   }
 
+  // === FX_FOREIGN_COMBO_ALERT (7차 TOP3 Fix #2) ===
+  // USDKRW 레벨과 외국인 연속 순매도 streak 의 교집합 경보.
+  // 단일 환율 레벨보다 "환율 극단 + 외국인 실제 이탈" 동시 충족 시 KOSPI/EMERGING 감산 강화.
+  // HARD(2): 환율 ≥1500 AND 외국인 5일 이상 연속 순매도 — 이중 게이트 극단.
+  // SOFT(1): 환율 ≥1480 AND 외국인 3일 이상 연속 순매도 — 경고.
+  // WATCH(-1): 환율 ≤1400 AND 외국인 연속 순매도 0 — 외인 복귀 유리 조건.
+  try {
+    const usdkrw = val(raw, 'USDKRW');
+    const foreignSellStreak = d.KOSPI_FOREIGN_SELL_STREAK?.value ?? null;
+    if (usdkrw !== null && foreignSellStreak !== null) {
+      let level: number | null = null;
+      let label = '';
+      if (usdkrw >= 1500 && foreignSellStreak >= 5) {
+        level = 2;
+        label = 'HARD — 환율 1500+ AND 외인 5일+ 연속 매도';
+      } else if (usdkrw >= 1480 && foreignSellStreak >= 3) {
+        level = 1;
+        label = 'SOFT — 환율 1480+ AND 외인 3일+ 연속 매도';
+      } else if (usdkrw <= 1400 && foreignSellStreak <= 0) {
+        level = -1;
+        label = 'WATCH — 환율 1400- AND 외인 매도 streak 없음 (복귀 유리)';
+      }
+      if (level !== null) {
+        d.FX_FOREIGN_COMBO_ALERT = {
+          name: 'fx_foreign_combo_alert',
+          value: level,
+          date: dt,
+          formula: `HARD=2, SOFT=1, WATCH=-1. ${label}`,
+        };
+      }
+    }
+  } catch {
+    /* FX+외인 복합 게이트 실패는 파이프라인 막지 않음 */
+  }
+
   return d;
 }

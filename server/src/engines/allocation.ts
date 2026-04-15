@@ -146,6 +146,19 @@ export function computeAllocation(
     }
   }
 
+  // === FX_FOREIGN_COMBO_ALERT (7차 TOP3 Fix #2) ===
+  // 환율 + 외국인 연속 매도 이중 게이트. HARD(2) 시 emerging 도 korea 와 동일 로직으로 30% cut.
+  // SOFT(1)/WATCH(-1) 는 배지 전용 — allocation 추가 조정 없음 (FX_LEVEL 감산으로 커버).
+  // 중복 감산 방지: FX_LEVEL ≤ -2 는 이미 korea 50% cut 한 상태 → HARD 에서는 emerging 만 cut.
+  const fxComboAlert = derived.FX_FOREIGN_COMBO_ALERT?.value ?? null;
+  if (fxComboAlert === 2) {
+    const cut = (base.emerging || 0) * 0.3;
+    if (cut > 0) {
+      base.emerging -= cut;
+      base.cash += cut;
+    }
+  }
+
   // === 방어 보정 우선순위 정책 (Fix #7) ===
   // 기존: FISCAL_STRESS / OVERHEATED 가 독립적으로 순차 발동 가능했음 →
   //   두 플래그 동시 on 이면 `cash` 가 이중으로 팽창(원래 base 50 → 실측 60+)하거나
