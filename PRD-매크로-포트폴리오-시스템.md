@@ -498,17 +498,27 @@ IF 실질금리_상승 AND DXY_강세:
 
 **영상 근거**: 영상 2 (금은비 + 경기회복 동시 충족 필요)
 
-```
-silver_outperform_signal =
-  (금은비 >= 80)
-  AND (ISM_제조업 > 50 OR ISM_반등중)
-  AND (실업수당 감소 추세)
+**이중 게이트 규칙** (6차 추가):
 
-IF silver_outperform_signal:
+```
+silver_signal =
+  (금은비 >= 80)
+  AND (ISM_제조업 > 50 OR regime ∈ {RISK_ON, NEUTRAL})
+  AND (실업수당 감소 추세 OR 신규청구 < 300K)
+
+이중 게이트 조건:
+  1. GSR >= 70 (은이 저평가)
+  2. ISM >= 50 OR 국면이 RISK_ON/NEUTRAL (경기회복 신호)
+  
+IF 이중 게이트 모두 충족:
   signal = BUY ("금 대비 은 비중 확대 고려")
 ELSE:
-  signal = HOLD ("조건 미충족, 대기")
+  signal = HOLD ("침체 구간 오진입 억제")
 ```
+
+**침체 방지 로직**:
+- 게이트 설계 목표: GSR 단독으로는 침체 구간에 은을 과매수하지 않음
+- ISM 50 미만 + 국면이 CAUTION/CORRECTION 이면 신호 억제 → 오진입 회피
 
 ---
 
@@ -903,6 +913,12 @@ IF OVERHEATED = 1:
 | P-10 | 비중 변경 알림 | P1 | ❌ |
 | P-11 | 백테스트: 과거 국면 기반 성과 시뮬레이션 | P2 | ❌ |
 | P-12 | 증권사 API 연동 (실제 잔고 연동) | P3 | ❌ |
+| P-13 | 트랑셰 영속화 (자산별 분할매수 추적) | P0 | ✅ |
+| P-14 | 추격 경고 배지 (진입 후 국면 개선 시) | P0 | ✅ |
+| P-15 | 이격 streak 경고 (OVERHEATED/OVERSOLD) | P0 | ✅ |
+| P-16 | M2 방향 전환 추적 | P0 | ✅ |
+| P-17 | 신용 스트레스 플래그 (HY OAS/z-score) | P0 | ✅ |
+| P-18 | 심리 서브스코어 (심리 4지표 종합) | P0 | ✅ |
 
 ---
 
@@ -943,6 +959,58 @@ IF OVERHEATED = 1:
 | SELL | 50% 이상 축소 | — | 즉시 익절 | — | 정책 긴축 신호 |
 
 **기타 자산**(은, 구리, 신흥국)도 유사한 3단계 구조로 관리.
+
+---
+
+### 6.8.1 트랑셰 영속화 및 추격 경고 (6차 추가)
+
+각 자산의 분할매수 진입을 추적하여 UI에서 체크박스로 관리하고, 추격 경고 배지를 표시한다.
+
+#### 트랑셰 상태 저장
+
+```
+POST /api/execution-plan/tranche
+{
+  "asset": "NASDAQ",
+  "tranche": 1,           # 1차/2차/3차
+  "entry_price": 14500,
+  "entry_date": "2026-04-15",
+  "status": "pending"     # pending / filled / closed
+}
+
+저장 위치: data/execution/tranche-state.json
+```
+
+#### UI 트랑셰 패널
+
+```
+✓ 나스닥 1차 (현재가 대비 -5% 진입)
+  └─ 진입가: 14500, 진입일: 2026-04-15
+  
+  [⚠️ 추격 경고] regimeAtEntry=PANIC_BUT_OK → 현 regime=RISK_ON (상승)
+  → "추격매수 주의: 진입 이후 국면 개선됨"
+
+✓ 나스닥 2차 (현재가 대비 -10% 진입)
+  └─ 진입가: 14300, 진입일: 2026-04-14
+  └─ 익절 신호: +20% 달성 시 자동 마킹
+  
+□ 나스닥 3차 (W반등 확인 대기)
+  └─ 대기 조건: W 패턴 완성 필요
+  
+🔵 "N차 집행" 버튼 → 매거진 스타일로 마스스 저장
+```
+
+#### 추격 경고 배지
+
+```
+IF regimeAtEntry < regimeCurrent (진입 후 국면이 상향):
+  badge = "⚠️ 추격 경고"
+  color = orange
+  message = "진입 이후 환경이 개선됨. 기존 계획 재검토."
+  
+기본값: PANIC_BUT_OK (regimeAtEntry) → RISK_ON (현재)
+  → 추격 경고 발동
+```
 
 ---
 
@@ -1007,7 +1075,7 @@ IF OVERHEATED = 1:
 
 ## 6.10 파생 지표 (Derived Indicators)
 
-약 40개 이상의 파생지표를 자동 계산해 국면·신호·실행계획에 활용한다.
+약 50개 이상의 파생지표를 자동 계산해 국면·신호·실행계획에 활용한다.
 
 ### 지표 분류
 
@@ -1015,7 +1083,25 @@ IF OVERHEATED = 1:
 - NASDAQ_DISPARITY (200DMA, 50DMA, 20DMA 대비 이격도)
 - NASDAQ_DRAWDOWN (전고점 대비 낙폭)
 - NASDAQ_ABOVE_200DMA (200DMA 위/아래 플래그)
-- KOSPI_DISPARITY, KOSPI_DRAWDOWN 등
+- NASDAQ_DISPARITY_STREAK_OVERHEATED (200DMA 대비 +15% 연속 유지일)
+- NASDAQ_DISPARITY_STREAK_OVERSOLD (200DMA 대비 -15% 연속 유지일)
+- NASDAQ_DISPARITY_CHASE_WARNING (streak ≥ 20일 시 추격 경고)
+- KOSPI_DISPARITY, KOSPI_DRAWDOWN, KOSPI_DISPARITY_STREAK_* 등
+
+**신용 위험 및 유동성** (5차 추가):
+- CREDIT_HY_OAS_BP (FRED BAMLH0A0HYM2: 하이일드 스프레드 basis points)
+- CREDIT_HYG_IEF_RATIO (Yahoo HYG/IEF 비율: 신용 심화도)
+- CREDIT_HYG_IEF_ZSCORE (252일 z-score: 신용 스트레스 정도)
+- CREDIT_STRESS_FLAG (HY OAS ≥ 600bp OR z ≤ -2 시 경고)
+
+**유동성 방향 및 M2** (5차·6차 추가):
+- RRP_DIRECTION (역레포 변화 추세)
+- TGA_DIRECTION (재무부 계정 변화)
+- MMF_DIRECTION (머니마켓펀드 순변화)
+- LIQUIDITY_DIRECTION (종합 유동성 점수)
+- M2_YOY_PCT (M2 전년대비 %: 실제 공급량 추세)
+- M2_YOY_DELTA_3M (M2_YOY 3개월 변화도: 방향 전환 감지)
+- M2_YOY_CROSS_DAYS (음→양 교차 이후 경과일: "총량보다 방향" 원칙)
 
 **비율 및 스프레드:**
 - GOLD_SILVER_RATIO (금은비)
@@ -1027,17 +1113,17 @@ IF OVERHEATED = 1:
 - REAL_YIELD_TREND (실질금리 추세)
 - NASDAQ_CROSS, KOSPI_CROSS (골든/데드크로스 플래그)
 
-**유동성 방향:**
-- RRP_DIRECTION (역레포 변화 추세)
-- TGA_DIRECTION (재무부 계정 변화)
-- MMF_DIRECTION (머니마켓펀드 순변화)
-- LIQUIDITY_DIRECTION (종합 유동성 점수)
-
 **환율 및 외국인 수급:**
 - KRW_FX_LEVEL (환율 레벨 분류: -2, -1, 0, 1, 2)
 - KRW_FX_GREEN (≤1480원), KRW_FX_RED (≥1500원)
 - KOSPI_FOREIGN_NET_20D (외국인 20일 순매수)
 - KOSPI_FOREIGN_TREND (추세), KOSPI_FOREIGN_BUY_STREAK (연속매수일수)
+
+**심리 서브스코어** (6차 추가):
+- PC_RATIO_10D (CBOE Put/Call Ratio 10일 MA: 매수/매도 심리)
+- AAII_BULL_BEAR_SPREAD (AAII Bull% - Bear%: 개인투자자 심리)
+- NAAIM_EXPOSURE (NAAIM Exposure Index: 기관 리스크 노출도)
+- PSYCH_SUBSCORE (F&G·PC·AAII·NAAIM 가중평균: null 시 재정규화)
 
 **다중 타임프레임:**
 - NASDAQ_MONTHLY_EXHAUSTION (3개월 연속 장대양봉 + 아래꼬리 없음)
@@ -1288,12 +1374,19 @@ IF OVERHEATED = 1:
 | 신규실업수당 | FRED `ICSA` | 주간 | ✅ |
 | SOFR | FRED `SOFR` | 일간 | ✅ |
 | EFFR | FRED `EFFR` | 일간 | ✅ |
+| 하이일드 스프레드 | FRED `BAMLH0A0HYM2` | 일간 | ✅ |
+| HYG 가격 | Yahoo `HYG` | 일간 | ✅ |
+| IEF 가격 | Yahoo `IEF` | 일간 | ✅ |
 | Fear & Greed | CNN 비공식 | 일간 | ⚠️ |
+| Put/Call Ratio | CBOE CSV | 일간 | ✅ |
+| AAII Bull/Bear | AAII 공식/stooq | 주간 | ⚠️ |
+| NAAIM Exposure | NAAIM 공식 | 주간 | ⚠️ |
 | ISM PMI | TradingEcon/수동 | 월간 | ⚠️ |
 | CPI | FRED/BLS | 월간 | ✅ |
-| 정책 방향 | 사용자 수동 | 수시 | 수동 |
-| 지정학 리스크 | 사용자 수동 | 수시 | 수동 |
-| 중앙은행 금 매수 | 사용자 수동 | 분기 | 수동 |
+| M2 (미국/유로/일본) | FRED `M2SL` / ECB / BOJ | 월간 | ✅ |
+| 정책 방향 | 자동(EFFR), 수동 입력 | 수시 | 수동 |
+| 지정학 리스크 | GPR 지수, 수동 입력 | 수시 | ✅/수동 |
+| 중앙은행 금 매수 | 자동(중앙은행 프록시), 수동 | 분기 | ✅/수동 |
 
 ---
 
@@ -1305,9 +1398,9 @@ IF OVERHEATED = 1:
 
 | 영역 | 구현 상태 |
 |---|---|
-| 시장 데이터 수집 | FRED + Yahoo + CNN Fear & Greed + GPR + OpenInsider + Dataroma + Earnings |
+| 시장 데이터 수집 | FRED + Yahoo + CNN Fear & Greed + GPR + OpenInsider + Dataroma + Earnings + CBOE P/C + AAII + NAAIM |
 | 자동화 입력 | 정책 방향 자동화(EFFR), 지정학 자동화(GPR), 중앙은행 금 매수 프록시 자동화, ISM 자동화(TradingEconomics + INDPRO fallback) |
-| 파생 지표 | 40개 이상 구현 (실질금리, DXY 단/장기 추세, 나스닥/코스피/금 이격도, 피보나치, 골든/데드크로스, W바닥, 유동성 방향, 섹터 모멘텀, 글로벌 M2 프록시 등) |
+| 파생 지표 | 50개 이상 구현 (실질금리, DXY 단/장기 추세, 나스닥/코스피/금 이격도, 피보나치, 골든/데드크로스, W바닥, 유동성 방향, 섹터 모멘텀, 글로벌 M2 프록시, 신용 스트레드, M2 YoY 방향, 이격 streak, 심리 서브스코어 등) |
 | 국면 엔진 | 11개 컴포넌트 기반 점수화 (VIX, Yield Curve, HY Spread, Jobless Claims, Nasdaq Disparity, FinStress, DXY, LiquidityDir, WTI, Global M2, Smart Money, Policy, GeoRisk) |
 | 자산 신호 | 나스닥, 코스피, 금, 은, 구리, 현금, 레버리지 |
 | 비중 조절 | 국면 템플릿 + 신호 배수 + 환율 보정 + 과열 시 현금/금 방어 강화 |
@@ -1316,6 +1409,8 @@ IF OVERHEATED = 1:
 | 백테스트 | 나스닥 벤치마크 + 포트폴리오 비중 기반 백테스트 |
 | 알림 | 텔레그램 신호 변경 + 포트폴리오 변경 + 전체 현황 알림 |
 | 배포 | Docker Compose 기반 홈서버 배포 완료 |
+| 5차 누적 | 신용 스트레드(CREDIT_HY_OAS/HYG/IEF), M2 YoY 방향(M2_YOY_PCT/DELTA/CROSS_DAYS), 은 이중 게이트(GSR≥70 AND ISM≥50/regime) |
+| 6차 누적 | 이격 streak(OVERHEATED/OVERSOLD/CHASE_WARNING), 트랑셰 영속화 + 추격 경고 배지, 심리 서브스코어(F&G/PC/AAII/NAAIM 가중평균) |
 
 ### 11.2 아직 미구현인 핵심 항목
 
