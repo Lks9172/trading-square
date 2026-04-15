@@ -133,16 +133,39 @@ export function computeAllocation(
     }
   }
 
-  // === 재정 리스크 보정 (FISCAL_STRESS=1, 영상4 §07 채권 자경단) ===
-  // 30년 금리 급등 + 높은 레벨 → 위험자산 축소, 금·현금 방어. OVERHEATED 와 별도로 발동 가능.
-  // Fix #4: BOND_VIGILANTE_WARNING 소비 — 3축(장기금리↑·DXY약세·HY확대) 중 2+ 충족 시에도
-  // FISCAL_STRESS 와 동일 수준으로 재정 리스크 보정을 점화. 두 플래그는 OR 로 합성.
+  // === 방어 보정 우선순위 정책 (Fix #7) ===
+  // 기존: FISCAL_STRESS / OVERHEATED 가 독립적으로 순차 발동 가능했음 →
+  //   두 플래그 동시 on 이면 `cash` 가 이중으로 팽창(원래 base 50 → 실측 60+)하거나
+  //   `gold` 가 누적 상한 없이 45% 를 넘어설 수 있어, 포트폴리오 분산이 무너진다.
+  //
+  // 채택 정책: **더 강한 쪽 하나만 적용 (exclusive)**.
+  //   우선순위: FISCAL_STRESS_HARD  (재정 +  수익률곡선 스티프닝)
+  //          >  FISCAL_STRESS / BOND_VIGILANTE (재정 자경단 경보)
+  //          >  OVERHEATED         (이격+공포 / 이격+VIX)
+  //
+  // 철학적 근거: FISCAL 은 "구조적/거시 위기" 신호이고 OVERHEATED 는 "단기 추세 과열"
+  //   신호다. 두 성격이 다르므로 동시 가중은 의미가 불명확하고, 가장 강한 위험
+  //   원인 하나로 집중해 방어하는 편이 신호 일관성·해석 가능성 모두에 유리.
+  //   (PRD 철학 "하나의 렌즈로 보지 않는다"는 판정 자체에 대한 원칙이고,
+  //    판정 확정 후 보정 단계에서는 "이중 보정이 dampen 을 왜곡" 리스크가 크다.)
   const fiscalStress =
     derived.FISCAL_STRESS?.value === 1 ||
     derived.BOND_VIGILANTE_WARNING?.value === 1;
   const fiscalStressHard = derived.FISCAL_STRESS_HARD?.value === 1;
-  if (fiscalStress) {
-    const amount = fiscalStressHard ? 15 : 8; // hard 는 더 강하게
+  const overheated = derived.OVERHEATED?.value === 1;
+
+  type DefenseMode = 'fiscal-hard' | 'fiscal' | 'overheated' | 'none';
+  const defenseMode: DefenseMode =
+    fiscalStressHard ? 'fiscal-hard' :
+    fiscalStress     ? 'fiscal' :
+    overheated       ? 'overheated' :
+                       'none';
+
+  if (defenseMode === 'fiscal-hard' || defenseMode === 'fiscal') {
+    // 재정 리스크 보정 (영상4 §07 채권 자경단).
+    // 30년 금리 급등 + 높은 레벨 → 위험자산 축소, 금·현금 방어.
+    // hard 는 더 강하게(15), 일반은 보수적(8).
+    const amount = defenseMode === 'fiscal-hard' ? 15 : 8;
     const reduceKeys = ['nasdaq', 'leverage', 'korea', 'emerging'];
     const available = reduceKeys.reduce((s, k) => s + (base[k] || 0), 0);
     const actual = Math.min(available, amount);
@@ -155,17 +178,14 @@ export function computeAllocation(
     // 60% cash, 40% gold 로 이관 (영상4 § 금은 장기 방어)
     base.cash = (base.cash || 0) + actual * 0.6;
     base.gold = (base.gold || 0) + actual * 0.4;
-  }
-
-  // === 과열 보정 (OVERHEATED=1) ===
-  // 철학: 과열 국면에서는 위험자산을 줄이고 현금·금으로 이관한다.
-  // 기존 구현은 `cash+20, gold+5` 를 먼저 더한 뒤 reduceKeys 총합에서 비례 25 를
-  // 차감했지만, Math.max(0, …) 가드 때문에 실제 차감량이 25 에 못 미치면
-  // 합이 100 을 초과해 normalize 가 전체 비율을 왜곡시킨다(특히 CAUTION/
-  // RECESSION_RISK 처럼 reduceKeys 총합이 작은 국면).
-  // 해결: 실제 차감 가능한 총량만큼만 cash/gold 에 이관하고, 20:5 비율은 유지한다.
-  const overheated = derived.OVERHEATED?.value === 1;
-  if (overheated) {
+  } else if (defenseMode === 'overheated') {
+    // 과열 보정 (OVERHEATED=1).
+    // 철학: 과열 국면에서는 위험자산을 줄이고 현금·금으로 이관한다.
+    // 기존 구현은 `cash+20, gold+5` 를 먼저 더한 뒤 reduceKeys 총합에서 비례 25 를
+    // 차감했지만, Math.max(0, …) 가드 때문에 실제 차감량이 25 에 못 미치면
+    // 합이 100 을 초과해 normalize 가 전체 비율을 왜곡시킨다(특히 CAUTION/
+    // RECESSION_RISK 처럼 reduceKeys 총합이 작은 국면).
+    // 해결: 실제 차감 가능한 총량만큼만 cash/gold 에 이관하고, 20:5 비율은 유지한다.
     const reduceKeys = ['nasdaq', 'leverage', 'korea', 'emerging', 'copper'];
     const available = reduceKeys.reduce((s, k) => s + (base[k] || 0), 0);
     const desired = 25;
