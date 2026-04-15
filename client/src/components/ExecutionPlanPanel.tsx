@@ -106,8 +106,13 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
       const res = await fetch('/api/execution-plan/tranche', { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
+      // 3차 감사 Fix #5: API 계약 defensive 파싱. summary 가 배열이 아니거나 null 이면
+      // 조용히 빈 상태로 복원 — crash 방지.
       const map: Record<string, TrancheSummary> = {};
-      for (const s of data.summary as TrancheSummary[]) map[s.asset] = s;
+      const arr = Array.isArray(data?.summary) ? (data.summary as TrancheSummary[]) : [];
+      for (const s of arr) {
+        if (s && typeof s.asset === 'string') map[s.asset] = s;
+      }
       setSummaries(map);
     } catch {
       /* 네트워크 실패 시 기존 상태 유지 */
