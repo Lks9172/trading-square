@@ -33,6 +33,8 @@ const YAHOO_SYMBOLS: Record<string, string> = {
   SKEW: '^SKEW',   // CBOE SKEW Index — 꼬리위험(out-of-the-money put 수요)
   VVIX: '^VVIX',   // CBOE VVIX — VIX 의 변동성 (변동성 레짐 변화 선행)
   OVX: '^OVX',     // CBOE Oil VIX — WTI 변동성 (에너지/지정학 쇼크 감지)
+  HYG: 'HYG',      // iShares iBoxx $ High Yield Corporate Bond ETF — 크레딧 스프레드 proxy
+  IEF: 'IEF',      // iShares 7-10 Year Treasury Bond ETF — HYG 대비 무위험 기준
 };
 
 export { YAHOO_SYMBOLS };

@@ -1158,5 +1158,77 @@ export async function computeDerived(
     /* 외국인 수급 수집 실패는 전체 파이프라인 막지 않음 */
   }
 
+  // === 크레딧 스프레드 (HY OAS + HYG/IEF 상대강도) ===
+  // HY OAS 는 FRED 가 소수점(예: 3.42 = 342bp)로 제공 → bp 로 환산.
+  // HYG/IEF 비율은 252영업일 z-score 로 정규화, flag 는 hard threshold + z-score OR 조합.
+  try {
+    const hyOasRaw = val(raw, 'BAMLH0A0HYM2');
+    let hyOasBp: number | null = null;
+    if (hyOasRaw !== null) {
+      // 일부 케이스에서 이미 bp 로 저장돼 있을 수 있어 스케일 자동 감지.
+      hyOasBp = hyOasRaw > 50 ? hyOasRaw : hyOasRaw * 100;
+      d.CREDIT_HY_OAS_BP = {
+        name: 'credit_hy_oas_bp',
+        value: parseFloat(hyOasBp.toFixed(1)),
+        date: dt,
+        formula: 'BAMLH0A0HYM2 (ICE BofA US HY OAS) — bp 환산',
+      };
+    }
+
+    const hygHist = await readHistory('yahoo', 'HYG');
+    const iefHist = await readHistory('yahoo', 'IEF');
+    let hygIefZ: number | null = null;
+    if (hygHist.length >= 30 && iefHist.length >= 30) {
+      // 둘 다 오름차순. 날짜 기준 정렬된 ratio 시리즈 구성.
+      const iefMap = new Map<string, number>();
+      for (const p of iefHist) iefMap.set(p.date, p.value);
+      const ratios: { date: string; ratio: number }[] = [];
+      for (const h of hygHist) {
+        const ief = iefMap.get(h.date);
+        if (ief && ief > 0 && h.value > 0) {
+          ratios.push({ date: h.date, ratio: h.value / ief });
+        }
+      }
+      if (ratios.length > 0) {
+        const latest = ratios[ratios.length - 1];
+        d.CREDIT_HYG_IEF_RATIO = {
+          name: 'credit_hyg_ief_ratio',
+          value: parseFloat(latest.ratio.toFixed(4)),
+          date: dt,
+          formula: 'Yahoo HYG 종가 / IEF 종가',
+        };
+        if (ratios.length >= 252) {
+          const window = ratios.slice(-252).map((r) => r.ratio);
+          const mean = window.reduce((s, v) => s + v, 0) / window.length;
+          const variance = window.reduce((s, v) => s + (v - mean) ** 2, 0) / window.length;
+          const stdev = Math.sqrt(variance);
+          if (stdev > 0) {
+            hygIefZ = (latest.ratio - mean) / stdev;
+            d.CREDIT_HYG_IEF_ZSCORE = {
+              name: 'credit_hyg_ief_zscore',
+              value: parseFloat(hygIefZ.toFixed(2)),
+              date: dt,
+              formula: '(HYG/IEF 현재 - 252일 평균) / 252일 표준편차',
+            };
+          }
+        }
+      }
+    }
+
+    const stressHy = hyOasBp !== null && hyOasBp >= 600;
+    const stressZ = hygIefZ !== null && hygIefZ <= -2;
+    if (hyOasBp !== null || hygIefZ !== null) {
+      const flag = stressHy || stressZ;
+      d.CREDIT_STRESS_FLAG = {
+        name: 'credit_stress_flag',
+        value: flag ? 1 : 0,
+        date: dt,
+        formula: `HY OAS ≥ 600bp(${stressHy ? 'Y' : 'N'}) OR HYG/IEF z ≤ -2(${stressZ ? 'Y' : 'N'})`,
+      };
+    }
+  } catch {
+    /* 크레딧 스프레드 계산 실패는 파이프라인 막지 않음 */
+  }
+
   return d;
 }
