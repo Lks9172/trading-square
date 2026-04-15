@@ -25,6 +25,8 @@ app.use(express.json());
 app.use('/api', apiRouter);
 app.use('/api/backtest', backtestRouter);
 
+// 서버 시작 후 Docker 네트워크·DNS 캐시가 안정될 시간 확보 (60s).
+// 그 후에 snapshot → startup telegram. telegram 실패는 내부 5회 재시도로 복구 시도.
 setTimeout(async () => {
   try {
     console.log('Starting initial snapshot...');
@@ -35,7 +37,7 @@ setTimeout(async () => {
   } catch (error) {
     console.error('Initial refresh failed:', error);
   }
-}, 30000);
+}, 60000);
 
 void ensureBackfill(process.env.FRED_API_KEY || '').catch((error) => {
   console.error('Initial backfill failed:', error);
