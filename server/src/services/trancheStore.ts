@@ -7,6 +7,8 @@ export interface TrancheEntry {
   executedAt: string;
   priceAtEntry: number | null;
   regimeAtEntry: string | null;
+  // 7차 TOP3 Fix #3: 분할매수 default 30/30/40 표준. 백워드 호환 위해 optional.
+  weightPct?: number;
 }
 
 const DATA_DIR = path.resolve(process.cwd(), 'data', 'execution');

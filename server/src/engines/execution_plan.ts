@@ -25,6 +25,11 @@ import { ASSET_TO_ALLOC_KEY } from './asset-keys';
 const vRaw = (raw: Record<string, MarketDataPoint>, k: string): number | null => raw[k]?.value ?? null;
 const vDer = (d: Record<string, DerivedIndicator>, k: string): number | null => d[k]?.value ?? null;
 
+// 7차 TOP3 Fix #3: 분할매수 default 30/30/40 표준.
+// 영상1 §전략C + 이동평균선.md §분할매수 — 1·2차 30%, 3차 40% (W 반등 확인 후 더 큰 비중).
+// 개별 플레이북의 stages 에 weightPct 가 이미 박혀 있으면 그 값을 우선, 없을 때만 이 fallback 사용.
+export const DEFAULT_TRANCHE_WEIGHTS: readonly number[] = [30, 30, 40] as const;
+
 function round(n: number, digits = 2): number {
   return parseFloat(n.toFixed(digits));
 }

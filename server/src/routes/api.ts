@@ -13,6 +13,7 @@ import {
   summarizeByAsset,
   TrancheEntry,
 } from '../services/trancheStore';
+import { DEFAULT_TRANCHE_WEIGHTS } from '../engines/execution_plan';
 
 const router = Router();
 
@@ -148,10 +149,12 @@ router.post('/execution-plan/tranche', async (req: Request, res: Response) => {
       }
     }
 
-    // 현재 snapshot 에서 regime/price 보강
+    // 현재 snapshot 에서 regime/price/weightPct 보강
     let regimeAtEntry: string | null = null;
     let priceAtEntry: number | null =
       typeof body.priceAtEntry === 'number' ? body.priceAtEntry : null;
+    // 7차 TOP3 Fix #3: 현재 플레이북 stages 의 weightPct 를 우선 사용, 없으면 30/30/40 fallback.
+    let weightPct: number | undefined;
     try {
       const snap = await getSnapshot(DEFAULT_PROFILE);
       regimeAtEntry = snap.regime?.regime ?? null;
@@ -160,8 +163,23 @@ router.post('/execution-plan/tranche', async (req: Request, res: Response) => {
         const candidate = raw?.[asset]?.value;
         if (typeof candidate === 'number') priceAtEntry = candidate;
       }
+      const plans = (snap as any).meta?.executionPlans as
+        | Array<{ asset: string; stages: Array<{ stage: number; weightPct?: number }> }>
+        | undefined;
+      const plan = plans?.find((p) => p.asset === asset);
+      const planStage = plan?.stages?.find((s) => s.stage === stage);
+      if (planStage && typeof planStage.weightPct === 'number' && Number.isFinite(planStage.weightPct)) {
+        weightPct = planStage.weightPct;
+      }
     } catch {
       /* snapshot 읽기 실패 시 regime/price 는 null 로 저장 */
+    }
+    if (weightPct === undefined) {
+      // fallback: stage 1→30, 2→30, 3→40 (1-based index).
+      const idx = stage - 1;
+      if (idx >= 0 && idx < DEFAULT_TRANCHE_WEIGHTS.length) {
+        weightPct = DEFAULT_TRANCHE_WEIGHTS[idx];
+      }
     }
 
     const entry: TrancheEntry = {
@@ -170,6 +188,7 @@ router.post('/execution-plan/tranche', async (req: Request, res: Response) => {
       executedAt: new Date().toISOString(),
       priceAtEntry,
       regimeAtEntry,
+      ...(weightPct !== undefined ? { weightPct } : {}),
     };
     const entries = await appendTranche(entry);
     res.status(201).json({ entry, total: entries.length });
