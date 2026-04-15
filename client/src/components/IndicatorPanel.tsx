@@ -91,6 +91,8 @@ const DERIVED_LABELS: Record<string, { label: string; unit: string; desc: string
   SECTOR_XLV:         { label: "헬스케어 섹터", unit: "%",   desc: "XLV 20일 수익률", formula: "최근 20거래일 수익률" },
   SECTOR_XLI:         { label: "산업재 섹터",   unit: "%",   desc: "XLI 20일 수익률", formula: "최근 20거래일 수익률" },
   SECTOR_XLY:         { label: "임의소비재 섹터", unit: "%", desc: "XLY 20일 수익률", formula: "최근 20거래일 수익률" },
+  SECTOR_SOXX:        { label: "반도체 광역",    unit: "%",   desc: "SOXX 20일 수익률. AI·HBM·헬륨 사이클 주도 섹터 (영상2·5)", formula: "최근 20거래일 수익률" },
+  SECTOR_SMH:         { label: "반도체 대형",    unit: "%",   desc: "SMH 20일 수익률. NVDA/TSM/AVGO 집중 비중, 반도체 리더십 지표", formula: "최근 20거래일 수익률" },
   SECTOR_STRONGEST:   { label: "최강 섹터",     unit: "%",   desc: "20일 수익률 기준 가장 강한 섹터", formula: "섹터별 20일 수익률 최대값" },
   KOSPI_TREND_RECOVERY: { label: "코스피 추세회복", unit: "", desc: "1=추세선 회복 (현재가>50DMA>200DMA)", formula: "현재가>50DMA>200DMA" },
   KOSPI_YEAR_RETURN:  { label: "코스피 연수익률", unit: "%", desc: "1년 수익률. 75%+ 시 역사적 조정 패턴 경고", formula: "1년 수익률" },

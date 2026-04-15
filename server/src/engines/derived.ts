@@ -467,7 +467,7 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
-  const sectorEtfs: Array<[string, string]> = [['XLK','기술'],['XLF','금융'],['XLE','에너지'],['XLV','헬스케어'],['XLI','산업재'],['XLY','임의소비재']];
+  const sectorEtfs: Array<[string, string]> = [['XLK','기술'],['XLF','금융'],['XLE','에너지'],['XLV','헬스케어'],['XLI','산업재'],['XLY','임의소비재'],['SOXX','반도체(광역)'],['SMH','반도체(대형주)']];
   try {
     const sectorResults = await Promise.allSettled(sectorEtfs.map(([sym]) => fetchYahooHistory(sym, 30)));
     const sectorReturns: Array<{ key: string; label: string; ret: number }> = [];

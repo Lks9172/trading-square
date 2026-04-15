@@ -24,6 +24,8 @@ const YAHOO_SYMBOLS: Record<string, string> = {
   XLV: 'XLV',
   XLI: 'XLI',
   XLY: 'XLY',
+  SOXX: 'SOXX',  // 반도체 ETF (영상2·5 AI·헬륨 반도체 특화)
+  SMH: 'SMH',    // 반도체 ETF (더 좁은 대형주 중심)
   NQ_FUTURES: 'NQ=F',
   ES_FUTURES: 'ES=F',
   // 옵션·변동성 지수 (자산제곱 대시보드 gap 보완)
