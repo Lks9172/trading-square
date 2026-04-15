@@ -2,6 +2,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fetchFredHistoryFrom, FRED_SERIES } from '../collectors/fred';
 import { fetchYahooHistoryYears, YAHOO_SYMBOLS } from '../collectors/yahoo';
+import { fetchFearAndGreed } from '../collectors/cnn';
+import { fetchAllSentiment } from '../collectors/sentiment';
 import { classifyRegime } from '../engines/regime';
 import { computeSignals } from '../engines/signals';
 import { computeAllocation } from '../engines/allocation';
@@ -59,6 +61,12 @@ function buildRawForDate(date: string, histories: Record<string, HistoryPoint[]>
     ['BAMLH0A0HYM2', 'fred', 'FRED'], ['STLFSI4', 'fred', 'FRED'], ['ICSA', 'fred', 'FRED'], ['UNRATE', 'fred', 'FRED'],
     ['NASDAQ', 'yahoo', 'YAHOO'], ['GOLD', 'yahoo', 'YAHOO'], ['SILVER', 'yahoo', 'YAHOO'], ['COPPER', 'yahoo', 'YAHOO'],
     ['DXY', 'yahoo', 'YAHOO'], ['SP500', 'yahoo', 'YAHOO'], ['WTI', 'yahoo', 'YAHOO'], ['USDKRW', 'yahoo', 'YAHOO'],
+    // 센티먼트 raw — KST 07:00 cron 의 appendSentimentDaily 가 daily append.
+    // 과거 일자에서 PSYCH_SUBSCORE 재구성 입력이며, latestAtOrBefore 로 영업일 스냅.
+    ['FEAR_GREED', 'cnn', 'CNN'],
+    ['PC_RATIO_10D', 'sentiment', 'CBOE'],
+    ['AAII_BULL_BEAR_SPREAD', 'sentiment', 'CALC'],
+    ['NAAIM_EXPOSURE', 'sentiment', 'CALC'],
   ];
 
   for (const [key, source, srcType] of defs) {
@@ -325,6 +333,58 @@ function reconstructM2Yoy(
 }
 
 /**
+ * date 시점 raw 로부터 PSYCH_SUBSCORE 재구성 (live derived.ts 와 동일 가중치/정규화).
+ * 컴포넌트: F&G(0~100→0~1) · P/C 10D(1.2~0.7→0~1 역정규화) · AAII spread(-40~+40) · NAAIM(0~100).
+ * null 컴포넌트는 스킵 후 가중치 재정규화. 4개 모두 raw 에 있으면 valid=4.
+ *
+ * 라이브 derived.ts § "심리 서브스코어 (PSYCH_SUBSCORE)" 와 동일 시그니처 유지가 핵심.
+ * 패스스루 derived (PC_RATIO_10D / AAII_BULL_BEAR_SPREAD / NAAIM_EXPOSURE) 도 함께 발급.
+ */
+function reconstructPsychSubscore(
+  date: string,
+  raw: Record<string, MarketDataPoint>,
+): Record<string, DerivedIndicator> {
+  const derived: Record<string, DerivedIndicator> = {};
+  const fng = raw.FEAR_GREED?.value ?? null;
+  const pcr10 = raw.PC_RATIO_10D?.value ?? null;
+  const aaii = raw.AAII_BULL_BEAR_SPREAD?.value ?? null;
+  const naaim = raw.NAAIM_EXPOSURE?.value ?? null;
+
+  if (pcr10 !== null) derived.PC_RATIO_10D = { name: 'pc_ratio_10d', value: pcr10, date, formula: 'CBOE Put/Call Ratio 10일 이동평균' };
+  if (aaii !== null) derived.AAII_BULL_BEAR_SPREAD = { name: 'aaii_bull_bear_spread', value: aaii, date, formula: 'AAII Bullish% - Bearish% (주간)' };
+  if (naaim !== null) derived.NAAIM_EXPOSURE = { name: 'naaim_exposure', value: naaim, date, formula: 'NAAIM Exposure Index (주간 평균)' };
+
+  const components: { v: number | null; w: number }[] = [];
+  if (fng !== null && Number.isFinite(fng)) components.push({ v: Math.max(0, Math.min(1, fng / 100)), w: 0.25 });
+  else components.push({ v: null, w: 0.25 });
+  if (pcr10 !== null && Number.isFinite(pcr10)) {
+    const c = Math.max(0.7, Math.min(1.2, pcr10));
+    components.push({ v: Math.max(0, Math.min(1, (1.2 - c) / (1.2 - 0.7))), w: 0.25 });
+  } else components.push({ v: null, w: 0.25 });
+  if (aaii !== null && Number.isFinite(aaii)) {
+    const c = Math.max(-40, Math.min(40, aaii));
+    components.push({ v: (c + 40) / 80, w: 0.25 });
+  } else components.push({ v: null, w: 0.25 });
+  if (naaim !== null && Number.isFinite(naaim)) {
+    const c = Math.max(0, Math.min(100, naaim));
+    components.push({ v: c / 100, w: 0.25 });
+  } else components.push({ v: null, w: 0.25 });
+
+  const valid = components.filter((c) => c.v !== null);
+  if (valid.length > 0) {
+    const totalW = valid.reduce((s, c) => s + c.w, 0);
+    const score = valid.reduce((s, c) => s + (c.v as number) * c.w, 0) / totalW;
+    derived.PSYCH_SUBSCORE = {
+      name: 'psych_subscore',
+      value: parseFloat(score.toFixed(3)),
+      date,
+      formula: `F&G·P/C 10D·AAII·NAAIM 가중평균 (가중 0.25 각, null 스킵 후 재정규화, ${valid.length}/4)`,
+    };
+  }
+  return derived;
+}
+
+/**
  * Fix(3차 감사): cachedLiveDerived 과거 일자 오염 차단.
  *
  * 변경 전: 라이브 derived 를 shallow clone 후 NASDAQ/비율만 덮어써 STAGFLATION/MTF/PSYCH 등
@@ -396,6 +456,12 @@ export async function recomputeFullDerivedForDate(
     }
   }
 
+  // 센티먼트 패스스루 + PSYCH_SUBSCORE 재구성 (raw 에 cnn/sentiment 항목이 있으면 발급).
+  // raw 가 비면 자연스럽게 키 미발급 → signals.ts 의 dv() null 가드로 깔끔히 스킵.
+  for (const [k, v] of Object.entries(reconstructPsychSubscore(date, raw))) {
+    derived[k] = v;
+  }
+
   return derived;
 }
 
@@ -415,6 +481,12 @@ export async function refreshComputedHistories() {
     if (yahooKeys.has(key)) histories[`yahoo:${key}`] = await readHistory('yahoo', key);
     else histories[`fred:${key}`] = await readHistory('fred', key);
   }
+
+  // 센티먼트 raw history (cnn / sentiment 소스). buildRawForDate 가 latestAtOrBefore 로 스냅.
+  histories['cnn:FEAR_GREED'] = await readHistory('cnn', 'FEAR_GREED');
+  histories['sentiment:PC_RATIO_10D'] = await readHistory('sentiment', 'PC_RATIO_10D');
+  histories['sentiment:AAII_BULL_BEAR_SPREAD'] = await readHistory('sentiment', 'AAII_BULL_BEAR_SPREAD');
+  histories['sentiment:NAAIM_EXPOSURE'] = await readHistory('sentiment', 'NAAIM_EXPOSURE');
 
   // Fix(3차 감사): date-aware 재계산 확장에 필요한 보조 히스토리. 없으면 빈 배열 → 해당 지표 null.
   const kospiHistory = await readHistory('yahoo', 'KOSPI');
@@ -670,6 +742,60 @@ export async function appendDailyData(apiKey: string) {
     } catch {
       void 0;
     }
+  }
+
+  // 센티먼트 daily append — KST 07:00 cron 에서 함께 호출.
+  await appendSentimentDaily();
+}
+
+/**
+ * CNN F&G + CBOE P/C 10D + AAII spread + NAAIM exposure 의 daily append.
+ *
+ * 정책:
+ *   - 수집 실패/null → append skip (null 저장 금지). 라이브 스냅샷에 일시 결측이 있더라도
+ *     history 는 마지막으로 성공한 영업일 값을 유지.
+ *   - 동일 (source,key,date) 중복 저장 금지 — lastDate >= asOf 이면 skip (멱등).
+ *   - 저장 date 필드는 각 소스의 asOf (데이터 소스 자체 영업일 = 미국/주간 발표 기준).
+ *     라이브 collector 의 asOf 가 비면 KST 기준 today 로 폴백.
+ *   - 5분 스냅샷에서는 호출하지 않는다 — 본 함수는 KST 07:00 cron 진입점 전용.
+ */
+export async function appendSentimentDaily(): Promise<void> {
+  const today = new Date().toISOString().split('T')[0];
+
+  // CNN F&G
+  try {
+    const fng = await fetchFearAndGreed();
+    if (fng && fng.value !== null && Number.isFinite(fng.value as number)) {
+      const asOf = fng.date || today;
+      const existing = await readHistory('cnn', 'FEAR_GREED');
+      const lastDate = existing.length > 0 ? existing[existing.length - 1].date : '';
+      if (lastDate < asOf) {
+        await writeHistory('cnn', 'FEAR_GREED', [...existing, { date: asOf, value: fng.value as number }]);
+      }
+    }
+  } catch (error) {
+    console.warn('[history] CNN F&G append skipped:', error);
+  }
+
+  // sentiment 묶음 (PC_RATIO_10D, AAII_BULL_BEAR_SPREAD, NAAIM_EXPOSURE)
+  try {
+    const sent = await fetchAllSentiment();
+    const targets = ['PC_RATIO_10D', 'AAII_BULL_BEAR_SPREAD', 'NAAIM_EXPOSURE'];
+    for (const key of targets) {
+      const point = sent[key];
+      if (!point || point.value === null || !Number.isFinite(point.value)) continue;
+      const asOf = point.date || today;
+      const existing = await readHistory('sentiment', key);
+      const lastDate = existing.length > 0 ? existing[existing.length - 1].date : '';
+      if (lastDate < asOf) {
+        await writeHistory('sentiment', key, [
+          ...existing,
+          { date: asOf, value: point.value },
+        ]);
+      }
+    }
+  } catch (error) {
+    console.warn('[history] sentiment append skipped:', error);
   }
 }
 
