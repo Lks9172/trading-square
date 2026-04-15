@@ -530,8 +530,11 @@ score = 위 조건 중 충족 개수 (보조 포함 total=7)
 4개:   BUY
 5~7개: STRONG_BUY
 
-+ 보너스 (감사 Fix #4): PSYCH_SUBSCORE ≤ 0.20 (극공포) 이면 met +1
++ 보너스 (감사 Fix #4 / 2차 감사 Fix #3): PSYCH_SUBSCORE ≤ 0.20 (극공포) 이면 met 와 total 동시 +1
   — F&G·PC Ratio 10D·AAII·NAAIM 가중평균 저점 확인 시 저점 카테고리 보강.
+  2차 감사 전에는 met 만 증가시켜 비율이 114% 까지 치솟고 임계가 붕괴했으나,
+  total 도 +1 함께 증가시키고 임계는 total 상대값으로 재정의(strongBuy=total-2,
+  buy=total-3, hold=total-4, reduce=total-5) 하여 보너스 발동 시 모든 임계가 +1 shift.
 
 + 과열 REDUCE override (감사 Fix #2): 4개 체크 중 2+ 충족 시 signal = REDUCE
   — 이격 +25%, F&G ≥ 85, VIX < 16, NASDAQ_CHASE_WARNING (이격률 ±15% 20일 지속)
@@ -845,6 +848,10 @@ IF 국면 == RISK_ON:
 
 승수는 NASDAQ/KOSPI/GOLD/SILVER/COPPER/CASH/EMERGING 7자산에 적용된다.
 (LEVERAGE 는 별도 게이트로 처리 — 아래 6.3.6 참고)
+
+**자산 키 매핑 (2차 감사 Fix #8):** allocation/execution_plan 두 엔진은 자산→비중 키 매핑을
+`engines/asset-keys.ts` 의 공통 상수 `ASSET_TO_ALLOC_KEY` 를 공유한다. LEVERAGE 는 맵에 포함되지만
+signal multiplier 루프에서는 `sig.asset !== 'LEVERAGE'` 가드로 배제 — 별도 게이트로만 통제.
 ```
 
 **예시:**
@@ -933,7 +940,7 @@ IF defenseMode === 'overheated':  (FISCAL 이 발동 안 했을 때만)
   - 또는 나스닥 이격도 +15% AND VIX<15  →  OVERHEATED=1
 ```
 
-##### 6.3.4.3 M2 유동성 쿠션 (감사 Fix #4)
+##### 6.3.4.3 M2 유동성 쿠션 (감사 Fix #4 / 2차 감사 재적용)
 
 ```
 IF !overheated AND 0 ≤ M2_YOY_CROSS_DAYS ≤ 90:
@@ -942,6 +949,12 @@ IF !overheated AND 0 ≤ M2_YOY_CROSS_DAYS ≤ 90:
 철학: 글로벌 M2 YoY 음→양 교차 직후 90일은 유동성 랠리 초기 구간.
 OVERHEATED 중에는 비활성 — 과열 위 쿠션은 리스크 증폭.
 ```
+
+**적용 시점 (2차 감사 Fix #4):** 쿠션은 BASE_ALLOCATIONS 복사 + horizon shift 직후,
+signal multiplier 루프 **이전** 에 적용한다. 기존에는 승수 적용 후 base.nasdaq 에 +5 를
+덧셈해 "승수된 값에 쿠션 덧셈" 으로 누적 팽창했으나, 이제는 "쿠션된 원점에서 승수 적용"
+으로 해석 일관성을 유지한다. 쿠션은 NASDAQ 에만 적용 — 레버리지는 leverageAllowed
+게이트로 별도 통제되므로 누적 금지.
 
 ---
 
@@ -1154,15 +1167,18 @@ UI (`AllocationPanel.tsx`) 도 `buyStage === null` 일 때 "데이터 없음 (NA
 ```
 POST /api/execution-plan/tranche
 {
-  "asset": "NASDAQ",
-  "tranche": 1,           # 1차/2차/3차
-  "entry_price": 14500,
-  "entry_date": "2026-04-15",
-  "status": "pending"     # pending / filled / closed
+  "asset": "NASDAQ",          # whitelist: NASDAQ/KOSPI/GOLD/SILVER/COPPER/LEVERAGE/EMERGING
+  "stage": 1,                 # integer 1..5 (2차 감사 Fix #7: 입력 검증 강화)
+  "priceAtEntry": 14500       # 제공 시 finite 양수 필수 (400 아니면 reject)
 }
 
 저장 위치: data/execution/tranche-state.json
 ```
+
+**입력 검증 (2차 감사 Fix #7):**
+- asset 허용 목록 밖 → 400 "invalid asset"
+- stage 정수 1..5 벗어남 → 400 "invalid stage; integer 1..5 required"
+- priceAtEntry 제공됐는데 Number.isFinite 실패 또는 ≤ 0 → 400 "invalid priceAtEntry"
 
 #### UI 트랑셰 패널
 
@@ -1390,6 +1406,44 @@ client/src/app/api/execution-plan/tranche/[asset]/route.ts
 - NASDAQ_CHANNEL_POSITION (15Y 채널 내 위치 %)
 - ISM_PROXY (ISM 제조업 PMI 프록시)
 - CHASE_NASDAQ / CHASE_KOSPI (20일 상승률 → 추격매수 주의)
+
+### 6.10.1 히스토리 백필 경로 (2차 감사 Fix #1+#2)
+
+백필 파이프라인(`server/src/state/history-store.ts` → `refreshComputedHistories`)은
+라이브 스냅샷과 **같은 시그니처** 로 derived 를 재계산한다:
+
+1. 저장된 FRED/Yahoo 히스토리에서 anchor 날짜의 `raw` 를 재구성 (`buildRawForDate`).
+2. 라이브 경로 `computeDerived(raw)` 를 anchor 루프 **이전에 1회 호출** 해
+   STAGFLATION/BOND_VIGILANTE/OVERHEATED/CREDIT_STRESS_FLAG/PSYCH_SUBSCORE/MTF 등
+   전체 derived 세트를 캐싱.
+3. `recomputeFullDerivedForDate` 로 각 날짜별 NASDAQ(SMA200/DISPARITY/DRAWDOWN/ABOVE_200DMA)
+   + 가격 비율(REAL_YIELD/GOLD_SILVER_RATIO/COPPER_GOLD_RATIO) 를 해당 date 기준으로 덮어써
+   시계열 변동을 보존.
+4. `classifyRegime({ raw, derived, manualInputs, smartMoneyScore: 0 })` — smart-money
+   시계열 미보유라 0 명시.
+
+**성능:** computeDerived 는 내부 Yahoo/FRED live fetch 가 많아 per-date 호출은 비용 폭발.
+모듈 스코프 캐시로 1회만 수행. 1차 감사에서 추가된 파생지표들이 2차 감사 이후 히스토리
+경로에도 정확히 반영된다 — 기존 `buildDerivedForDate` 는 NASDAQ 4개 필드 + 2개 비율만
+채웠기 때문에 발생하던 "1차 Fix 성과 히스토리 미반영" 문제 해소.
+
+### 6.10.2 SILVER/COPPER REDUCE 분기 (2차 감사 Fix #6)
+
+SILVER/COPPER 신호는 `signalFromScore` 기반 임계로 통일:
+
+- **SILVER** (total=2): `{strongBuy:2, buy:1, hold:1, reduce:1, sell:0}` + 이중 게이트 유지.
+  - GSR≥70 AND (ISM≥50 OR regime RISK_ON/NEUTRAL) 메인 1개, ICSA<250K 메인 1개.
+  - aux 2+ 면 STRONG_BUY 승격, 메인 1 + aux 2+ 면 BUY 승격, aux 0 면 BUY 차단 → HOLD.
+  - met=0 → REDUCE (이전 HOLD 였던 약세 강등 분기 복구).
+
+- **COPPER** (total=3): `{strongBuy:3, buy:2, hold:1, reduce:0, sell:0}`.
+  - 기존 `met>=3 STRONG_BUY / met===2 BUY / else HOLD` 수치는 보존하고 met=0 → REDUCE 복구.
+
+### 6.10.3 스케줄 timezone (2차 감사 Fix #5)
+
+모든 `cron.schedule(...)` 호출에 `{ timezone: 'Asia/Seoul' }` 옵션 명시. 일일 히스토리
+append cron 은 `0 22 * * *` (UTC) → `0 7 * * *` (KST) 로 표기만 변경 — 실제 실행 시각
+동일(KST 07:00).
 
 ---
 
