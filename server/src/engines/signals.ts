@@ -620,6 +620,87 @@ function kospiSignal(
   };
 }
 
+/**
+ * EMERGING 신호 — 영상2 §30 "신흥국 ETF, 달러약세 수혜" + 영상4 유동성·정책 렌즈
+ *
+ * 메인 3조건:
+ *   1. DXY 약세 추세 (DXY_TREND < -0.5 or 절대값 < 103)
+ *   2. 글로벌 M2 확장 (GLOBAL_M2_PROXY > 0)
+ *   3. 정책 완화 방향 (manualInputs.policyDirection > 0)
+ *
+ * 보조:
+ *   - 실질금리 하락 추세 (REAL_YIELD_TREND < -0.05) → 신흥국 유동성 수혜
+ *   - DXY 장기 약세 (DXY_TREND_LONG < -2) → 구조적 우호
+ */
+function emergingSignal(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
+  profile: UserProfile,
+): AssetSignal {
+  const reasons: string[] = [];
+  const unmetReasons: string[] = [];
+  let met = 0;
+  const total = 3;
+
+  const dxy = v(raw, 'DXY');
+  const dxyTrend = dv(derived, 'DXY_TREND');
+  const dxyWeak = (dxyTrend !== null && dxyTrend < -0.5) || (dxy !== null && dxy < 103);
+  if (dxyWeak) {
+    met += 1;
+    reasons.push(`DXY ${dxy?.toFixed(1) ?? '?'} (단기: ${dxyTrend?.toFixed(2) ?? '?'}) 약세 — 달러약세 수혜 (가중치 1.0)`);
+  } else {
+    unmetReasons.push(`DXY ${dxy?.toFixed(1) ?? '?'} 강세 — 신흥국 자본 유출 압력 (가중치 1.0 미충족)`);
+  }
+
+  const m2 = dv(derived, 'GLOBAL_M2_PROXY');
+  if (m2 !== null && m2 > 0) {
+    met += 1;
+    reasons.push(`글로벌 M2 YoY +${m2.toFixed(1)}% → 유동성 확장 (가중치 1.0)`);
+  } else if (m2 !== null) {
+    unmetReasons.push(`글로벌 M2 YoY ${m2.toFixed(1)}% — 유동성 위축 (가중치 1.0 미충족)`);
+  } else {
+    unmetReasons.push('글로벌 M2 데이터 없음 (가중치 1.0 미충족)');
+  }
+
+  const policy = profile.manualInputs?.policyDirection ?? 0;
+  if (policy > 0) {
+    met += 1;
+    reasons.push(`정책 완화 방향 (policyDirection=${policy}) → 신흥국 리스크 우호 (가중치 1.0)`);
+  } else {
+    unmetReasons.push(`정책 완화 미확인 (policyDirection=${policy}) (가중치 1.0 미충족)`);
+  }
+
+  // 보조
+  const ryTrend = dv(derived, 'REAL_YIELD_TREND');
+  if (ryTrend !== null && ryTrend < -0.05) reasons.push('실질금리 하락 추세 → 신흥국 자본 유입 우호 (보조조건)');
+  const dxyTrendLong = dv(derived, 'DXY_TREND_LONG');
+  if (dxyTrendLong !== null && dxyTrendLong < -2) reasons.push(`DXY 장기 ${dxyTrendLong.toFixed(2)} 구조적 약세 (보조조건)`);
+
+  let signal: Signal;
+  if (met === 3) signal = 'STRONG_BUY';
+  else if (met >= 2) signal = 'BUY';
+  else if (met >= 1) signal = 'HOLD';
+  else signal = 'HOLD';
+
+  // DXY 급등 방어: DXY_TREND > +1 이면 REDUCE 강등
+  if (dxyTrend !== null && dxyTrend > 1 && met < 3) {
+    signal = 'REDUCE';
+    unmetReasons.push('⚠️ DXY 단기 강세 — 신흥국 자본 유출 경계 (보조조건)');
+  }
+
+  return {
+    asset: 'EMERGING',
+    signal,
+    conditionsMet: met,
+    conditionsTotal: total,
+    weightedScore: met,
+    weightedMaxScore: total,
+    reasons: reasons.length > 0 ? reasons : ['조건 미충족, 대기'],
+    unmetReasons,
+    date: new Date().toISOString().split('T')[0],
+  };
+}
+
 export function computeSignals(
   raw: Record<string, MarketDataPoint>,
   derived: Record<string, DerivedIndicator>,
@@ -632,6 +713,7 @@ export function computeSignals(
     goldSignal(raw, derived, profile),
     silverSignal(derived, raw),
     copperSignal(derived, raw, profile),
+    emergingSignal(raw, derived, profile),
     cashSignal(regime),
     leverageCheck(raw, derived),
   ];

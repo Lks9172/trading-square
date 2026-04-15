@@ -36,6 +36,7 @@ const ASSET_ALLOC_KEY: Record<string, string> = {
   SILVER: 'silver',
   COPPER: 'copper',
   LEVERAGE: 'leverage',
+  EMERGING: 'emerging',
 };
 
 function actionLabel(action: ExecutionAction): string {
@@ -306,6 +307,64 @@ function leveragePlan(
   };
 }
 
+/** EMERGING 플레이북 — DXY 약세 + 글로벌 M2 + 정책 완화 3축 */
+function emergingPlan(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
+  signal: AssetSignal,
+  alloc: number,
+): ExecutionPlan {
+  const price = vRaw(raw, 'EWZ');  // 대표 대리 심볼
+  const dxy = vRaw(raw, 'DXY');
+  const dxyTrend = vDer(derived, 'DXY_TREND');
+  const m2 = vDer(derived, 'GLOBAL_M2_PROXY');
+
+  let action: ExecutionAction = 'HOLD';
+  let reason = '조건 대기';
+  const stages: ExecutionStage[] = [];
+  let stopCond = '';
+  let takeCond = '';
+
+  if (signal.signal === 'STRONG_BUY') {
+    action = 'BUY_NOW';
+    reason = 'DXY 약세 + M2 확장 + 정책 완화 3축 동시 충족 (영상2 §30 달러약세 수혜)';
+    stages.push({ stage: 1, weightPct: 40, triggerCondition: '현재가에서 즉시 진입', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: 30, triggerCondition: 'EWZ -5% 추가 하락 시', status: 'pending' });
+    stages.push({ stage: 3, weightPct: 30, triggerCondition: 'DXY 추가 약세 (DXY < 100) 확인', status: 'pending' });
+    stopCond = 'DXY > 110 급등 또는 정책 긴축 전환';
+    takeCond = 'DXY < 95 구조적 약세 완료 또는 +25% 수익';
+  } else if (signal.signal === 'BUY') {
+    action = 'SCALE_IN';
+    reason = '신흥국 2/3 조건 충족 — 분할 진입';
+    stages.push({ stage: 1, weightPct: 60, triggerCondition: '현재가에서 1차 진입', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: 40, triggerCondition: '나머지 조건 확정 시', status: 'pending' });
+    stopCond = 'DXY > 107 또는 M2 YoY 마이너스 전환';
+  } else if (signal.signal === 'REDUCE') {
+    action = 'TAKE_PROFIT';
+    reason = 'DXY 단기 강세 — 신흥국 자본 유출 경계';
+    stages.push({ stage: 1, weightPct: 30, triggerCondition: '부분 익절 30%', status: 'ready' });
+  } else if (dxyTrend !== null && dxyTrend > 1) {
+    action = 'AVOID';
+    reason = `DXY 급등 추세 (${dxyTrend.toFixed(2)}) — 자본유출 우려, 진입 지양`;
+  } else {
+    action = 'HOLD';
+    reason = `HOLD (${signal.conditionsMet}/${signal.conditionsTotal}) — M2 ${m2?.toFixed(1) ?? '?'}% / DXY ${dxy?.toFixed(1) ?? '?'}`;
+  }
+
+  return {
+    asset: 'EMERGING',
+    action,
+    actionLabel: actionLabel(action),
+    currentPrice: price,
+    targetAllocationPct: alloc,
+    stages,
+    stopLoss: { price: null, condition: stopCond || '— ' },
+    takeProfit: { price: null, condition: takeCond || '— ' },
+    validityDays: 90, // 신흥국은 달러 사이클이 길어 유효기간 길게
+    primaryReason: reason,
+  };
+}
+
 /** 단순 자산(SILVER/COPPER) 플레이북 — signal 기반 generic */
 function genericAssetPlan(
   asset: string,
@@ -371,6 +430,7 @@ export function computeExecutionPlans(
     else if (sig.asset === 'LEVERAGE') plans.push(leveragePlan(raw, derived, sig, alloc));
     else if (sig.asset === 'SILVER') plans.push(genericAssetPlan('SILVER', raw, sig, alloc, 'SILVER'));
     else if (sig.asset === 'COPPER') plans.push(genericAssetPlan('COPPER', raw, sig, alloc, 'COPPER'));
+    else if (sig.asset === 'EMERGING') plans.push(emergingPlan(raw, derived, sig, alloc));
     // CASH 는 플레이북 없음 (보조 자산)
   }
 
