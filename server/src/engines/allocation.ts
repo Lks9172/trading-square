@@ -1,4 +1,5 @@
 import { Regime, Signal, AssetSignal, AllocationPlan, DerivedIndicator, MarketDataPoint } from '../types/indicators';
+import { ASSET_TO_ALLOC_KEY } from './asset-keys';
 
 // 백테스트 1/3/5/10Y 가중(1Y 25% + 3Y 10% + 5Y 30% + 10Y 35%, DD penalty 0.15) 기준
 // Monte Carlo sweep (N=40, 국면별 독립, 나머지 국면 PRD 유지) 결과의 top1 을 반영.
@@ -35,15 +36,10 @@ const SIGNAL_MULTIPLIERS: Record<Signal, number> = {
   SELL: 0.3,
 };
 
-const SIGNAL_ASSET_MAP: Record<string, string> = {
-  NASDAQ: 'nasdaq',
-  KOSPI: 'korea',
-  GOLD: 'gold',
-  SILVER: 'silver',
-  COPPER: 'copper',
-  CASH: 'cash',
-  EMERGING: 'emerging',
-};
+// Fix #8(2차 감사): 자산 키 매핑은 engines/asset-keys.ts 의 ASSET_TO_ALLOC_KEY 로 통일.
+// LEVERAGE 는 맵에 포함되지만 이 루프에서는 signal multiplier 를 적용하지 않는다
+// (base.leverage 는 leverageAllowed 게이트로만 결정됨). 아래 signals 루프 가드 참조.
+const SIGNAL_ASSET_MAP = ASSET_TO_ALLOC_KEY;
 
 function determineBuyStage(
   derived: Record<string, DerivedIndicator>,

@@ -20,6 +20,7 @@ import {
   ExecutionStage,
   ExecutionAction,
 } from '../types/indicators';
+import { ASSET_TO_ALLOC_KEY } from './asset-keys';
 
 const vRaw = (raw: Record<string, MarketDataPoint>, k: string): number | null => raw[k]?.value ?? null;
 const vDer = (d: Record<string, DerivedIndicator>, k: string): number | null => d[k]?.value ?? null;
@@ -28,16 +29,9 @@ function round(n: number, digits = 2): number {
   return parseFloat(n.toFixed(digits));
 }
 
-/** 자산별 할당 키 매핑 (allocation 측 키). */
-const ASSET_ALLOC_KEY: Record<string, string> = {
-  NASDAQ: 'nasdaq',
-  KOSPI: 'korea',
-  GOLD: 'gold',
-  SILVER: 'silver',
-  COPPER: 'copper',
-  LEVERAGE: 'leverage',
-  EMERGING: 'emerging',
-};
+// Fix #8(2차 감사): allocation.ts 와 키 매핑을 engines/asset-keys.ts 로 통일.
+// execution_plan 은 LEVERAGE 도 allocationPct 참조 대상이므로 포함된 채로 사용.
+const ASSET_ALLOC_KEY = ASSET_TO_ALLOC_KEY;
 
 function actionLabel(action: ExecutionAction): string {
   const map: Record<ExecutionAction, string> = {
