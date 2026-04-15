@@ -47,6 +47,7 @@ void refreshComputedHistories().catch((error) => {
   console.error('Initial computed history refresh failed:', error);
 });
 
+// Fix #5(2차 감사): 모든 cron 에 timezone 명시. 5분 스냅샷은 TZ 영향 없지만 일관성 위해 동일 옵션 부여.
 cron.schedule('*/5 * * * *', async () => {
   try {
     const snapshot = await getSnapshot(DEFAULT_PROFILE, true);
@@ -54,9 +55,11 @@ cron.schedule('*/5 * * * *', async () => {
   } catch (error) {
     console.error('Scheduled snapshot refresh failed:', error);
   }
-});
+}, { timezone: 'Asia/Seoul' });
 
-cron.schedule('0 22 * * *', async () => {
+// KST 07:00 히스토리 append — 기존 `0 22 * * *` 는 UTC 22시 = KST 07시였으나
+// Asia/Seoul TZ 지정 후엔 `0 7 * * *` 표기가 의미와 동일. 가독성 개선 + TZ 명시.
+cron.schedule('0 7 * * *', async () => {
   try {
     const apiKey = process.env.FRED_API_KEY || '';
     await appendDailyData(apiKey);
@@ -65,7 +68,7 @@ cron.schedule('0 22 * * *', async () => {
   } catch (error) {
     console.error('Daily history append failed:', error);
   }
-});
+}, { timezone: 'Asia/Seoul' });
 
 app.listen(PORT, () => {
   console.log(`MacroSquare server running on port ${PORT}`);
