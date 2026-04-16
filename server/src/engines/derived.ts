@@ -1631,6 +1631,108 @@ export async function computeDerived(
     /* 심리 서브스코어 실패는 파이프라인 막지 않음 */
   }
 
+  // === 호르무즈 연쇄 체인 스코어 (8차 TOP7 Fix #2) ===
+  // WTI 60D 변화 + OVX + DXY 추세 + KRW 레벨 + 외국인 연속 순매도 5축 가중합.
+  // 양수=완화 연쇄(한국 우호), 음수=악성 연쇄(호르무즈 불안→유가↑→원화약세→외인이탈).
+  // 각 축 정규화 [-2..+2] 후 가중합 → [-5..+5] 범위로 클램프.
+  try {
+    const wti60 = d.WTI_60D_CHANGE?.value ?? null;
+    const ovx = val(raw, 'OVX');
+    const dxyTrend = d.DXY_TREND?.value ?? null;
+    const fxLevel = d.KRW_FX_LEVEL?.value ?? null;
+    const fgnSellStreak = d.KOSPI_FOREIGN_SELL_STREAK?.value ?? null;
+
+    const axes: Array<{ name: string; score: number | null }> = [];
+
+    // WTI 60d: 유가 상승 = 악성 (지정학 리스크 확산), 하락 = 완화
+    if (wti60 !== null) {
+      let s = 0;
+      if (wti60 > 10) s = -2;
+      else if (wti60 > 5) s = -1;
+      else if (wti60 < -10) s = 2;
+      else if (wti60 < -5) s = 1;
+      axes.push({ name: 'WTI60D', score: s });
+    } else {
+      axes.push({ name: 'WTI60D', score: null });
+    }
+
+    // OVX: 원유 변동성 ≥ 60 = risk-off 확산 신호 (-1.5)
+    if (ovx !== null) {
+      let s = 0;
+      if (ovx >= 60) s = -1.5;
+      else if (ovx >= 45) s = -0.5;
+      else if (ovx <= 25) s = 0.5;
+      axes.push({ name: 'OVX', score: s });
+    } else {
+      axes.push({ name: 'OVX', score: null });
+    }
+
+    // DXY 약세 = KRW 에 우호 (지정학 달러 수요 완화)
+    if (dxyTrend !== null) {
+      let s = 0;
+      if (dxyTrend < -1) s = 1;
+      else if (dxyTrend < -0.3) s = 0.5;
+      else if (dxyTrend > 1) s = -1;
+      else if (dxyTrend > 0.3) s = -0.5;
+      axes.push({ name: 'DXY_TREND', score: s });
+    } else {
+      axes.push({ name: 'DXY_TREND', score: null });
+    }
+
+    // KRW 레벨: KRW_FX_LEVEL 은 이미 [-2..+2]. 환율 약세 극단이면 연쇄 악성 가속.
+    if (fxLevel !== null) {
+      let s = 0;
+      if (fxLevel >= 1) s = 1.5;
+      else if (fxLevel <= -1) s = -1.5;
+      else if (fxLevel <= -2) s = -2;
+      axes.push({ name: 'KRW_LEVEL', score: s });
+    } else {
+      axes.push({ name: 'KRW_LEVEL', score: null });
+    }
+
+    // 외국인 연속 순매도 streak: 이미 연쇄 결과물 관측치
+    if (fgnSellStreak !== null) {
+      let s = 0;
+      if (fgnSellStreak >= 5) s = -1;
+      else if (fgnSellStreak >= 3) s = -0.5;
+      else if (fgnSellStreak === 0) s = 1;
+      axes.push({ name: 'FOREIGN_SELL_STREAK', score: s });
+    } else {
+      axes.push({ name: 'FOREIGN_SELL_STREAK', score: null });
+    }
+
+    const valid = axes.filter((a) => a.score !== null);
+    if (valid.length > 0) {
+      let rawScore = valid.reduce((s, a) => s + (a.score as number), 0);
+      // 클램프 [-5..+5]
+      if (rawScore > 5) rawScore = 5;
+      if (rawScore < -5) rawScore = -5;
+
+      d.HORMUZ_CHAIN_SCORE = {
+        name: 'hormuz_chain_score',
+        value: parseFloat(rawScore.toFixed(2)),
+        date: dt,
+        formula: `5축 가중합 (${valid.map((a) => `${a.name}:${(a.score as number).toFixed(1)}`).join(' · ')}). 범위 [-5..+5]. ${valid.length}/5 축 집계.`,
+      };
+
+      let label: string;
+      if (rawScore <= -3) label = '악성 연쇄';
+      else if (rawScore <= -1) label = '주의';
+      else if (rawScore <= 1) label = '중립';
+      else if (rawScore <= 3) label = '우호';
+      else label = '완화 연쇄';
+
+      d.HORMUZ_CHAIN_LABEL = {
+        name: 'hormuz_chain_label',
+        value: rawScore, // UI 는 score 로 라벨 매핑
+        date: dt,
+        formula: `${label} (≤-3 악성 / -3~-1 주의 / -1~+1 중립 / +1~+3 우호 / ≥+3 완화 연쇄)`,
+      };
+    }
+  } catch {
+    /* 호르무즈 연쇄 체인 스코어 실패는 파이프라인 막지 않음 */
+  }
+
   // === FX_FOREIGN_COMBO_ALERT (7차 TOP3 Fix #2) ===
   // USDKRW 레벨과 외국인 연속 순매도 streak 의 교집합 경보.
   // 단일 환율 레벨보다 "환율 극단 + 외국인 실제 이탈" 동시 충족 시 KOSPI/EMERGING 감산 강화.
