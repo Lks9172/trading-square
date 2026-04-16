@@ -1136,6 +1136,29 @@ export async function computeDerived(
             date: dt,
             formula: `장기 회귀채널 하단 (mid - 1σ). 영상3 '매수 강도 강해지는 경향'`,
           };
+
+          // 8차 TOP7 Fix #4: 종가 vs 중단선 크로스 이벤트 (2일 비교)
+          // 전일 종가 ≤ MID & 당일 종가 > MID → +1 (상향 크로스, 장기 추세 회귀)
+          // 전일 종가 ≥ MID & 당일 종가 < MID → -1 (하향 크로스, 약세 이탈)
+          try {
+            const nasdaqHist = await readHistory('yahoo', 'NASDAQ');
+            if (nasdaqHist.length >= 2 && ch.midLine !== null && Number.isFinite(ch.midLine)) {
+              const prev = nasdaqHist[nasdaqHist.length - 2].value;
+              const cur = nasdaqHist[nasdaqHist.length - 1].value;
+              const mid = ch.midLine;
+              let cross = 0;
+              if (prev <= mid && cur > mid) cross = 1;
+              else if (prev >= mid && cur < mid) cross = -1;
+              d.NASDAQ_CHANNEL_MID_CROSS = {
+                name: 'nasdaq_channel_mid_cross',
+                value: cross,
+                date: dt,
+                formula: `전일 ${prev.toFixed(2)} / 당일 ${cur.toFixed(2)} / MID ${mid.toFixed(2)}. +1=상향 크로스, -1=하향 크로스, 0=유지`,
+              };
+            }
+          } catch {
+            /* NASDAQ channel cross 실패는 전체 파이프라인 막지 않음 */
+          }
         }
       }
 
