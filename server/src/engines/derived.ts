@@ -23,24 +23,75 @@ function today(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-// 최근부터 역순 순회하여 이격률이 threshold 를 연속으로 유지한 일수 반환.
-// direction='over' → disparity ≥ threshold 가 유지되는 구간
-// direction='under' → disparity ≤ threshold 가 유지되는 구간
-// history 는 '최근이 앞' (index 0 = 가장 최근) 이라는 기존 derived 컨벤션에 맞춘다.
+function average(values: number[]): number | null {
+  const finite = values.filter((value) => Number.isFinite(value));
+  if (finite.length === 0) return null;
+  return finite.reduce((sum, value) => sum + value, 0) / finite.length;
+}
+
+function computeWindowedPercentChange(
+  points: Array<{ value: number }>,
+  recentWindow: number,
+  priorWindow: number,
+): { recentAvg: number; priorAvg: number; pctChange: number } | null {
+  if (points.length < recentWindow + priorWindow) return null;
+  const recentAvg = average(points.slice(0, recentWindow).map((point) => point.value));
+  const priorAvg = average(points.slice(recentWindow, recentWindow + priorWindow).map((point) => point.value));
+  if (recentAvg === null || priorAvg === null || priorAvg === 0) return null;
+  return {
+    recentAvg,
+    priorAvg,
+    pctChange: ((recentAvg - priorAvg) / priorAvg) * 100,
+  };
+}
+
+export function computeHistoryYoY(
+  history: Array<{ date: string; value: number }>,
+  minExpectedLevel = 0,
+  maxAgeDays?: number,
+): number | null {
+  if (history.length < 2) return null;
+  const latest = history[history.length - 1];
+  if (!Number.isFinite(latest.value) || latest.value === 0 || latest.value < minExpectedLevel) return null;
+  if (maxAgeDays !== undefined) {
+    const ageDays = Math.floor((Date.now() - new Date(latest.date).getTime()) / 86400000);
+    if (ageDays > maxAgeDays) return null;
+  }
+
+  const targetDt = new Date(latest.date);
+  targetDt.setFullYear(targetDt.getFullYear() - 1);
+  const targetMs = targetDt.getTime();
+  let past: { date: string; value: number } | null = null;
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (new Date(history[i].date).getTime() <= targetMs) {
+      past = history[i];
+      break;
+    }
+  }
+  if (!past || !Number.isFinite(past.value) || past.value === 0 || past.value < minExpectedLevel) return null;
+  return ((latest.value / past.value) - 1) * 100;
+}
+
+// 최근부터 역순 순회하며 "각 날짜 자신의 이동평균" 기준으로 이격률이 threshold 를
+// 연속 유지한 일수를 계산한다. 이전 구현은 오늘의 SMA200 하나를 과거 모든 가격에
+// 재사용해 streak 를 과대/과소 계산할 수 있었다.
 export function computeDisparityStreak(
   history: number[],
-  current200MA: number,
+  lookback: number,
   threshold: number,
   direction: 'over' | 'under' = 'over',
 ): number | null {
-  if (!history || history.length === 0 || !Number.isFinite(current200MA) || current200MA <= 0) {
+  if (!history || history.length < lookback || lookback <= 0) {
     return null;
   }
   let streak = 0;
-  for (let i = 0; i < history.length; i += 1) {
+  for (let i = 0; i <= history.length - lookback; i += 1) {
     const price = history[i];
     if (!Number.isFinite(price) || price <= 0) break;
-    const disp = ((price - current200MA) / current200MA) * 100;
+    const window = history.slice(i, i + lookback);
+    const movingAverage = window.reduce((sum, value) => sum + value, 0) / window.length;
+    if (!Number.isFinite(movingAverage) || movingAverage <= 0) break;
+    const disp = ((price - movingAverage) / movingAverage) * 100;
     const inside = direction === 'over' ? disp >= threshold : disp <= threshold;
     if (!inside) break;
     streak += 1;
@@ -139,8 +190,8 @@ export async function computeDerived(
       }
 
       // 200DMA 이격률이 ±15% 구간에 연속으로 머무른 일수 (추격/투매 피로 감지)
-      const overStreak = computeDisparityStreak(closes, sma200, 15, 'over');
-      const underStreak = computeDisparityStreak(closes, sma200, -15, 'under');
+      const overStreak = computeDisparityStreak(closes, 200, 15, 'over');
+      const underStreak = computeDisparityStreak(closes, 200, -15, 'under');
       if (overStreak !== null) {
         d.NASDAQ_DISPARITY_STREAK_OVERHEATED = {
           name: 'nasdaq_disparity_streak_overheated',
@@ -220,8 +271,8 @@ export async function computeDerived(
       };
 
       // 200DMA 이격률 ±15% 연속 일수 (추격/투매 피로)
-      const kospiOverStreak = computeDisparityStreak(closes, sma200, 15, 'over');
-      const kospiUnderStreak = computeDisparityStreak(closes, sma200, -15, 'under');
+      const kospiOverStreak = computeDisparityStreak(closes, 200, 15, 'over');
+      const kospiUnderStreak = computeDisparityStreak(closes, 200, -15, 'under');
       if (kospiOverStreak !== null) {
         d.KOSPI_DISPARITY_STREAK_OVERHEATED = {
           name: 'kospi_disparity_streak_overheated',
@@ -292,30 +343,19 @@ export async function computeDerived(
   }
 
   // === 글로벌 M2 aggregate ===
-  // 각 국가 시리즈의 "최신 vs 12개월 전" YoY%를 직접 계산해서 평균.
-  // 기존에는 raw index level을 그대로 평균했는데 이는 의미가 없어 재작성.
-  const readYoY = async (key: string): Promise<number | null> => {
+  // 미국 M2 + 유로/일본 broad money level index 의 "최신 vs 12개월 전" YoY% 평균.
+  // 유로/일본은 OECD growth-rate 시리즈가 아니라 level-like index 시리즈를 써야
+  // YoY-of-YoY 왜곡 없이 같은 축에서 비교할 수 있다.
+  const GLOBAL_M2_MAX_AGE_DAYS = 400;
+  const readYoY = async (key: string, minExpectedLevel = 0): Promise<number | null> => {
     const hist = await readHistory('fred', key);
-    if (hist.length < 2) return null;
-    const latest = hist[hist.length - 1];
-    const targetDt = new Date(latest.date);
-    targetDt.setFullYear(targetDt.getFullYear() - 1);
-    const targetMs = targetDt.getTime();
-    let past: { date: string; value: number } | null = null;
-    for (let i = hist.length - 1; i >= 0; i -= 1) {
-      if (new Date(hist[i].date).getTime() <= targetMs) {
-        past = hist[i];
-        break;
-      }
-    }
-    if (!past || past.value === 0) return null;
-    return ((latest.value / past.value) - 1) * 100;
+    return computeHistoryYoY(hist, minExpectedLevel, GLOBAL_M2_MAX_AGE_DAYS);
   };
 
   const [usYoY, euroYoY, japanYoY] = await Promise.all([
     readYoY('M2SL'),
-    readYoY('M3_EURO'),
-    readYoY('M3_JAPAN'),
+    readYoY('M3_EURO', 20),
+    readYoY('M3_JAPAN', 20),
   ]);
 
   // 광의통화 YoY 합리 범위: COVID 피크(미국 M2 약 +27%)까지 포섭하되,
@@ -487,31 +527,44 @@ export async function computeDerived(
 
   try {
     const rrpHist = await fetchFredHistory('RRPONTSYD', apiKey, 30);
-    const tgaHist = await fetchFredHistory('WTREGEN', apiKey, 10);
-    const mmfHist = await fetchFredHistory('WRMFNS', apiKey, 10);
+    const tgaHist = await fetchFredHistory('WTREGEN', apiKey, 12);
+    const mmfHist = await fetchFredHistory('WRMFNS', apiKey, 12);
+    const reserveHist = await fetchFredHistory('WRESBAL', apiKey, 12);
 
-    if (rrpHist.length >= 10) {
+    const rrpTrend = computeWindowedPercentChange(rrpHist, 5, 5);
+    if (rrpTrend) {
       d.RRP_DIRECTION = {
         name: 'rrp_direction',
-        value: parseFloat((rrpHist[0].value - rrpHist[Math.min(9, rrpHist.length - 1)].value).toFixed(2)),
+        value: parseFloat(rrpTrend.pctChange.toFixed(2)),
         date: dt,
-        formula: 'RRP 최근값 - 10일전 (음수=시장유입)',
+        formula: `RRP 최근 5일 평균(${rrpTrend.recentAvg.toFixed(0)}) vs 직전 5일 평균(${rrpTrend.priorAvg.toFixed(0)}) 변화율 % (음수=시장유입)`,
       };
     }
-    if (tgaHist.length >= 2) {
+    const tgaTrend = computeWindowedPercentChange(tgaHist, 2, 2);
+    if (tgaTrend) {
       d.TGA_DIRECTION = {
         name: 'tga_direction',
-        value: parseFloat((tgaHist[0].value - tgaHist[1].value).toFixed(2)),
+        value: parseFloat(tgaTrend.pctChange.toFixed(2)),
         date: dt,
-        formula: 'TGA 최근값 - 이전주 (음수=유동성공급)',
+        formula: `TGA 최근 2주 평균(${tgaTrend.recentAvg.toFixed(0)}) vs 직전 2주 평균(${tgaTrend.priorAvg.toFixed(0)}) 변화율 % (음수=유동성공급)`,
       };
     }
-    if (mmfHist.length >= 2) {
+    const mmfTrend = computeWindowedPercentChange(mmfHist, 2, 2);
+    if (mmfTrend) {
       d.MMF_DIRECTION = {
         name: 'mmf_direction',
-        value: parseFloat((mmfHist[0].value - mmfHist[1].value).toFixed(2)),
+        value: parseFloat(mmfTrend.pctChange.toFixed(2)),
         date: dt,
-        formula: 'MMF 최근값 - 이전주 (음수=위험자산이동)',
+        formula: `MMF 최근 2주 평균(${mmfTrend.recentAvg.toFixed(0)}) vs 직전 2주 평균(${mmfTrend.priorAvg.toFixed(0)}) 변화율 % (음수=위험자산이동)`,
+      };
+    }
+    const reserveTrend = computeWindowedPercentChange(reserveHist, 2, 2);
+    if (reserveTrend) {
+      d.WRESBAL_DIRECTION = {
+        name: 'wresbal_direction',
+        value: parseFloat(reserveTrend.pctChange.toFixed(2)),
+        date: dt,
+        formula: `지급준비금 최근 2주 평균(${reserveTrend.recentAvg.toFixed(0)}) vs 직전 2주 평균(${reserveTrend.priorAvg.toFixed(0)}) 변화율 % (양수=은행 유동성 체력 개선)`,
       };
     }
   } catch { void 0; }
@@ -749,23 +802,32 @@ export async function computeDerived(
 
   // === 유동성 방향 종합 점수 (영상4 §120 "총량 아닌 방향") ===
   // RRP 감소 / TGA 감소 / MMF 감소 / WRESBAL 증가 / Global M2 YoY > 0 → 각 +1.
-  // 반대 방향은 -1. 총 -5 ~ +5.
+  // 반대 방향은 -1. 최근값 하나가 아니라 평균 대비 변화율을 써서 하루 내 잦은 노이즈를 완화한다.
   let liqScore = 0;
   const liqParts: string[] = [];
   const rrpDir = d.RRP_DIRECTION?.value;
   if (rrpDir !== undefined && rrpDir !== null) {
-    if (rrpDir < 0) { liqScore += 1; liqParts.push('RRP↓'); }
-    else if (rrpDir > 0) { liqScore -= 1; liqParts.push('RRP↑'); }
+    if (rrpDir <= -1) { liqScore += 1; liqParts.push(`RRP ${rrpDir.toFixed(1)}%`); }
+    else if (rrpDir >= 1) { liqScore -= 1; liqParts.push(`RRP ${rrpDir.toFixed(1)}%`); }
+    else liqParts.push(`RRP 중립 ${rrpDir.toFixed(1)}%`);
   }
   const tgaDir = d.TGA_DIRECTION?.value;
   if (tgaDir !== undefined && tgaDir !== null) {
-    if (tgaDir < 0) { liqScore += 1; liqParts.push('TGA↓'); }
-    else if (tgaDir > 0) { liqScore -= 1; liqParts.push('TGA↑'); }
+    if (tgaDir <= -2) { liqScore += 1; liqParts.push(`TGA ${tgaDir.toFixed(1)}%`); }
+    else if (tgaDir >= 2) { liqScore -= 1; liqParts.push(`TGA ${tgaDir.toFixed(1)}%`); }
+    else liqParts.push(`TGA 중립 ${tgaDir.toFixed(1)}%`);
   }
   const mmfDir = d.MMF_DIRECTION?.value;
   if (mmfDir !== undefined && mmfDir !== null) {
-    if (mmfDir < 0) { liqScore += 1; liqParts.push('MMF↓'); }
-    else if (mmfDir > 0) { liqScore -= 1; liqParts.push('MMF↑'); }
+    if (mmfDir <= -0.5) { liqScore += 1; liqParts.push(`MMF ${mmfDir.toFixed(1)}%`); }
+    else if (mmfDir >= 0.5) { liqScore -= 1; liqParts.push(`MMF ${mmfDir.toFixed(1)}%`); }
+    else liqParts.push(`MMF 중립 ${mmfDir.toFixed(1)}%`);
+  }
+  const reserveDir = d.WRESBAL_DIRECTION?.value;
+  if (reserveDir !== undefined && reserveDir !== null) {
+    if (reserveDir >= 1) { liqScore += 1; liqParts.push(`WRESBAL ${reserveDir.toFixed(1)}%`); }
+    else if (reserveDir <= -1) { liqScore -= 1; liqParts.push(`WRESBAL ${reserveDir.toFixed(1)}%`); }
+    else liqParts.push(`WRESBAL 중립 ${reserveDir.toFixed(1)}%`);
   }
   const m2 = d.GLOBAL_M2_PROXY?.value;
   if (m2 !== undefined && m2 !== null) {
@@ -776,7 +838,7 @@ export async function computeDerived(
     name: 'liquidity_direction',
     value: liqScore,
     date: dt,
-    formula: `RRP/TGA/MMF 감소 + M2 YoY 양수 = 각 +1. -5~+5 범위. 현재: ${liqParts.join(' · ')}`,
+    formula: `RRP/TGA/MMF 최근 평균 감소 + WRESBAL 평균 증가 + M2 YoY 양수 = 각 +1. -5~+5 범위. 현재: ${liqParts.join(' · ')}`,
   };
 
   // === 채권 자경단 / 재정 리스크 (영상4 §07 "30년 4.93% 돌파, 미국 재정 리스크 노출") ===
@@ -1202,6 +1264,44 @@ export async function computeDerived(
         value: summary.foreignExtreme === 'overheated' ? 1 : summary.foreignExtreme === 'oversold' ? -1 : 0,
         date: summary.latestDate,
         formula: '20D 순매수 합 ≥+3조 → 과열(+1) / ≤-3조 → 과매도(-1) / 중립(0)',
+      };
+
+      // === 개인 순매수 시리즈 (8차 TOP7 Fix #1) ===
+      // 외인/기관 반대 주체. 개인이 외국인 대규모 매물을 흡수하는 구도는 역사적으로 악성.
+      d.KOSPI_INDIVIDUAL_NET_1D = {
+        name: 'kospi_individual_net_1d',
+        value: summary.individualLatest,
+        date: summary.latestDate,
+        formula: '당일 개인 순매수 (억원, 네이버 금융)',
+      };
+      d.KOSPI_INDIVIDUAL_NET_5D = {
+        name: 'kospi_individual_net_5d',
+        value: summary.individualNet5D,
+        date: summary.latestDate,
+        formula: '최근 5영업일 개인 순매수 합 (억원)',
+      };
+      d.KOSPI_INDIVIDUAL_NET_20D = {
+        name: 'kospi_individual_net_20d',
+        value: summary.individualNet20D,
+        date: summary.latestDate,
+        formula: '최근 20영업일 개인 순매수 합 (억원)',
+      };
+
+      // === 외인-개인 괴리 경보 (8차 TOP7 Fix #1) ===
+      // 외인 5일 순매도 ≥ 3조 AND 개인 5일 순매수 ≥ 3조 → 악성 구도 (+1)
+      // 반대 (외인 +3조 AND 개인 -3조) → 가능 (-1)
+      // 평시 0.
+      let divergenceLevel = 0;
+      if (summary.foreignNet5D <= -30000 && summary.individualNet5D >= 30000) {
+        divergenceLevel = 1;
+      } else if (summary.foreignNet5D >= 30000 && summary.individualNet5D <= -30000) {
+        divergenceLevel = -1;
+      }
+      d.KOSPI_FOREIGN_INDIVIDUAL_DIVERGENCE = {
+        name: 'kospi_foreign_individual_divergence',
+        value: divergenceLevel,
+        date: summary.latestDate,
+        formula: `외인5D ${summary.foreignNet5D}억·개인5D ${summary.individualNet5D}억. +1=개인이 외인 매물 흡수(악성), -1=반대, 0=평시. 3조 기준.`,
       };
 
       // === 외국인-환율 괴리 (ATM화) 지수 (영상5 §112 "환율 5% 상승 대비 외국인 매도 2배 과잉") ===

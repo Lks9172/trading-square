@@ -112,6 +112,10 @@ export interface InvestorFlowSummary {
   institutionLatest: number;
   institutionNet5D: number;
   pensionNet5D: number;
+  /** 개인 순매수 (억원) — 외인-개인 괴리 경보 계산용 */
+  individualLatest: number;
+  individualNet5D: number;
+  individualNet20D: number;
   /** 외국인 최근5일 평균 vs 6~20일 평균 차이 — 양수면 추세 가속 */
   foreignTrend: number;
   /** 외국인 연속 순매수 일수 (최신일부터 역산) */
@@ -168,6 +172,9 @@ export function summarizeInvestorFlow(
     institutionLatest: latest.institution,
     institutionNet5D: parseFloat(sum(last5, 'institution').toFixed(0)),
     pensionNet5D: parseFloat(sum(last5, 'pension').toFixed(0)),
+    individualLatest: latest.individual,
+    individualNet5D: parseFloat(sum(last5, 'individual').toFixed(0)),
+    individualNet20D: parseFloat(sum(last20, 'individual').toFixed(0)),
     foreignTrend: parseFloat((avg(last5, 'foreign') - avg(prev15, 'foreign')).toFixed(1)),
     foreignBuyStreak: buyStreak,
     foreignSellStreak: sellStreak,

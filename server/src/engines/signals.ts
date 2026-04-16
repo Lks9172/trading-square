@@ -45,6 +45,40 @@ function dv(derived: Record<string, DerivedIndicator>, key: string): number | nu
   return derived[key]?.value ?? null;
 }
 
+function disabledAssetSignal(asset: string, reason: string): AssetSignal {
+  return {
+    asset,
+    signal: 'HOLD',
+    conditionsMet: 0,
+    conditionsTotal: 0,
+    weightedScore: 0,
+    weightedMaxScore: 0,
+    reasons: [reason],
+    unmetReasons: [],
+    date: new Date().toISOString().split('T')[0],
+    explanation: {
+      baseSignal: 'HOLD',
+      finalSignal: 'HOLD',
+      overrides: [],
+    },
+  };
+}
+
+function withSignalExplanation(
+  signal: AssetSignal,
+  baseSignal: Signal,
+  overrides: string[] = [],
+): AssetSignal {
+  return {
+    ...signal,
+    explanation: {
+      baseSignal,
+      finalSignal: signal.signal,
+      overrides,
+    },
+  };
+}
+
 /**
  * 5단계 임계치를 모두 받아 signal 을 결정.
  *
@@ -81,6 +115,13 @@ function signalFromScore(met: number, total: number, thresholds: SignalThreshold
   if (met >= thresholds.hold) return 'HOLD';
   if (met >= thresholds.reduce) return 'REDUCE';
   return 'SELL';
+}
+
+function softenRiskSignal(signal: Signal): Signal {
+  if (signal === 'STRONG_BUY') return 'BUY';
+  if (signal === 'BUY') return 'HOLD';
+  if (signal === 'HOLD') return 'REDUCE';
+  return signal;
 }
 
 function nasdaqSignal(
@@ -136,20 +177,25 @@ function nasdaqSignal(
   }
 
   // --- 유동성 카테고리 (1) ---
-  // RRP 감소(시장 유동성 유입) OR 글로벌 M2 YoY 양수(글로벌 유동성 확장) 중 하나 이상.
+  // 단일 RRP tick 보다 완만한 유동성 종합점수 우선. 하루 내 잦은 flicker 를 줄이기 위해
+  // RRP/TGA/MMF/WRESBAL 평균 변화 + 글로벌 M2 를 합성한 LIQUIDITY_DIRECTION 을 본다.
+  const liquidityDir = dv(derived, 'LIQUIDITY_DIRECTION');
   const rrpDir = dv(derived, 'RRP_DIRECTION');
   const globalM2 = dv(derived, 'GLOBAL_M2_PROXY');
-  const rrpLoosening = rrpDir !== null && rrpDir < 0;
+  const liquidityExpanding = liquidityDir !== null && liquidityDir >= 1;
+  const rrpLoosening = rrpDir !== null && rrpDir <= -1;
   const m2Expanding = globalM2 !== null && globalM2 > 0;
-  if (rrpLoosening || m2Expanding) {
+  if (liquidityExpanding || rrpLoosening || m2Expanding) {
     met++;
     reasons.push(
-      `유동성 확장 (${rrpLoosening ? `RRP ${rrpDir?.toFixed(0)} 감소` : ''}` +
-      `${rrpLoosening && m2Expanding ? ' · ' : ''}` +
+      `유동성 확장 (${liquidityExpanding ? `종합점수 ${liquidityDir?.toFixed(0)}` : ''}` +
+      `${(liquidityExpanding && (rrpLoosening || m2Expanding)) ? ' · ' : ''}` +
+      `${rrpLoosening ? `RRP ${rrpDir?.toFixed(1)}%` : ''}` +
+      `${(rrpLoosening && m2Expanding) ? ' · ' : ''}` +
       `${m2Expanding ? `글로벌 M2 YoY ${globalM2?.toFixed(1)}%` : ''}, 가중치 1.0)`
     );
   } else {
-    unmetReasons.push(`유동성 확장 미충족 (RRP ${rrpDir?.toFixed(0) ?? '?'}, M2 ${globalM2?.toFixed(1) ?? '?'}%, 가중치 1.0 미충족)`);
+    unmetReasons.push(`유동성 확장 미충족 (종합 ${liquidityDir?.toFixed(0) ?? '?'}, RRP ${rrpDir?.toFixed(1) ?? '?' }%, M2 ${globalM2?.toFixed(1) ?? '?'}%, 가중치 1.0 미충족)`);
   }
 
   // --- 정책 카테고리 (1) ---
@@ -184,7 +230,7 @@ function nasdaqSignal(
   else if (mtfMonthPos !== null && mtfMonthPos <= 15) { reasons.push(`월봉 위치 ${mtfMonthPos.toFixed(0)}% → 저점권, 분할매수 구간 (보조조건)`); }
 
   if (icsa !== null && icsa >= 300000 && above200 === 0) {
-    return {
+    return withSignalExplanation({
       asset: 'NASDAQ',
       signal: 'SELL',
       conditionsMet: met,
@@ -194,20 +240,22 @@ function nasdaqSignal(
       reasons: ['200DMA 하회 + 실업수당 30만 초과 → 구조적 위험'],
       unmetReasons,
       date: new Date().toISOString().split('T')[0],
-    };
+    }, 'SELL');
   }
 
   // Fix #3(2차 감사): thresholds 를 total 상대값으로 복원.
   //   base(total=7) 기준 {strongBuy:5, buy:4, hold:3, reduce:2} 는 기존과 동일한 수치.
   //   PSYCH 보너스로 total=8 이 되면 모든 임계가 +1 shift → 보너스가 임계를 붕괴시키지 않음.
   //   수식: strongBuy = total-2, buy = total-3, hold = total-4, reduce = total-5, sell = 0.
-  let signal = signalFromScore(met, total, {
+  const overrides: string[] = [];
+  const baseSignal = signalFromScore(met, total, {
     sell: 0,
     reduce: Math.max(0, total - 5),
     hold: Math.max(0, total - 4),
     buy: Math.max(0, total - 3),
     strongBuy: Math.max(0, total - 2),
   });
+  let signal = baseSignal;
 
   // Fix #2: NASDAQ 과열 REDUCE override.
   // 4개 체크 중 2개 이상 발동 시 met 와 무관하게 REDUCE 강등(영상1 §추격매수 금지).
@@ -223,10 +271,12 @@ function nasdaqSignal(
   if (chaseWarning === 1) overheatFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
   if (overheatFlags.length >= 2 && signal !== 'SELL') {
     signal = 'REDUCE';
-    unmetReasons.push(`과열 REDUCE override: ${overheatFlags.join(' · ')}`);
+    const overrideReason = `과열 REDUCE override: ${overheatFlags.join(' · ')}`;
+    overrides.push(overrideReason);
+    unmetReasons.push(overrideReason);
   }
 
-  return {
+  return withSignalExplanation({
     asset: 'NASDAQ',
     signal,
     conditionsMet: met,
@@ -236,7 +286,7 @@ function nasdaqSignal(
     reasons,
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  };
+  }, baseSignal, overrides);
 }
 
 function goldSignal(
@@ -284,7 +334,7 @@ function goldSignal(
   const pct = (score / maxScore) * 100;
 
   if (realYield !== null && realYield > 2.0 && dxy !== null && dxy > 106) {
-    return {
+    return withSignalExplanation({
       asset: 'GOLD',
       signal: 'HOLD',
       conditionsMet: metCount,
@@ -294,7 +344,7 @@ function goldSignal(
       reasons: ['실질금리 상승 + DXY 강세 → 지정학만으로 매수 위험'],
       unmetReasons,
       date: new Date().toISOString().split('T')[0],
-    };
+    }, 'HOLD');
   }
 
   let signal: Signal;
@@ -302,21 +352,27 @@ function goldSignal(
   else if (pct > 50) signal = 'BUY';
   else if (pct > 30) signal = 'HOLD';
   else signal = 'REDUCE';
+  const baseSignal = signal;
+  const overrides: string[] = [];
 
   const goldFibZone = dv(derived, 'GOLD_FIB_ZONE');
   if (signal === 'REDUCE' && goldFibZone !== null && goldFibZone >= 2) {
     signal = 'HOLD';
-    reasons.push(`피보나치 바닥권(구간 ${goldFibZone}) → 최소 HOLD 보장`);
+    const overrideReason = `피보나치 바닥권(구간 ${goldFibZone}) → 최소 HOLD 보장`;
+    overrides.push(overrideReason);
+    reasons.push(overrideReason);
   }
   if (signal === 'HOLD' && goldFibZone !== null && goldFibZone >= 3 && goldDisparity !== null && goldDisparity <= -15) {
     const hardMacroBlock = (realYield !== null && realYield > 2.5) && (dxy !== null && dxy > 106);
     if (!hardMacroBlock) {
       signal = 'BUY';
-      reasons.push(`강한 바닥권(피보 ${goldFibZone}, 이격도 ${goldDisparity.toFixed(1)}%) → BUY 승격`);
+      const overrideReason = `강한 바닥권(피보 ${goldFibZone}, 이격도 ${goldDisparity.toFixed(1)}%) → BUY 승격`;
+      overrides.push(overrideReason);
+      reasons.push(overrideReason);
     }
   }
 
-  return {
+  return withSignalExplanation({
     asset: 'GOLD',
     signal,
     conditionsMet: metCount,
@@ -326,7 +382,7 @@ function goldSignal(
     reasons,
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  };
+  }, baseSignal, overrides);
 }
 
 function silverSignal(
@@ -386,25 +442,34 @@ function silverSignal(
   //   signalFromScore 로 전환: total=2 기준 {strongBuy:2, buy:1, hold:1, reduce:1, sell:0}.
   //   여기에 이중 게이트(aux 보강) 유지: 메인 풀 충족 시 aux 2+ → STRONG_BUY 승격,
   //   메인 1개 + aux 2+ → BUY 승격, aux 0 → BUY 차단 후 HOLD.
-  let signal: Signal = signalFromScore(met, total, {
+  const overrides: string[] = [];
+  const baseSignal = signalFromScore(met, total, {
     sell: 0,
     reduce: 1,
     hold: total - 1, // 2-1=1
     buy: total,       // 2
     strongBuy: total, // 2 (기본)
   });
+  let signal: Signal = baseSignal;
   // STRONG_BUY 승격은 aux 2+ 필요 (기존 이중 게이트 유지)
   if (met === 2 && auxMet >= 2) signal = 'STRONG_BUY';
   else if (met === 2) signal = 'BUY';
-  else if (met === 1 && auxMet >= 2) { signal = 'BUY'; reasons.push('메인 1개 + 보조 2개 충족 → BUY 승격 (보조조건)'); }
+  else if (met === 1 && auxMet >= 2) {
+    signal = 'BUY';
+    const overrideReason = '메인 1개 + 보조 2개 충족 → BUY 승격 (보조조건)';
+    overrides.push(overrideReason);
+    reasons.push(overrideReason);
+  }
   // met=0 이면 signalFromScore 결과(REDUCE 또는 SELL) 유지.
 
   if (auxMet === 0 && signal === 'BUY') {
     signal = 'HOLD';
-    unmetReasons.push('경기방향 보조조건 전부 미충족 → BUY 차단 (보조조건)');
+    const overrideReason = '경기방향 보조조건 전부 미충족 → BUY 차단 (보조조건)';
+    overrides.push(overrideReason);
+    unmetReasons.push(overrideReason);
   }
 
-  return {
+  return withSignalExplanation({
     asset: 'SILVER',
     signal,
     conditionsMet: met,
@@ -414,7 +479,7 @@ function silverSignal(
     reasons: reasons.length > 0 ? reasons : ['조건 미충족, 대기'],
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  };
+  }, baseSignal, overrides);
 }
 
 function copperSignal(
@@ -463,15 +528,16 @@ function copperSignal(
   // Fix #6(2차 감사): REDUCE 분기 복구 — 기존 `met≥3 STRONG_BUY / met===2 BUY / else HOLD` 는
   //   met=0(3조건 모두 미충족) 에서도 HOLD 로 약세 강등이 없었다. signalFromScore 로 통일:
   //   total=3 기준 {strongBuy:3, buy:2, hold:1, reduce:0, sell:0} — 기존 BUY/STRONG_BUY 분기는 보존.
-  let signal: Signal = signalFromScore(met, total, {
+  const baseSignal = signalFromScore(met, total, {
     sell: 0,
     reduce: 0,
     hold: 1,
     buy: 2,
     strongBuy: 3,
   });
+  let signal: Signal = baseSignal;
 
-  return {
+  return withSignalExplanation({
     asset: 'COPPER',
     signal,
     conditionsMet: met,
@@ -481,12 +547,14 @@ function copperSignal(
     reasons,
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  };
+  }, baseSignal);
 }
 
 function cashSignal(regime: RegimeState): AssetSignal {
   const map: Record<string, Signal> = {
     RECESSION_RISK: 'STRONG_BUY',
+    BOND_VIGILANTE: 'STRONG_BUY',
+    STAGFLATION: 'BUY',
     CAUTION: 'BUY',
     NEUTRAL: 'HOLD',
     CORRECTION: 'REDUCE',
@@ -496,6 +564,8 @@ function cashSignal(regime: RegimeState): AssetSignal {
 
   const reasons: Record<string, string> = {
     RECESSION_RISK: '구조적 위험 → 현금 비중 극대화',
+    BOND_VIGILANTE: '장기금리·신용 스트레스 → 현금 방어 강화',
+    STAGFLATION: '물가 압력 + 성장 둔화 → 현금 방어 유지',
     CAUTION: '경계 → 현금 확보',
     NEUTRAL: '중립 → 현금 유지',
     CORRECTION: '조정 → 현금 투입 시작',
@@ -503,7 +573,7 @@ function cashSignal(regime: RegimeState): AssetSignal {
     RISK_ON: '위험선호 → 현금 최소화',
   };
 
-  return {
+  return withSignalExplanation({
     asset: 'CASH',
     signal: map[regime.regime] ?? 'HOLD',
     conditionsMet: 0,
@@ -513,13 +583,19 @@ function cashSignal(regime: RegimeState): AssetSignal {
     reasons: [reasons[regime.regime] ?? ''],
     unmetReasons: [],
     date: new Date().toISOString().split('T')[0],
-  };
+  }, map[regime.regime] ?? 'HOLD');
 }
 
 function leverageCheck(
   raw: Record<string, MarketDataPoint>,
-  derived: Record<string, DerivedIndicator>
+  derived: Record<string, DerivedIndicator>,
+  profile: UserProfile,
 ): AssetSignal {
+  if (!profile.leverageEnabled) {
+    clearLeverageEntry();
+    return disabledAssetSignal('LEVERAGE', '사용자 설정 leverageEnabled=false — 레버리지 비활성화');
+  }
+
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
   let met = 0;
@@ -538,7 +614,7 @@ function leverageCheck(
   else { unmetReasons.push('실업수당 300K 미만 조건 미충족 (가중치 1.0 미충족)'); }
 
   if (disparity !== null && disparity >= 0 && met < 3) {
-    return {
+    return withSignalExplanation({
       asset: 'LEVERAGE',
       signal: 'REDUCE',
       conditionsMet: met,
@@ -548,7 +624,7 @@ function leverageCheck(
       reasons: [`이격도 ${disparity.toFixed(1)}% → 200DMA 복귀/초과. 레버리지 익절 구간 (목표 20~30% 도달 추정)`],
       unmetReasons,
       date: new Date().toISOString().split('T')[0],
-    };
+    }, 'REDUCE');
   }
 
   if (disparity !== null && disparity > -10 && disparity < 0 && met < 3) {
@@ -561,6 +637,8 @@ function leverageCheck(
 
   const today = new Date().toISOString().split('T')[0];
   let signal: Signal = met === 3 ? 'BUY' : 'HOLD';
+  const baseSignal = signal;
+  const overrides: string[] = [];
   const decisionReasons = met === 3
     ? [...reasons, '3조건 충족 → 2x ETF 최대 15% 허용']
     : [...reasons, `${3 - met}개 조건 미충족 → 레버리지 불허`];
@@ -575,6 +653,7 @@ function leverageCheck(
       const elapsed = daysBetween(today, entryDate);
       if (elapsed >= LEVERAGE_FORCE_EXIT_DAYS) {
         signal = 'REDUCE';
+        overrides.push(`진입 ${elapsed}일 경과 (>= ${LEVERAGE_FORCE_EXIT_DAYS}일) -> REDUCE`);
         decisionReasons.push(
           `⏰ 진입 ${elapsed}일 경과 (≥ ${LEVERAGE_FORCE_EXIT_DAYS}일) → 영상1 §전략C "2~3개월 짧게" 원칙 강제 익절`,
         );
@@ -595,7 +674,7 @@ function leverageCheck(
     decisionReasons.push(`신호 종료 → 진입일 기록 삭제 (다음 BUY 시 재기록)`);
   }
 
-  return {
+  return withSignalExplanation({
     asset: 'LEVERAGE',
     signal,
     conditionsMet: met,
@@ -605,13 +684,18 @@ function leverageCheck(
     reasons: decisionReasons,
     unmetReasons,
     date: today,
-  };
+  }, baseSignal, overrides);
 }
 
 function kospiSignal(
   raw: Record<string, MarketDataPoint>,
-  derived: Record<string, DerivedIndicator>
+  derived: Record<string, DerivedIndicator>,
+  profile: UserProfile,
 ): AssetSignal {
+  if (!profile.includeKR) {
+    return disabledAssetSignal('KOSPI', '사용자 설정 includeKR=false — 한국 자산 제외');
+  }
+
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
   let met = 0;
@@ -692,6 +776,14 @@ function kospiSignal(
     unmetReasons.push(`⚠️ 외국인 ${foreignSellStreak}일 연속 순매도 → 구조적 이탈 경고 (보조조건)`);
   }
 
+  // 8차 TOP7 Fix #1: 외인-개인 괴리 경보 (경고만, met 변동 없음)
+  const fgIndividualDiv = dv(derived, 'KOSPI_FOREIGN_INDIVIDUAL_DIVERGENCE');
+  if (fgIndividualDiv === 1) {
+    unmetReasons.push('⚠️ 개인이 외인 매물 흡수 (역사적 악성 구도) — 외인5D -3조↓ + 개인5D +3조↑ (보조조건)');
+  } else if (fgIndividualDiv === -1) {
+    reasons.push('외인 매수 + 개인 매도 구도 — 외인 주도 강세 후보 (보조조건)');
+  }
+
   // 영상5 이중 게이트: 환율 1480↓ 그린 / 1500↑ 레드 (단일 KRW_FX_LEVEL 보완 보조조건)
   const fxGreen = dv(derived, 'KRW_FX_GREEN');
   const fxRed = dv(derived, 'KRW_FX_RED');
@@ -700,7 +792,7 @@ function kospiSignal(
 
   const usdkrw = v(raw, 'USDKRW');
   if (usdkrw !== null && usdkrw >= 1500 && above200 === 0) {
-    return {
+    return withSignalExplanation({
       asset: 'KOSPI',
       signal: 'SELL',
       conditionsMet: met,
@@ -710,13 +802,15 @@ function kospiSignal(
       reasons: ['코스피 200DMA 하회 + 환율 1500원 돌파 → 외국인 매도 압력 극대화'],
       unmetReasons,
       date: new Date().toISOString().split('T')[0],
-    };
+    }, 'SELL');
   }
 
   // Fix #1: total=7 기준 [2,3,4] 에 REDUCE/SELL 하한을 명시. 기존 HOLD 시작 met=2 는 유지하고
   // met=1 만 REDUCE, met=0 만 SELL 로 강등. KOSPI 는 환율·외인·거래량 축이 하나라도 깨지면
   // met 급락 가능하므로 total-5=2 대신 보수적으로 reduce=1 채택.
-  let signal = signalFromScore(met, total, { sell: 0, reduce: 1, hold: 2, buy: 3, strongBuy: 4 });
+  const overrides: string[] = [];
+  const baseSignal = signalFromScore(met, total, { sell: 0, reduce: 1, hold: 2, buy: 3, strongBuy: 4 });
+  let signal = baseSignal;
 
   const trendRecovery = dv(derived, 'KOSPI_TREND_RECOVERY');
   const trendConfirmCount = [
@@ -727,30 +821,52 @@ function kospiSignal(
 
   if (trendConfirmCount < 2 && (signal === 'STRONG_BUY')) {
     signal = 'BUY';
-    reasons.push(`추세전환 3조건 ${trendConfirmCount}/3 미충족 → BUY 상한 (보조조건)`);
+    const overrideReason = `추세전환 3조건 ${trendConfirmCount}/3 미충족 → BUY 상한 (보조조건)`;
+    overrides.push(overrideReason);
+    reasons.push(overrideReason);
   }
   if (trendConfirmCount === 0 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
     signal = 'HOLD';
-    reasons.push(`추세전환 3조건 전부 미충족 → HOLD 상한 (보조조건)`);
+    const overrideReason = '추세전환 3조건 전부 미충족 → HOLD 상한 (보조조건)';
+    overrides.push(overrideReason);
+    reasons.push(overrideReason);
   }
 
-  // Fix #2: KOSPI 과열 REDUCE override.
-  // 3개 체크 중 2개 이상 발동 시 REDUCE 강등(영상5 "환율 5% 상승 대비 외인 매도 2배 과잉" 경고 포함).
-  //   a) 이격도 ≥ +20%
-  //   b) KOSPI_CHASE_WARNING === 1  (이격률 ±15% 20일 지속)
-  //   c) KOSPI_FX_ELASTICITY_DEVIATION ≥ 2  (외인 실매도가 환율 기대 대비 2배 이상)
+  // 코스피 완화 규칙:
+  // - "실제 가격 과열"이 있는 경우에만 강한 다운그레이드를 허용한다.
+  // - CHASE_WARNING 은 과열뿐 아니라 과매도 연속구간도 포함하므로, 단독으로는 REDUCE 근거로 쓰지 않는다.
+  // - FX_ELASTICITY 는 흐름 경고로만 보고, 가격 과열이 없으면 최대 HOLD 까지만 캡한다.
   const kOverheatFlags: string[] = [];
-  if (disparity !== null && disparity >= 20) kOverheatFlags.push(`코스피 이격도 +${disparity.toFixed(1)}% ≥ 20%`);
+  const kCautionFlags: string[] = [];
+  const priceOverheated = disparity !== null && disparity >= 20;
+  if (priceOverheated) kOverheatFlags.push(`코스피 이격도 +${disparity.toFixed(1)}% ≥ 20%`);
+  const kOverheatStreak = dv(derived, 'KOSPI_DISPARITY_STREAK_OVERHEATED');
+  if (kOverheatStreak !== null && kOverheatStreak >= 20) {
+    kOverheatFlags.push(`과열 이격도 연속 ${kOverheatStreak.toFixed(0)}일`);
+  }
   const kChaseWarning = dv(derived, 'KOSPI_CHASE_WARNING');
-  if (kChaseWarning === 1) kOverheatFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
+  if (kChaseWarning === 1) {
+    kCautionFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
+  }
   const fxElasticity = dv(derived, 'KOSPI_FX_ELASTICITY_DEVIATION');
-  if (fxElasticity !== null && fxElasticity >= 2) kOverheatFlags.push(`FX_ELASTICITY_DEVIATION ${fxElasticity.toFixed(2)} ≥ 2 (외인 과매도 ATM화)`);
-  if (kOverheatFlags.length >= 2 && signal !== 'SELL') {
-    signal = 'REDUCE';
-    unmetReasons.push(`과열 REDUCE override: ${kOverheatFlags.join(' · ')}`);
+  if (fxElasticity !== null && fxElasticity >= 2) {
+    kCautionFlags.push(`FX_ELASTICITY_DEVIATION ${fxElasticity.toFixed(2)} ≥ 2 (외인 과매도 ATM화)`);
+  }
+  if (kOverheatFlags.length >= 1 && (kOverheatFlags.length + kCautionFlags.length) >= 2 && signal !== 'SELL') {
+    const previous = signal;
+    signal = softenRiskSignal(signal);
+    const overrideReason = `가격 과열 완화 override: ${[...kOverheatFlags, ...kCautionFlags].join(' · ')} (${previous} → ${signal})`;
+    overrides.push(overrideReason);
+    unmetReasons.push(overrideReason);
+  } else if (!priceOverheated && kCautionFlags.length >= 2 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
+    const previous = signal;
+    signal = 'HOLD';
+    const overrideReason = `흐름 경고 HOLD 캡: ${kCautionFlags.join(' · ')} (${previous} → HOLD)`;
+    overrides.push(overrideReason);
+    unmetReasons.push(overrideReason);
   }
 
-  return {
+  return withSignalExplanation({
     asset: 'KOSPI',
     signal,
     conditionsMet: met,
@@ -760,7 +876,7 @@ function kospiSignal(
     reasons,
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  };
+  }, baseSignal, overrides);
 }
 
 /**
@@ -824,14 +940,27 @@ function emergingSignal(
   else if (met >= 2) signal = 'BUY';
   else if (met >= 1) signal = 'HOLD';
   else signal = 'HOLD';
+  const baseSignal = signal;
+  const overrides: string[] = [];
 
-  // DXY 급등 방어: DXY_TREND > +1 이면 REDUCE 강등
-  if (dxyTrend !== null && dxyTrend > 1 && met < 3) {
+  // DXY 급등 방어 완화:
+  // - 단기 강세(+1 초과)는 한 단계 감속만 적용
+  // - 아주 강한 달러 모멘텀(+2 초과) + 메인 조건 약함(met<=1) 에서만 REDUCE
+  if (dxyTrend !== null && dxyTrend > 2 && met <= 1) {
+    const previous = signal;
     signal = 'REDUCE';
-    unmetReasons.push('⚠️ DXY 단기 강세 — 신흥국 자본 유출 경계 (보조조건)');
+    const overrideReason = `⚠️ DXY 매우 강한 단기 강세(${dxyTrend.toFixed(2)}) — 신흥국 REDUCE (${previous} → REDUCE)`;
+    overrides.push(overrideReason);
+    unmetReasons.push(overrideReason);
+  } else if (dxyTrend !== null && dxyTrend > 1 && met < 3) {
+    const previous = signal;
+    signal = softenRiskSignal(signal);
+    const overrideReason = `⚠️ DXY 단기 강세(${dxyTrend.toFixed(2)}) — 신흥국 한 단계 완화 (${previous} → ${signal})`;
+    overrides.push(overrideReason);
+    unmetReasons.push(overrideReason);
   }
 
-  return {
+  return withSignalExplanation({
     asset: 'EMERGING',
     signal,
     conditionsMet: met,
@@ -841,7 +970,7 @@ function emergingSignal(
     reasons: reasons.length > 0 ? reasons : ['조건 미충족, 대기'],
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  };
+  }, baseSignal, overrides);
 }
 
 export function computeSignals(
@@ -852,12 +981,14 @@ export function computeSignals(
 ): AssetSignal[] {
   return [
     nasdaqSignal(raw, derived, profile),
-    kospiSignal(raw, derived),
+    kospiSignal(raw, derived, profile),
     goldSignal(raw, derived, profile),
     silverSignal(derived, raw, regime),
     copperSignal(derived, raw, profile),
     emergingSignal(raw, derived, profile),
     cashSignal(regime),
-    leverageCheck(raw, derived),
-  ];
+    leverageCheck(raw, derived, profile),
+  ].map((signal) => signal.explanation
+    ? signal
+    : withSignalExplanation(signal, signal.signal));
 }
