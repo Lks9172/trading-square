@@ -9,6 +9,8 @@
  */
 
 import axios from 'axios';
+import { childLogger } from '../services/logger';
+import { readSourceCacheWithin, writeSourceCache } from '../services/source-cache';
 
 export interface CalendarEvent {
   date: string;            // YYYY-MM-DD (발표일)
@@ -18,6 +20,9 @@ export interface CalendarEvent {
   daysUntil: number;       // 오늘 기준 D-일 (음수면 과거)
   importance: 'high' | 'medium';
 }
+const log = childLogger({ module: 'collector.calendar' });
+const CALENDAR_CACHE_KEY = 'economic-calendar';
+const CALENDAR_STALE_MS = 14 * 24 * 60 * 60 * 1000;
 
 /** FRED release id 정의 */
 const FRED_RELEASES: Array<{ id: number; name: string; category: CalendarEvent['category']; importance: 'high' | 'medium' }> = [
@@ -38,6 +43,11 @@ const FRED_RELEASES: Array<{ id: number; name: string; category: CalendarEvent['
  */
 const STATIC_POLITICAL_EVENTS: Array<{ date: string; name: string; category: CalendarEvent['category']; importance: 'high' | 'medium' }> = [
   { date: '2026-11-03', name: '🗳 미 중간선거', category: 'OTHER', importance: 'high' },
+  // 8차 TOP7 Fix #7: 추경·WGBI 장기 정책 이벤트 + 6개월 효과 반영 마커
+  { date: '2026-04-15', name: '🏛 추경 국회 제출 (성장률 +0.2%p 효과, 2026-10-15 반영 예상)', category: 'OTHER', importance: 'high' },
+  { date: '2026-10-15', name: '🏛 추경 성장률 +0.2%p 6개월 효과 반영일', category: 'OTHER', importance: 'medium' },
+  { date: '2026-10-01', name: '🇰🇷 WGBI 편입 예상일 (외국인 자금 유입 장기 환율 안정)', category: 'OTHER', importance: 'high' },
+  { date: '2027-01-01', name: '🇰🇷 WGBI 편입 효과 1~2분기 지연 반영 시점', category: 'OTHER', importance: 'medium' },
 ];
 
 const FOMC_MEETINGS_2026 = [
@@ -83,6 +93,7 @@ async function fetchFredReleaseDates(
 export async function fetchEconomicCalendar(apiKey: string): Promise<CalendarEvent[]> {
   const today = new Date().toISOString().split('T')[0];
   const events: CalendarEvent[] = [];
+  const startedAt = Date.now();
 
   // 1. FRED release dates
   const settled = await Promise.allSettled(
@@ -131,10 +142,32 @@ export async function fetchEconomicCalendar(apiKey: string): Promise<CalendarEve
 
   // 정렬 + 향후 30일 이내 + 과거 7일 이내 + 정치 이벤트는 장기도 포함
   events.sort((a, b) => a.date.localeCompare(b.date));
-  return events.filter((e) => {
+  const filtered = events.filter((e) => {
     if (e.category === 'OTHER') return e.daysUntil >= -30 && e.daysUntil <= 400;
     return e.daysUntil >= -7 && e.daysUntil <= 30;
   });
+  log.info({
+    durationMs: Date.now() - startedAt,
+    totalEvents: filtered.length,
+    categories: filtered.reduce<Record<string, number>>((acc, event) => {
+      acc[event.category] = (acc[event.category] || 0) + 1;
+      return acc;
+    }, {}),
+  }, 'economic calendar collected');
+  if (filtered.length > 0) {
+    await writeSourceCache(CALENDAR_CACHE_KEY, filtered, { asOf: today });
+    return filtered;
+  }
+
+  const cached = await readSourceCacheWithin<CalendarEvent[]>(CALENDAR_CACHE_KEY, CALENDAR_STALE_MS);
+  if (cached) {
+    log.warn({
+      ageMs: cached.ageMs,
+      updatedAt: cached.updatedAt,
+    }, 'economic calendar empty, serving cached value');
+    return cached.value;
+  }
+  return filtered;
 }
 
 /** 임박 이벤트(D-3 이내) 요약 */
