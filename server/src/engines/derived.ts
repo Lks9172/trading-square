@@ -1690,6 +1690,31 @@ export async function computeDerived(
         formula: `F&G·P/C 10D·AAII·NAAIM 가중평균 (가중 0.25 각, null 스킵 후 재정규화, ${valid.length}/4)`,
       };
     }
+
+    // === 8차 TOP7 Fix #6: F&G ↔ AAII 심리-심리 divergence (관측 전용) ===
+    // 두 심리지표 간 극단 괴리 — 기관(F&G 로 대표)과 개인(AAII spread) 심리가 정반대.
+    // +1: F&G ≤25 극공포 AND AAII ≥0 탐욕 (기관 공포 / 개인 탐욕)
+    // -1: F&G ≥75 탐욕 AND AAII ≤-20 극공포 (기관 탐욕 / 개인 공포)
+    // 시그널 영향 없음 (관측만).
+    if (fng !== null && aaii !== null) {
+      let divergenceLevel = 0;
+      let label = '';
+      if (fng <= 25 && aaii >= 0) {
+        divergenceLevel = 1;
+        label = `F&G ${fng.toFixed(0)} ≤25 극공포 AND AAII ${aaii.toFixed(0)} ≥0 탐욕 — 개인 탐욕 혼재`;
+      } else if (fng >= 75 && aaii <= -20) {
+        divergenceLevel = -1;
+        label = `F&G ${fng.toFixed(0)} ≥75 탐욕 AND AAII ${aaii.toFixed(0)} ≤-20 극공포 — 기관 탐욕 혼재`;
+      } else {
+        label = `F&G ${fng.toFixed(0)} / AAII ${aaii.toFixed(0)} — 괴리 없음`;
+      }
+      d.PSYCH_DIVERGENCE = {
+        name: 'psych_divergence',
+        value: divergenceLevel,
+        date: dt,
+        formula: `${label}. +1=공포혼재, -1=탐욕혼재, 0=평시`,
+      };
+    }
   } catch {
     /* 심리 서브스코어 실패는 파이프라인 막지 않음 */
   }
