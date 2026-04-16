@@ -584,6 +584,15 @@ gold_score = Σ(충족 조건 × 가중치) / 8.0 × 100
 < 30: REDUCE
 ```
 
+**8차 TOP7 추가 — GOLD_PRIORITY_SCORE 보조 조건:**
+
+```
+GOLD_PRIORITY_SCORE: derived 2축 (REAL_YIELD_TREND 가중 4, DXY_TREND 가중 3) / 7 → 0~1
+  - ≥ 0.7: reasons += "금 우선순위 스코어 ≥ 0.7 → 실질금리·DXY 2축 금 매수 강화"
+  - ≤ 0.3: unmetReasons += "금 우호 축 부족"
+  (cbBuying/geoRisk 2축은 manualInputs 접근 제약으로 위 main 신호에서 재가산)
+```
+
 **예외 규칙 (영상 2):**
 
 ```
@@ -703,6 +712,19 @@ THEN signal 하향 (구조적 이탈 경고)
 
 - **환율 그린 게이트**: KRW ≤ 1480원 → 외국인 복귀 우호
 - **환율 레드 게이트**: KRW ≥ 1500원 → 외국인 매도 압력 임계
+
+**8차 TOP7 추가 경고 (외인-개인 괴리):**
+
+```
+IF KOSPI_FOREIGN_INDIVIDUAL_DIVERGENCE === 1
+  (외인 5D 순매도 ≥ 3조 AND 개인 5D 순매수 ≥ 3조)
+THEN unmetReasons += "⚠️ 개인이 외인 매물 흡수 (역사적 악성 구도)"
+  (met 변동 없음, 경고만)
+
+IF KOSPI_FOREIGN_INDIVIDUAL_DIVERGENCE === -1
+  (외인 5D 순매수 AND 개인 5D 순매도)
+THEN reasons += "외인 주도 강세 후보"
+```
 
 ---
 
@@ -1620,6 +1642,49 @@ SILVER/COPPER 신호는 `signalFromScore` 기반 임계로 통일:
 모든 `cron.schedule(...)` 호출에 `{ timezone: 'Asia/Seoul' }` 옵션 명시. 일일 히스토리
 append cron 은 `0 22 * * *` (UTC) → `0 7 * * *` (KST) 로 표기만 변경 — 실제 실행 시각
 동일(KST 07:00).
+
+---
+
+### 6.10.5 8차 TOP7 파생지표 확장 (2026-04-16)
+
+8차 TOP7 감사 이후 추가된 파생지표 7종. 기존 함수 시그니처·임계치 체계를 보존하고
+신규 키만 추가하는 원칙.
+
+**1. KOSPI 개인 순매수 + 외인-개인 괴리 (Fix #1)**
+- `KOSPI_INDIVIDUAL_NET_1D/5D/20D` (억원) — 네이버 금융 집계
+- `KOSPI_FOREIGN_INDIVIDUAL_DIVERGENCE`: 외인·개인 5D 순매수 3조 기준 (+1 악성, -1 반대, 0 평시)
+- kospiSignal 에 경고만 추가 (met 변동 없음).
+
+**2. 호르무즈 연쇄 체인 (Fix #2)**
+- `HORMUZ_CHAIN_SCORE`: WTI 60D + OVX + DXY_TREND + KRW_FX_LEVEL + KOSPI_FOREIGN_SELL_STREAK
+  5축 가중합 → [-5..+5] 클램프
+- `HORMUZ_CHAIN_LABEL`: ≤-3 "악성 연쇄" / -3~-1 "주의" / -1~+1 "중립" / +1~+3 "우호" / ≥+3 "완화 연쇄"
+
+**3. GOLD_PRIORITY_SCORE (Fix #3)**
+- derived 2축(REAL_YIELD_TREND 가중 4 + DXY_TREND 가중 3) / 7 → 0~1
+- goldSignal 에서 ≥0.7 보강, ≤0.3 감산 reason 추가
+- cbBuying/geoRisk 2축은 manualInputs 접근 제약으로 signal 레벨에서 이미 가산
+
+**4. NASDAQ_CHANNEL_MID_CROSS (Fix #4)**
+- 전일/당일 NASDAQ 종가와 15Y 회귀 중단선(MID) 비교
+- +1 상향 크로스, -1 하향 크로스, 0 유지
+
+**5. ICSA 52주 최저 재돌파 (Fix #5)**
+- `ICSA_52W_LOW_RETEST`: 현재 ICSA 가 52주 최저 ×1.05 이내면 1
+- `ICSA_RECOVERY_SIGNAL`: 재테스트(=1) AND 최근 4주 중 3회 이상 상승 → 1 (반등 추세)
+
+**6. PSYCH_DIVERGENCE (Fix #6)**
+- F&G ≤25 극공포 AND AAII spread ≥0 탐욕 → +1 (공포혼재)
+- F&G ≥75 탐욕 AND AAII spread ≤-20 극공포 → -1 (탐욕혼재)
+- 시그널 영향 없음, 관측 전용
+
+**7. 추경·WGBI 장기 정책 이벤트 (Fix #7)**
+- `calendar.ts STATIC_POLITICAL_EVENTS` 에 하드코드:
+  - 2026-04-15 추경 국회 제출 (성장률 +0.2%p 효과)
+  - 2026-10-15 추경 6개월 효과 반영일
+  - 2026-10-01 WGBI 편입 예상일 (외국인 자금 유입 장기 환율 안정)
+  - 2027-01-01 WGBI 1~2분기 지연 반영 시점
+- `/api/snapshot` meta.calendar 에 `OTHER` 카테고리로 합류.
 
 ---
 
