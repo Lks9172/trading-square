@@ -1733,6 +1733,49 @@ export async function computeDerived(
     /* 호르무즈 연쇄 체인 스코어 실패는 파이프라인 막지 않음 */
   }
 
+  // === GOLD_PRIORITY_SCORE (8차 TOP7 Fix #3) ===
+  // 영상5 금 우선순위 4축 (실질금리·DXY·CB buying·geo risk) 중 derived 레벨에서 접근 가능한
+  // 2축(실질금리 추세·DXY 추세)으로 0~1 정규화. cbBuying/geoRisk 는 manualInputs 로 signal 레벨 재가산.
+  // 가중: 실질금리 4 / DXY 3 → 총 7, 충족 점수 / 7.
+  try {
+    const ryTrend = d.REAL_YIELD_TREND?.value ?? null;
+    const dxyTrend = d.DXY_TREND?.value ?? null;
+    if (ryTrend !== null || dxyTrend !== null) {
+      let score = 0;
+      const maxScore = 7;
+      const parts: string[] = [];
+      // 축 1 (가중 4): REAL_YIELD_TREND < 0 (실질금리 하락) → 금 1순위 우호
+      if (ryTrend !== null && ryTrend < 0) {
+        score += 4;
+        parts.push(`RY_TREND ${ryTrend.toFixed(3)}<0 (+4)`);
+      } else if (ryTrend !== null) {
+        parts.push(`RY_TREND ${ryTrend.toFixed(3)}≥0 (+0)`);
+      } else {
+        parts.push('RY_TREND null');
+      }
+      // 축 2 (가중 3): DXY_TREND < -0.5 (단기 약세)
+      if (dxyTrend !== null && dxyTrend < -0.5) {
+        score += 3;
+        parts.push(`DXY_TREND ${dxyTrend.toFixed(2)}<-0.5 (+3)`);
+      } else if (dxyTrend !== null) {
+        parts.push(`DXY_TREND ${dxyTrend.toFixed(2)}≥-0.5 (+0)`);
+      } else {
+        parts.push('DXY_TREND null');
+      }
+
+      const normalized = score / maxScore;
+      d.GOLD_PRIORITY_SCORE = {
+        name: 'gold_priority_score',
+        value: parseFloat(normalized.toFixed(3)),
+        date: dt,
+        // TODO: cbBuying/geoRisk 는 manualInputs 접근 제약으로 signal 레벨에서 재가산.
+        formula: `2축 가중합 / 7 → 0~1. ${parts.join(' · ')}. ≥0.7 금 매수 강화 / ≤0.3 금 감산.`,
+      };
+    }
+  } catch {
+    /* GOLD_PRIORITY_SCORE 실패는 파이프라인 막지 않음 */
+  }
+
   // === FX_FOREIGN_COMBO_ALERT (7차 TOP3 Fix #2) ===
   // USDKRW 레벨과 외국인 연속 순매도 streak 의 교집합 경보.
   // 단일 환율 레벨보다 "환율 극단 + 외국인 실제 이탈" 동시 충족 시 KOSPI/EMERGING 감산 강화.

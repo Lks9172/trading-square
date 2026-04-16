@@ -331,6 +331,14 @@ function goldSignal(
   const chaseGold = dv(derived, 'CHASE_GOLD');
   if (chaseGold !== null && chaseGold > 15) { unmetReasons.push(`⚠️ 금 20일 +${chaseGold.toFixed(1)}% → 추격매수 주의 (보조조건)`); }
 
+  // 8차 TOP7 Fix #3: GOLD_PRIORITY_SCORE 소비 (derived 2축 + manual 2축 재가산)
+  const goldPriority = dv(derived, 'GOLD_PRIORITY_SCORE');
+  if (goldPriority !== null && goldPriority >= 0.7) {
+    reasons.push(`금 우선순위 스코어 ${goldPriority.toFixed(2)} ≥ 0.7 → 실질금리·DXY 2축 금 매수 강화 (보조조건)`);
+  } else if (goldPriority !== null && goldPriority <= 0.3) {
+    unmetReasons.push(`금 우선순위 스코어 ${goldPriority.toFixed(2)} ≤ 0.3 → 금 우호 축 부족 (보조조건)`);
+  }
+
   const pct = (score / maxScore) * 100;
 
   if (realYield !== null && realYield > 2.0 && dxy !== null && dxy > 106) {
