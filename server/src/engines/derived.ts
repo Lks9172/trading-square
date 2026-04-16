@@ -800,6 +800,46 @@ export async function computeDerived(
     };
   }
 
+  // === ICSA 52주 최저 재돌파 + 반등 추세 트리거 (8차 TOP7 Fix #5) ===
+  // 실업수당 52주 최저에 근접하면 노동시장 회복 사이클 후반 = 향후 반전 조기 경고.
+  // 4주 연속 상승이면 추세 확정.
+  try {
+    const icsaHist = await readHistory('fred', 'ICSA');
+    if (icsaHist.length >= 52 && icsaVal !== null) {
+      const last52 = icsaHist.slice(-52).map((p) => p.value).filter((v) => Number.isFinite(v) && v > 0);
+      if (last52.length >= 10) {
+        const low52 = Math.min(...last52);
+        // 52주 최저 재테스트: 현재값이 52주 최저 × 1.05 이내
+        const retest = icsaVal <= low52 * 1.05 ? 1 : 0;
+        d.ICSA_52W_LOW_RETEST = {
+          name: 'icsa_52w_low_retest',
+          value: retest,
+          date: dt,
+          formula: `현재 ${Math.round(icsaVal / 1000)}K vs 52주 최저 ${Math.round(low52 / 1000)}K. ≤최저×1.05 → 1 (저점 재테스트)`,
+        };
+
+        // 반등 추세: 최근 4주 연속 상승하는지 (마지막 4주 추세 판정)
+        if (icsaHist.length >= 5) {
+          const recent5 = icsaHist.slice(-5).map((p) => p.value);
+          let upCount = 0;
+          for (let i = 1; i < recent5.length; i += 1) {
+            if (recent5[i] > recent5[i - 1]) upCount += 1;
+          }
+          // 4회 비교 중 3회 이상 상승 = 반등 추세 (+1), 그 외 0
+          const recoverySignal = upCount >= 3 && retest === 1 ? 1 : 0;
+          d.ICSA_RECOVERY_SIGNAL = {
+            name: 'icsa_recovery_signal',
+            value: recoverySignal,
+            date: dt,
+            formula: `52주 최저 재테스트(${retest}) AND 최근 4주 상승 ${upCount}/4 ≥ 3회 → 반등 추세 경고 (+1)`,
+          };
+        }
+      }
+    }
+  } catch {
+    /* ICSA 52주 최저 트리거 실패는 파이프라인 막지 않음 */
+  }
+
   // === 유동성 방향 종합 점수 (영상4 §120 "총량 아닌 방향") ===
   // RRP 감소 / TGA 감소 / MMF 감소 / WRESBAL 증가 / Global M2 YoY > 0 → 각 +1.
   // 반대 방향은 -1. 최근값 하나가 아니라 평균 대비 변화율을 써서 하루 내 잦은 노이즈를 완화한다.
