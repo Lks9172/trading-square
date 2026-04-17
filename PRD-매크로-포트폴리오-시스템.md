@@ -1572,6 +1572,10 @@ if (!data) {
 **경고 신호:**
 - BOND_VIGILANTE_WARNING (30년 금리 급등)
 - STAGFLATION_WARNING (스테그플레이션)
+- STAGFLATION_VERIFIED (9차 TOP3 Fix #1: WARNING + 실질금리↑ + 금↓ 3축 확증)
+- GEOPOLITICAL_UNWIND_EVENT (9차 TOP3 Fix #2: KOSPI↑/USDKRW↓/WTI↓ 동시 급변, 0/1/2)
+- SHORT_COVER_SUSPECTED (9차 TOP3 Fix #2: EVENT + 외인 1조+ 순매수)
+- NASDAQ_CHASE_LEVEL / KOSPI_CHASE_LEVEL (9차 TOP3 Fix #3: 0/1/2/3 soft/medium/hard 계층)
 - OVERHEATED (월봉 과열)
 - FISCAL_STRESS, FISCAL_STRESS_HARD (재정 스트레스)
 
@@ -1705,6 +1709,42 @@ append cron 은 `0 22 * * *` (UTC) → `0 7 * * *` (KST) 로 표기만 변경 �
   - 2026-10-01 WGBI 편입 예상일 (외국인 자금 유입 장기 환율 안정)
   - 2027-01-01 WGBI 1~2분기 지연 반영 시점
 - `/api/snapshot` meta.calendar 에 `OTHER` 카테고리로 합류.
+
+### 6.10.6 9차 gap TOP3 파생지표 (2026-04-17)
+
+9차 감사 gap TOP3 반영. 원 영상·stt 인과 체인을 정량 교차검증 단계로 격상.
+
+**1. STAGFLATION_VERIFIED (Fix #1) — 실질금리 교차검증**
+- 위치: STAGFLATION_WARNING 직후
+- 근거: video2 §67-68 "전쟁→유가↑→인플레↑→금리인하 꺾임→실질금리↑→금↓" 인과 체인
+- 3축 교차검증 (모두 충족 시 1, 아니면 0, 결측 시 null):
+  - 축 1: `STAGFLATION_WARNING === 1` (기존 2축 WARNING 발동)
+  - 축 2: `REAL_YIELD_TREND > 0` (실질금리 상승)
+  - 축 3: `GOLD` 20D 변화 `< 0` (금 하락)
+- formula 에 3축 Y/N + 값 명시 (단서 투명성)
+- 용도: WARNING 단독 발동과 실제 스태그플레이션 진입을 분리, 오판 차단
+
+**2. GEOPOLITICAL_UNWIND_EVENT + SHORT_COVER_SUSPECTED (Fix #2) — 점프 이벤트**
+- 근거: stt_kospi 4:58·5:06 — 지정학 리스크 해소 시점 KOSPI↑/USDKRW↓/WTI↓ 동시 급변
+- `readHistory('yahoo', 'KOSPI'/'USDKRW'/'WTI')` 마지막 2일 비교로 일봉 변동률 계산
+- 3축:
+  - 축 1: KOSPI 일봉 ≥ +5%
+  - 축 2: USDKRW 일봉 ≤ -1.5%
+  - 축 3: WTI 일봉 ≤ -10%
+- `GEOPOLITICAL_UNWIND_EVENT`: 2축 충족=1, 3축 전부=2, 아니면 0, 결측 null
+- `SHORT_COVER_SUSPECTED`: EVENT ≥ 1 AND `KOSPI_FOREIGN_NET_1D ≥ 10000`(1조, 억원 단위) → 1
+
+**3. NASDAQ/KOSPI_CHASE_LEVEL (Fix #3) — 추격경고 hard/soft 계층화**
+- 근거: video3 추격금지 원칙 정량화
+- 0~3 단계 (clamp):
+  - 0 (none): 조건 없음
+  - 1 (soft): 이격도 ≥ +15% 또는 streak ≥ 15일
+  - 2 (medium): level=1 조건 + VIX < 15 (방심 구간)
+  - 3 (hard): streak ≥ 25일 또는 이격도 ≥ +20%
+- 입력: `NASDAQ_DISPARITY`, `NASDAQ_DISPARITY_STREAK_OVERHEATED`, raw `VIXCLS` (KOSPI 동일)
+- 기존 `NASDAQ_CHASE_WARNING` / `KOSPI_CHASE_WARNING` (binary) 는 signals.ts 소비 중이라 **병렬 유지**
+  — LEVEL 은 raw 단계 노출, 히스테리시스는 기존 flagPersistence 로 WARNING 만 대상
+- 결측 시 null, formula 에 각 단계 근거 명시 (예: "streak 26일 + 이격 +12% → 3(hard)")
 
 ---
 
