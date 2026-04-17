@@ -14,6 +14,7 @@ import {
   fetchYearlyBuckets,
   detectYearlyAreaIndex,
 } from './candles';
+import { withSpan } from '../observability/trace';
 
 function val(raw: Record<string, MarketDataPoint>, key: string): number | null {
   return raw[key]?.value ?? null;
@@ -650,7 +651,10 @@ export async function computeDerived(
 
   const sectorEtfs: Array<[string, string]> = [['XLK','기술'],['XLF','금융'],['XLE','에너지'],['XLV','헬스케어'],['XLI','산업재'],['XLY','임의소비재'],['SOXX','반도체(광역)'],['SMH','반도체(대형주)']];
   try {
+    // 2026-04 로그 관측성 개선: derived 7s 병목 세분화 — 섹터/MTF/yearly 각각 child span.
+    await withSpan('macrosquare.engine.derived.sector', async (span) => {
     const sectorResults = await Promise.allSettled(sectorEtfs.map(([sym]) => fetchYahooHistory(sym, 30)));
+    span.setAttribute('derived.sector.count', sectorEtfs.length);
     const sectorReturns: Array<{ key: string; label: string; ret: number }> = [];
     sectorEtfs.forEach(([sym, label], i) => {
       const r = sectorResults[i];
@@ -673,6 +677,7 @@ export async function computeDerived(
       const strongest = sectorReturns.sort((a, b) => b.ret - a.ret)[0];
       d.SECTOR_STRONGEST = { name: 'sector_strongest', value: strongest.ret, date: dt, formula: `가장 강한 섹터: ${strongest.label}(${strongest.key}) ${strongest.ret.toFixed(1)}%` };
     }
+    }); // withSpan sector
   } catch { void 0; }
 
   try {
@@ -1043,6 +1048,8 @@ export async function computeDerived(
     { symbol: '^IXIC', prefix: 'NASDAQ' },
     { symbol: '^KS11', prefix: 'KOSPI' },
   ];
+  await withSpan('macrosquare.engine.derived.mtf_yearly', async (span) => {
+    span.setAttribute('derived.mtf.symbols', mtfTargets.length);
   for (const { symbol, prefix } of mtfTargets) {
     try {
       const mtf = await fetchMultiTimeframe(symbol);
@@ -1235,6 +1242,7 @@ export async function computeDerived(
       /* 멀티 타임프레임 수집 실패는 전체 파이프라인 막지 않음 */
     }
   }
+  }); // withSpan mtf_yearly
 
   // === USD/KRW 주봉 선형 회귀 채널 (5년) ===
   // stt_kospi: 환율이 채널 상단(>0.9)에 붙으면 원화 약세 극단 → 외국인 매도 리스크,
@@ -1613,11 +1621,27 @@ export async function computeDerived(
   // === 심리 서브스코어 (PSYCH_SUBSCORE) ===
   // 6차 TOP3 Step 2 — F&G · P/C Ratio(10D) · AAII spread · NAAIM 가중평균(각 0.25).
   // null 컴포넌트는 스킵하고 남은 가중치를 재정규화.
+  // 2026-04 개선: CBOE options chain 방식은 당일값만 제공 (ma10 extra null) 이라
+  // raw 에 PC_RATIO_10D 가 없음 → sentiment history 의 최근 10 entries 로 자체 롤링 계산.
   try {
     const fng = val(raw, 'FEAR_GREED');
-    const pcr10 = val(raw, 'PC_RATIO_10D');
     const aaii = val(raw, 'AAII_BULL_BEAR_SPREAD');
     const naaim = val(raw, 'NAAIM_EXPOSURE');
+
+    // PC_RATIO 10D 롤링: history 에 append 된 daily PC_RATIO 에서 계산.
+    let pcr10: number | null = null;
+    try {
+      const pcrHist = await readHistory('sentiment', 'PC_RATIO');
+      if (pcrHist.length > 0) {
+        const last10 = pcrHist.slice(-10).map((p) => p.value).filter(Number.isFinite);
+        if (last10.length >= 3) {
+          pcr10 = last10.reduce((a, b) => a + b, 0) / last10.length;
+          pcr10 = parseFloat(pcr10.toFixed(3));
+        }
+      }
+    } catch {
+      /* pcr 10D 계산 실패 — null 유지 */
+    }
 
     // 패스스루 derived (대시보드/패널에서 참조)
     if (pcr10 !== null) {
@@ -1625,7 +1649,7 @@ export async function computeDerived(
         name: 'pc_ratio_10d',
         value: pcr10,
         date: dt,
-        formula: 'CBOE Put/Call Ratio 10일 이동평균',
+        formula: 'CBOE Put/Call Ratio 10일 이동평균 (sentiment/PC_RATIO history 기반 자체 롤링)',
       };
     }
     if (aaii !== null) {

@@ -1,18 +1,19 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { fetchFredHistoryFrom, FRED_SERIES } from '../collectors/fred';
+import { fetchFredHistoryFrom, FRED_LEVEL_SERIES_MIN_LATEST, FRED_SERIES } from '../collectors/fred';
 import { fetchYahooHistoryYears, YAHOO_SYMBOLS } from '../collectors/yahoo';
 import { fetchFearAndGreed } from '../collectors/cnn';
 import { fetchAllSentiment } from '../collectors/sentiment';
 import { classifyRegime } from '../engines/regime';
 import { computeSignals } from '../engines/signals';
 import { computeAllocation } from '../engines/allocation';
-import { computeDerived } from '../engines/derived';
+import { computeDerived, computeDisparityStreak } from '../engines/derived';
 import { linearRegressionChannel } from '../engines/candles';
 import type { OHLCCandle } from '../collectors/yahoo';
 import { DEFAULT_PROFILE } from './cache';
 import { DerivedIndicator, MarketDataPoint } from '../types/indicators';
 import { withSpan } from '../observability/trace';
+import { inferAutoManualInputsFromState, mergeEffectiveManualInputs } from '../services/policy-inputs';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const HISTORY_DIR = path.join(DATA_DIR, 'history');
@@ -67,7 +68,7 @@ function buildRawForDate(date: string, histories: Record<string, HistoryPoint[]>
   const defs: Array<[string, string, MarketDataPoint['source']]> = [
     ['DGS10', 'fred', 'FRED'], ['T10YIE', 'fred', 'FRED'], ['T10Y2Y', 'fred', 'FRED'], ['VIXCLS', 'fred', 'FRED'],
     ['BAMLH0A0HYM2', 'fred', 'FRED'], ['STLFSI4', 'fred', 'FRED'], ['ICSA', 'fred', 'FRED'], ['UNRATE', 'fred', 'FRED'],
-    ['DGS30', 'fred', 'FRED'],
+    ['DGS30', 'fred', 'FRED'], ['EFFR', 'fred', 'FRED'],
     ['NASDAQ', 'yahoo', 'YAHOO'], ['GOLD', 'yahoo', 'YAHOO'], ['SILVER', 'yahoo', 'YAHOO'], ['COPPER', 'yahoo', 'YAHOO'],
     ['DXY', 'yahoo', 'YAHOO'], ['SP500', 'yahoo', 'YAHOO'], ['WTI', 'yahoo', 'YAHOO'], ['USDKRW', 'yahoo', 'YAHOO'],
     // 센티먼트 raw — KST 07:00 cron 의 appendSentimentDaily 가 daily append.
@@ -133,21 +134,10 @@ function reconstruct200DmaSuite(
     formula: 'P>SMA200',
   };
 
-  // 이격률 ±15% 연속 유지일 (live derived.ts 의 computeDisparityStreak 동일 로직).
-  // 인덱스 0=최신 가정으로 작성된 라이브 함수 시그니처에 맞춰 reverse 시리즈 사용.
+  // 이격률 ±15% 연속 유지일 (각 날짜 자신의 SMA200 기준).
   const closesNewestFirst = [...eligible.map((p) => p.value)].reverse();
-  let overStreak = 0;
-  let underStreak = 0;
-  for (const price of closesNewestFirst) {
-    const disp = ((price - sma200) / sma200) * 100;
-    if (disp >= 15) overStreak += 1;
-    else break;
-  }
-  for (const price of closesNewestFirst) {
-    const disp = ((price - sma200) / sma200) * 100;
-    if (disp <= -15) underStreak += 1;
-    else break;
-  }
+  const overStreak = computeDisparityStreak(closesNewestFirst, 200, 15, 'over') ?? 0;
+  const underStreak = computeDisparityStreak(closesNewestFirst, 200, -15, 'under') ?? 0;
   if (overStreak > 0) {
     derived[`${prefix}_DISPARITY_STREAK_OVERHEATED`] = {
       name: `${lower}_disparity_streak_overheated`,
@@ -862,6 +852,18 @@ function signalValue(signal: string) {
   return 0;
 }
 
+function regimeValue(regime: string) {
+  if (regime === 'RISK_ON') return 100;
+  if (regime === 'NEUTRAL') return 80;
+  if (regime === 'CAUTION') return 60;
+  if (regime === 'CORRECTION') return 40;
+  if (regime === 'PANIC_BUT_OK') return 20;
+  if (regime === 'RECESSION_RISK') return 0;
+  if (regime === 'STAGFLATION') return 30;
+  if (regime === 'BOND_VIGILANTE') return 10;
+  return 50;
+}
+
 export async function refreshComputedHistories(options?: { force?: boolean }) {
   return withSpan('macrosquare.history.refreshComputed', async (span) => {
   // 3차 감사 Fix #2: 증분 skip. signal-REGIME 마지막 date 가 오늘(UTC) 이상이면 full
@@ -882,7 +884,7 @@ export async function refreshComputedHistories(options?: { force?: boolean }) {
     }
   }
   const histories: Record<string, HistoryPoint[]> = {};
-  const keys = ['NASDAQ', 'GOLD', 'SILVER', 'COPPER', 'SP500', 'WTI', 'USDKRW', 'DXY', 'DGS10', 'T10YIE', 'T10Y2Y', 'VIXCLS', 'BAMLH0A0HYM2', 'STLFSI4', 'ICSA', 'UNRATE'];
+  const keys = ['NASDAQ', 'GOLD', 'SILVER', 'COPPER', 'SP500', 'WTI', 'USDKRW', 'DXY', 'DGS10', 'T10YIE', 'T10Y2Y', 'VIXCLS', 'BAMLH0A0HYM2', 'STLFSI4', 'ICSA', 'UNRATE', 'EFFR'];
   const yahooKeys = new Set(['NASDAQ', 'GOLD', 'SILVER', 'COPPER', 'SP500', 'WTI', 'USDKRW', 'DXY']);
   for (const key of keys) {
     if (yahooKeys.has(key)) histories[`yahoo:${key}`] = await readHistory('yahoo', key);
@@ -910,6 +912,7 @@ export async function refreshComputedHistories(options?: { force?: boolean }) {
   const base = histories['yahoo:NASDAQ'] || [];
   const computed: Record<string, HistoryPoint[]> = {
     REGIME: [],
+    REGIME_LABEL: [],
     PORTFOLIO: [],
     NASDAQ: [],
     GOLD: [],
@@ -959,14 +962,28 @@ export async function refreshComputedHistories(options?: { force?: boolean }) {
     }
     // smartMoneyScore: 히스토리에는 smart-money 시계열이 없으므로 0 을 명시적으로 전달.
     //   라이브 경로와 동일 시그니처 유지가 이 Fix 의 핵심.
+    const effectiveInputs = mergeEffectiveManualInputs(
+      DEFAULT_PROFILE.manualInputs,
+      inferAutoManualInputsFromState({
+        raw,
+        derived,
+        effrHistory: (histories['fred:EFFR'] || []).filter((p) => dateToTime(p.date) <= dateToTime(anchor.date)).slice(-60).reverse(),
+        t10y2yHistory: (histories['fred:T10Y2Y'] || []).filter((p) => dateToTime(p.date) <= dateToTime(anchor.date)).slice(-10).reverse(),
+        icsaHistory: (histories['fred:ICSA'] || []).filter((p) => dateToTime(p.date) <= dateToTime(anchor.date)).slice(-10).reverse(),
+        goldHistory: (histories['yahoo:GOLD'] || []).filter((p) => dateToTime(p.date) <= dateToTime(anchor.date)).slice(-60).reverse(),
+        dxyHistory: (histories['yahoo:DXY'] || []).filter((p) => dateToTime(p.date) <= dateToTime(anchor.date)).slice(-60).reverse(),
+      }),
+      DEFAULT_PROFILE.manualInputs,
+    );
+    const effectiveProfile = { ...DEFAULT_PROFILE, manualInputs: effectiveInputs };
     const regime = classifyRegime({
       raw,
       derived,
-      manualInputs: DEFAULT_PROFILE.manualInputs,
+      manualInputs: effectiveInputs,
       smartMoneyScore: 0,
     });
-    const signals = computeSignals(raw, derived, regime, DEFAULT_PROFILE);
-    const allocation = computeAllocation(regime.regime, regime.score, signals, derived, raw);
+    const signals = computeSignals(raw, derived, regime, effectiveProfile);
+    const allocation = computeAllocation(regime.regime, regime.score, signals, derived, raw, undefined, undefined, effectiveProfile);
     const byAsset = Object.fromEntries(signals.map((s) => [s.asset, s]));
 
     computed.NASDAQ.push({ date: anchor.date, value: signalValue(byAsset['NASDAQ']?.signal || 'HOLD') });
@@ -974,10 +991,12 @@ export async function refreshComputedHistories(options?: { force?: boolean }) {
     computed.SILVER.push({ date: anchor.date, value: signalValue(byAsset['SILVER']?.signal || 'HOLD') });
     computed.COPPER.push({ date: anchor.date, value: signalValue(byAsset['COPPER']?.signal || 'HOLD') });
     computed.REGIME.push({ date: anchor.date, value: regime.score });
+    computed.REGIME_LABEL.push({ date: anchor.date, value: regimeValue(regime.regime) });
     computed.PORTFOLIO.push({ date: anchor.date, value: 100 - allocation.allocations.cash });
   }
 
   await writeHistory('signal', 'REGIME', computed.REGIME);
+  await writeHistory('signal', 'REGIME_LABEL', computed.REGIME_LABEL);
   await writeHistory('signal', 'PORTFOLIO', computed.PORTFOLIO);
   await writeHistory('signal', 'NASDAQ', computed.NASDAQ);
   await writeHistory('signal', 'GOLD', computed.GOLD);
@@ -1069,6 +1088,25 @@ async function identifyMissingOrShallow(
   return missing;
 }
 
+async function identifyLegacyFredScaleMismatch(files: string[]): Promise<string[]> {
+  const mismatched: string[] = [];
+  for (const [key, minExpectedValue] of Object.entries(FRED_LEVEL_SERIES_MIN_LATEST)) {
+    const filename = `fred-${key.toLowerCase()}.json`;
+    if (!files.includes(filename)) continue;
+    try {
+      const raw = await fs.readFile(path.join(HISTORY_DIR, filename), 'utf-8');
+      const points = JSON.parse(raw) as HistoryPoint[];
+      const latest = points[points.length - 1];
+      if (!latest || !Number.isFinite(latest.value) || latest.value < minExpectedValue) {
+        mismatched.push(key);
+      }
+    } catch {
+      mismatched.push(key);
+    }
+  }
+  return mismatched;
+}
+
 export async function ensureBackfill(apiKey: string) {
   await ensureDir();
   const files = await fs.readdir(HISTORY_DIR).catch(() => [] as string[]);
@@ -1082,6 +1120,7 @@ export async function ensureBackfill(apiKey: string) {
     files,
     12,
   );
+  const fredLegacyMismatch = await identifyLegacyFredScaleMismatch(files);
   const yahooMissing = await identifyMissingOrShallow(
     'yahoo',
     Object.keys(YAHOO_SYMBOLS),
@@ -1089,16 +1128,17 @@ export async function ensureBackfill(apiKey: string) {
     120,
   );
   const signalMissing = !files.some((f) => f.startsWith('signal-'));
+  const fredRefill = Array.from(new Set([...fredMissing, ...fredLegacyMismatch]));
 
-  if (fredMissing.length > 0) {
-    console.log(`[backfill] FRED re-filling: ${fredMissing.join(', ')}`);
-    await backfillFred(apiKey, fredMissing);
+  if (fredRefill.length > 0) {
+    console.log(`[backfill] FRED re-filling: ${fredRefill.join(', ')}`);
+    await backfillFred(apiKey, fredRefill);
   }
   if (yahooMissing.length > 0) {
     console.log(`[backfill] Yahoo re-filling: ${yahooMissing.join(', ')}`);
     await backfillYahoo(yahooMissing);
   }
-  if (fredMissing.length || yahooMissing.length || signalMissing) {
+  if (fredRefill.length || yahooMissing.length || signalMissing) {
     await refreshComputedHistories();
   }
 }
@@ -1204,10 +1244,12 @@ export async function appendSentimentDaily(): Promise<void> {
     console.warn('[history] CNN F&G append skipped:', (error as Error)?.message || error);
   }
 
-  // sentiment 묶음 (PC_RATIO_10D, AAII_BULL_BEAR_SPREAD, NAAIM_EXPOSURE)
+  // sentiment 묶음 (PC_RATIO, AAII_BULL_BEAR_SPREAD, NAAIM_EXPOSURE)
+  // 2026-04 개선: CBOE options chain 방식이 당일값만 주므로 PC_RATIO_10D 는
+  // 수집기에서 안 나옴 — 대신 PC_RATIO raw 를 daily append 후 derived 에서 10D 롤링.
   try {
     const sent = await fetchAllSentiment();
-    const targets = ['PC_RATIO_10D', 'AAII_BULL_BEAR_SPREAD', 'NAAIM_EXPOSURE'];
+    const targets = ['PC_RATIO', 'AAII_BULL_BEAR_SPREAD', 'NAAIM_EXPOSURE'];
     for (const key of targets) {
       const point = sent[key];
       if (!point || point.value === null || !Number.isFinite(point.value)) {
