@@ -276,6 +276,31 @@ function nasdaqSignal(
     unmetReasons.push(overrideReason);
   }
 
+  // 9차 후속 Fix #2: NASDAQ_CHASE_LEVEL 계층화 override (binary CHASE_WARNING 보완).
+  //   level 0 → no-op
+  //   level 1 (soft): reason 경고만, 신호 불변
+  //   level 2 (medium): STRONG_BUY → BUY (한 단계 강등)
+  //   level 3 (hard): STRONG_BUY/BUY → HOLD (기존 CHASE_WARNING 동등)
+  //   level null: 기존 binary CHASE_WARNING 로직 유지 (하위 호환).
+  const chaseLevel = dv(derived, 'NASDAQ_CHASE_LEVEL');
+  if (chaseLevel !== null) {
+    const levelReason = derived.NASDAQ_CHASE_LEVEL?.formula ?? '';
+    if (chaseLevel >= 3 && (signal === 'STRONG_BUY' || signal === 'BUY')) {
+      const previous = signal;
+      signal = 'HOLD';
+      const overrideReason = `CHASE_LEVEL=3 (hard): ${levelReason} (${previous} → HOLD)`;
+      overrides.push(overrideReason);
+      unmetReasons.push(overrideReason);
+    } else if (chaseLevel >= 2 && signal === 'STRONG_BUY') {
+      signal = 'BUY';
+      const overrideReason = `CHASE_LEVEL=2 (medium): ${levelReason} (STRONG_BUY → BUY)`;
+      overrides.push(overrideReason);
+      unmetReasons.push(overrideReason);
+    } else if (chaseLevel >= 1) {
+      unmetReasons.push(`CHASE_LEVEL=1 (soft): ${levelReason} — 관측 경고 (신호 불변)`);
+    }
+  }
+
   return withSignalExplanation({
     asset: 'NASDAQ',
     signal,
@@ -872,6 +897,31 @@ function kospiSignal(
     const overrideReason = `흐름 경고 HOLD 캡: ${kCautionFlags.join(' · ')} (${previous} → HOLD)`;
     overrides.push(overrideReason);
     unmetReasons.push(overrideReason);
+  }
+
+  // 9차 후속 Fix #2: KOSPI_CHASE_LEVEL 계층화 override (binary CHASE_WARNING 보완).
+  //   level 0 → no-op
+  //   level 1 (soft): reason 경고만, 신호 불변
+  //   level 2 (medium): STRONG_BUY → BUY
+  //   level 3 (hard): STRONG_BUY/BUY → HOLD
+  //   level null: 기존 binary CHASE_WARNING 로직 유지 (하위 호환).
+  const kChaseLevel = dv(derived, 'KOSPI_CHASE_LEVEL');
+  if (kChaseLevel !== null) {
+    const levelReason = derived.KOSPI_CHASE_LEVEL?.formula ?? '';
+    if (kChaseLevel >= 3 && (signal === 'STRONG_BUY' || signal === 'BUY')) {
+      const previous = signal;
+      signal = 'HOLD';
+      const overrideReason = `CHASE_LEVEL=3 (hard): ${levelReason} (${previous} → HOLD)`;
+      overrides.push(overrideReason);
+      unmetReasons.push(overrideReason);
+    } else if (kChaseLevel >= 2 && signal === 'STRONG_BUY') {
+      signal = 'BUY';
+      const overrideReason = `CHASE_LEVEL=2 (medium): ${levelReason} (STRONG_BUY → BUY)`;
+      overrides.push(overrideReason);
+      unmetReasons.push(overrideReason);
+    } else if (kChaseLevel >= 1) {
+      unmetReasons.push(`CHASE_LEVEL=1 (soft): ${levelReason} — 관측 경고 (신호 불변)`);
+    }
   }
 
   return withSignalExplanation({
