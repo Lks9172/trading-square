@@ -1,7 +1,7 @@
 import { computeAllocation } from '../engines/allocation';
 import { AssetSignal, DerivedIndicator, MarketDataPoint } from '../types/indicators';
 
-function makeSignals(overrides: Record<string, string>): AssetSignal[] {
+function makeSignals(overrides: Record<string, string>, leverageTier?: 'HARD' | 'MEDIUM' | 'SOFT' | null): AssetSignal[] {
   const defaults: Record<string, string> = {
     NASDAQ: 'HOLD', KOSPI: 'HOLD', GOLD: 'HOLD', SILVER: 'HOLD',
     COPPER: 'HOLD', CASH: 'HOLD', LEVERAGE: 'HOLD',
@@ -10,6 +10,7 @@ function makeSignals(overrides: Record<string, string>): AssetSignal[] {
   return Object.entries(merged).map(([asset, signal]) => ({
     asset, signal: signal as any, conditionsMet: 0, conditionsTotal: 0,
     weightedScore: 0, weightedMaxScore: 0, reasons: [], unmetReasons: [], date: '2026-01-01',
+    ...(asset === 'LEVERAGE' ? { tier: leverageTier ?? null } : {}),
   }));
 }
 
@@ -80,20 +81,45 @@ describe('computeAllocation', () => {
     expect(highFxResult.allocations.korea).toBeLessThan(normalResult.allocations.korea);
   });
 
-  it('leverage is capped at 15% after normalization (영상1 §전략C)', () => {
-    // PANIC_BUT_OK 국면 + LEVERAGE BUY + 다른 자산 SELL 로 leverage 비중이 팽창할 조건
+  it('leverage HARD tier is capped at 15% after normalization (영상1 §전략C)', () => {
+    // PANIC_BUT_OK 국면 + LEVERAGE STRONG_BUY(HARD) + 다른 자산 SELL 로 leverage 비중이 팽창할 조건
     const signals = makeSignals({
-      LEVERAGE: 'BUY',
+      LEVERAGE: 'STRONG_BUY',
       NASDAQ: 'SELL',
       KOSPI: 'SELL',
       GOLD: 'SELL',
       SILVER: 'SELL',
       COPPER: 'SELL',
-    });
+    }, 'HARD');
     const result = computeAllocation('PANIC_BUT_OK', 30, signals, makeDerived({}), makeRaw({}), 'long');
     expect(result.leverageAllowed).toBe(true);
     expect(result.allocations.leverage).toBeLessThanOrEqual(15);
     expect(Object.values(result.allocations).reduce((a, b) => a + b, 0)).toBe(100);
+  });
+
+  it('leverage MEDIUM tier is capped at 10%', () => {
+    const signals = makeSignals({
+      LEVERAGE: 'BUY', NASDAQ: 'SELL', KOSPI: 'SELL', GOLD: 'SELL', SILVER: 'SELL', COPPER: 'SELL',
+    }, 'MEDIUM');
+    const result = computeAllocation('PANIC_BUT_OK', 30, signals, makeDerived({}), makeRaw({}), 'long');
+    expect(result.leverageAllowed).toBe(true);
+    expect(result.allocations.leverage).toBeLessThanOrEqual(10);
+  });
+
+  it('leverage SOFT tier is capped at 5%', () => {
+    const signals = makeSignals({
+      LEVERAGE: 'BUY', NASDAQ: 'SELL', KOSPI: 'SELL', GOLD: 'SELL', SILVER: 'SELL', COPPER: 'SELL',
+    }, 'SOFT');
+    const result = computeAllocation('PANIC_BUT_OK', 30, signals, makeDerived({}), makeRaw({}), 'long');
+    expect(result.leverageAllowed).toBe(true);
+    expect(result.allocations.leverage).toBeLessThanOrEqual(5);
+  });
+
+  it('leverage BUY without tier stays at 0% (no tier gate)', () => {
+    const signals = makeSignals({ LEVERAGE: 'BUY' }, null);
+    const result = computeAllocation('PANIC_BUT_OK', 30, signals, makeDerived({}), makeRaw({}), 'long');
+    expect(result.leverageAllowed).toBe(false);
+    expect(result.allocations.leverage).toBe(0);
   });
 
   it('overheated keeps allocations summing to 100 even when reduceKeys are small', () => {

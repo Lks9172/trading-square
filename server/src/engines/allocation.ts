@@ -243,7 +243,14 @@ export function computeAllocation(
   // Fix #3: STRONG_BUY 도 허용. 기존엔 === 'BUY' 만 통과시켜 STRONG_BUY 시 레버리지 0%
   // 처리되는 비대칭이 있었다(3/3 조건 충족 후 승격되면 오히려 차단되는 모순).
   const leverageSig = leverageSignal?.signal;
-  const leverageAllowed = leverageSig === 'BUY' || leverageSig === 'STRONG_BUY';
+  // === 3단계 티어별 상한 계산 ===
+  // SOFT=5%, MEDIUM=10%, HARD=15%. 티어 미발동 → 0% (허용 차단).
+  const leverageTier = leverageSignal?.tier ?? null;
+  const leverageCap =
+    leverageTier === 'HARD' ? 15 :
+    leverageTier === 'MEDIUM' ? 10 :
+    leverageTier === 'SOFT' ? 5 : 0;
+  const leverageAllowed = leverageCap > 0 && (leverageSig === 'BUY' || leverageSig === 'STRONG_BUY');
 
   if (!leverageAllowed) {
     if (base.leverage > 0) {
@@ -258,13 +265,14 @@ export function computeAllocation(
 
   let allocations = normalize(base);
 
-  // === 레버리지 최종 상한 (영상1 §전략C): 15% ===
+  // === 레버리지 최종 상한 (영상1 §전략C + 3단계 티어) ===
+  // 티어별 상한: SOFT=5% / MEDIUM=10% / HARD=15%. 티어 미발동 시 0%.
   // normalize 이후 실제 비중 기준. 초과분은 cash 로 이관해 현금 쿠션 유지.
-  if (allocations.leverage > 15) {
-    const excess = allocations.leverage - 15;
+  if (allocations.leverage > leverageCap) {
+    const excess = allocations.leverage - leverageCap;
     allocations = {
       ...allocations,
-      leverage: 15,
+      leverage: leverageCap,
       cash: (allocations.cash || 0) + excess,
     };
   }
