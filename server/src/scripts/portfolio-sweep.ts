@@ -5,7 +5,25 @@
  * (다른 5국면은 현 PRD 유지) backtest 1Y. 국면별 Top-5 → 3Y/5Y 교차검증.
  * 마지막으로 각 국면 Top-1 합친 composed optimal 도 검증.
  *
- * 실행: tsx src/scripts/portfolio-sweep.ts [samplesPerRegime]
+ * === 실행 ===
+ *
+ *   # 기본 (top1 국면별 + top-decile 평균 동시 출력, composed=top1)
+ *   npx tsx src/scripts/portfolio-sweep.ts [N=80]
+ *
+ *   # top-decile 재선정 모드 (BASE_ALLOCATIONS 재선정 후보 강조)
+ *   npx tsx src/scripts/portfolio-sweep.ts --mode=decile [N=80]
+ *   #   → composed 를 각 국면의 top-decile 평균으로 구성해 backtest
+ *   #   → 샘플 내 과적합 완화 후보 제시용. 실제 숫자 교체는 사용자 검토 후 별도 진행.
+ *
+ * 환경변수 PORTFOLIO_SWEEP_MODE=decile 로도 전환 가능.
+ *
+ * === 용도 ===
+ * BASE_ALLOCATIONS (server/src/engines/allocation.ts) 교체 후보 산출.
+ * 현 BASE 가 Monte Carlo top1 (샘플 내 최대) 에 과적합될 수 있다는 금융감사 지적에 대응한다.
+ * top-decile 평균은 상위 10% 조합의 평균이라 단일 극단에 덜 편향.
+ *
+ * === 주의 ===
+ * 이 스크립트는 BASE_ALLOCATIONS 를 자동 덮어쓰지 않는다. 출력만 제시하며, 실제 반영은 별도 커밋.
  */
 
 import { readHistory } from '../state/history-store';
@@ -126,8 +144,29 @@ async function backtest(
   return { return_pct: parseFloat((pv - 100).toFixed(2)), max_drawdown: parseFloat(maxDD.toFixed(2)) };
 }
 
+/** CLI 파싱 — --mode=decile | --mode=top1 (기본) + positional N. 환경변수도 허용. */
+function parseArgs(): { mode: 'top1' | 'decile'; N: number } {
+  const rawArgs = process.argv.slice(2);
+  let mode: 'top1' | 'decile' = 'top1';
+  let nArg: string | undefined;
+  for (const a of rawArgs) {
+    if (a.startsWith('--mode=')) {
+      const m = a.slice(7).toLowerCase();
+      if (m === 'decile' || m === 'top1') mode = m;
+    } else if (/^\d+$/.test(a)) {
+      nArg = a;
+    }
+  }
+  const envMode = (process.env.PORTFOLIO_SWEEP_MODE || '').toLowerCase();
+  if (envMode === 'decile' || envMode === 'top1') mode = mode === 'top1' && envMode ? (envMode as 'top1' | 'decile') : mode;
+  if (envMode === 'decile') mode = 'decile';
+  const N = parseInt(nArg || '80', 10);
+  return { mode, N };
+}
+
 async function main() {
-  const N = parseInt(process.argv[2] || '80', 10);
+  const { mode, N } = parseArgs();
+  console.log(`[portfolio-sweep] mode=${mode} N=${N}/regime`);
 
   const assets: Record<string, { key: string; source: string }> = {
     nasdaq: { key: 'NASDAQ', source: 'yahoo' }, gold: { key: 'GOLD', source: 'yahoo' },
@@ -159,6 +198,7 @@ async function main() {
     - (Math.abs(r1.max_drawdown) + Math.abs(r10.max_drawdown)) / 2 * DD_PENALTY;
 
   const bestPerRegime: Record<Regime, { row: Record<string, number>; r1y: Result; r3y: Result; r5y: Result; r10y: Result; score: number }> = {} as any;
+  const decilePerRegime: Record<Regime, Record<string, number>> = {} as any;
   for (const regime of REGIMES) {
     process.stderr.write(`\n[${regime}] sampling N=${N} (1Y+3Y+5Y+10Y) ...\n`);
     const samples: Array<{ row: Record<string, number>; r1y: Result; r3y: Result; r5y: Result; r10y: Result; score: number }> = [];
@@ -213,22 +253,33 @@ async function main() {
     console.log(`[top1 vs decile diff] ${Object.keys(top5[0].row).map((k) => `${k}:${top5[0].row[k]}→${meanRow[k]}`).join(' ')}`);
 
     bestPerRegime[regime] = top5[0];
+    decilePerRegime[regime] = meanRow;
   }
 
-  // composed optimal: 각 국면 top1 합침
+  // composed optimal: mode 에 따라 top1 또는 top-decile 평균 합침.
+  //   - top1: 국면별 최고점 샘플 — 샘플 내 과적합 위험 존재
+  //   - decile: 국면별 상위 10% 평균 — BASE_ALLOCATIONS 교체 후보 robust 추정
   const composed: Template = {} as any;
-  for (const r of REGIMES) composed[r] = bestPerRegime[r].row as any;
+  for (const r of REGIMES) {
+    composed[r] = (mode === 'decile' ? decilePerRegime[r] : bestPerRegime[r].row) as any;
+  }
   const c1y = await backtest(composed, 252, histories, fredHistories, dxyHist, histories.nasdaq);
   const c3y = await backtest(composed, 756, histories, fredHistories, dxyHist, histories.nasdaq);
   const c5y = await backtest(composed, 1260, histories, fredHistories, dxyHist, histories.nasdaq);
   const c10y = await backtest(composed, 2520, histories, fredHistories, dxyHist, histories.nasdaq);
 
-  console.log(`\n=== COMPOSED OPTIMAL (국면별 top1 합침) ===`);
+  const header = mode === 'decile'
+    ? 'COMPOSED (국면별 top-decile 평균) — BASE_ALLOCATIONS 재선정 후보'
+    : 'COMPOSED OPTIMAL (국면별 top1 합침)';
+  console.log(`\n=== ${header} ===`);
   console.log(JSON.stringify(composed, null, 2));
   console.log(`\n  1Y:  ${c1y.return_pct}% (dd ${c1y.max_drawdown}%) Δ vs PRD = ${(c1y.return_pct - base1y.return_pct).toFixed(2)}%p`);
   console.log(`  3Y:  ${c3y.return_pct}% (dd ${c3y.max_drawdown}%) Δ vs PRD = ${(c3y.return_pct - base3y.return_pct).toFixed(2)}%p`);
   console.log(`  5Y:  ${c5y.return_pct}% (dd ${c5y.max_drawdown}%) Δ vs PRD = ${(c5y.return_pct - base5y.return_pct).toFixed(2)}%p`);
   console.log(`  10Y: ${c10y.return_pct}% (dd ${c10y.max_drawdown}%) Δ vs PRD = ${(c10y.return_pct - base10y.return_pct).toFixed(2)}%p`);
+  if (mode === 'decile') {
+    console.log(`\n(주의) 위 composed 는 BASE_ALLOCATIONS 자동 교체 대상이 아니다. 사용자 검토 후 별도 커밋으로 반영.`);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
