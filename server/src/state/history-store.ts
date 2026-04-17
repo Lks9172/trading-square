@@ -923,6 +923,8 @@ export async function refreshComputedHistories(options?: { force?: boolean }) {
   // Fix #1+#2(2차 감사): live computeDerived 를 anchor 루프 전에 **한 번만** 호출해 재사용.
   //   내부에서 Yahoo/FRED live fetch 가 많아 per-date 호출은 비용 폭발. 날짜 의존 필드는
   //   recomputeFullDerivedForDate 에서 raw/nasdaqHistory 로 덮어쓴다.
+  // NOTE: 과거 일자 재계산은 manualInputs(cbBuying/geoRisk) 가 당일 값으로만 존재하므로
+  //   computeDerived 2번째 인자 undefined → GOLD_PRIORITY_SCORE 는 2축 폴백 (기존 동작 유지).
   let cachedLiveDerived: Record<string, DerivedIndicator> = {};
   try {
     const latestRaw = buildRawForDate(

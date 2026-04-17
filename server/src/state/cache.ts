@@ -84,7 +84,7 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
     fetchEconomicCalendar(apiKey).catch(() => []),
   );
   const derived = await withSpan('macrosquare.engine.derived', (s) =>
-    computeDerived(raw).then((d) => {
+    computeDerived(raw, effectiveInputs).then((d) => {
       s.setAttribute('derived.keys', Object.keys(d).length);
       return d;
     }),

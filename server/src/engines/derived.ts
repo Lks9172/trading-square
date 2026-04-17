@@ -101,7 +101,13 @@ export function computeDisparityStreak(
 }
 
 export async function computeDerived(
-  raw: Record<string, MarketDataPoint>
+  raw: Record<string, MarketDataPoint>,
+  manualInputs?: {
+    cbBuying?: boolean;
+    geoRisk?: number;
+    policyDirection?: number;
+    ismPmi?: number | null;
+  },
 ): Promise<Record<string, DerivedIndicator>> {
   const d: Record<string, DerivedIndicator> = {};
   const dt = today();
@@ -1845,18 +1851,23 @@ export async function computeDerived(
     /* 호르무즈 연쇄 체인 스코어 실패는 파이프라인 막지 않음 */
   }
 
-  // === GOLD_PRIORITY_SCORE (8차 TOP7 Fix #3) ===
-  // 영상5 금 우선순위 4축 (실질금리·DXY·CB buying·geo risk) 중 derived 레벨에서 접근 가능한
-  // 2축(실질금리 추세·DXY 추세)으로 0~1 정규화. cbBuying/geoRisk 는 manualInputs 로 signal 레벨 재가산.
-  // 가중: 실질금리 4 / DXY 3 → 총 7, 충족 점수 / 7.
+  // === GOLD_PRIORITY_SCORE (8차 TOP7 Fix #3 → 4축 완성) ===
+  // 영상5 금 우선순위 4축 완성:
+  //   축 1 (가중 4): REAL_YIELD_TREND < 0 (실질금리 하락) → 금 1순위 우호
+  //   축 2 (가중 3): DXY_TREND < -0.5 (단기 약세)
+  //   축 3 (가중 2): manualInputs.cbBuying === true (중앙은행 매수)
+  //   축 4 (가중 1): manualInputs.geoRisk >= 3 (지정학 위험 고조)
+  // 총합 / 10 → 0~1 정규화.
+  // manualInputs 가 undefined 이면 기존 2축 (실질금리 4 + DXY 3, /7) 으로 폴백 — 과거 재계산 등에서 호환.
   try {
     const ryTrend = d.REAL_YIELD_TREND?.value ?? null;
     const dxyTrend = d.DXY_TREND?.value ?? null;
+    const hasManual = manualInputs !== undefined;
     if (ryTrend !== null || dxyTrend !== null) {
       let score = 0;
-      const maxScore = 7;
+      const maxScore = hasManual ? 10 : 7;
       const parts: string[] = [];
-      // 축 1 (가중 4): REAL_YIELD_TREND < 0 (실질금리 하락) → 금 1순위 우호
+      // 축 1 (가중 4): REAL_YIELD_TREND < 0
       if (ryTrend !== null && ryTrend < 0) {
         score += 4;
         parts.push(`RY_TREND ${ryTrend.toFixed(3)}<0 (+4)`);
@@ -1865,7 +1876,7 @@ export async function computeDerived(
       } else {
         parts.push('RY_TREND null');
       }
-      // 축 2 (가중 3): DXY_TREND < -0.5 (단기 약세)
+      // 축 2 (가중 3): DXY_TREND < -0.5
       if (dxyTrend !== null && dxyTrend < -0.5) {
         score += 3;
         parts.push(`DXY_TREND ${dxyTrend.toFixed(2)}<-0.5 (+3)`);
@@ -1874,14 +1885,33 @@ export async function computeDerived(
       } else {
         parts.push('DXY_TREND null');
       }
+      // 축 3 (가중 2): cbBuying
+      if (hasManual) {
+        if (manualInputs?.cbBuying === true) {
+          score += 2;
+          parts.push('CB_BUYING=true (+2)');
+        } else {
+          parts.push('CB_BUYING=false (+0)');
+        }
+        // 축 4 (가중 1): geoRisk >= 3
+        const geoRisk = manualInputs?.geoRisk ?? 0;
+        if (geoRisk >= 3) {
+          score += 1;
+          parts.push(`GEO_RISK ${geoRisk}≥3 (+1)`);
+        } else {
+          parts.push(`GEO_RISK ${geoRisk}<3 (+0)`);
+        }
+      }
 
       const normalized = score / maxScore;
+      const formulaHeader = hasManual
+        ? '4축 가중 (실질금리 4 + DXY 3 + CB매수 2 + 지정학 1) / 10'
+        : '2축 폴백 (실질금리 4 + DXY 3) / 7 — manualInputs 미전달 (과거 재계산 등)';
       d.GOLD_PRIORITY_SCORE = {
         name: 'gold_priority_score',
         value: parseFloat(normalized.toFixed(3)),
         date: dt,
-        // TODO: cbBuying/geoRisk 는 manualInputs 접근 제약으로 signal 레벨에서 재가산.
-        formula: `2축 가중합 / 7 → 0~1. ${parts.join(' · ')}. ≥0.7 금 매수 강화 / ≤0.3 금 감산.`,
+        formula: `${formulaHeader} → 0~1. ${parts.join(' · ')}. ≥0.7 금 매수 강화 / ≤0.3 금 감산.`,
       };
     }
   } catch {
