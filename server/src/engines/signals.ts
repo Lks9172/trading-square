@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { MarketDataPoint, DerivedIndicator, RegimeState, AssetSignal, Signal, UserProfile } from '../types/indicators';
+import { MarketDataPoint, DerivedIndicator, RegimeState, AssetSignal, Signal, UserProfile, LeverageTier } from '../types/indicators';
 
 // === LEVERAGE 진입일 영속 저장 ===
 // 영상1 §전략C "레버리지는 2~3개월 짧게, 20~30% 익절, 횡보 시 원금잠식 위험".
@@ -657,6 +657,7 @@ function leverageCheck(
       reasons: [`이격도 ${disparity.toFixed(1)}% → 200DMA 복귀/초과. 레버리지 익절 구간 (목표 20~30% 도달 추정)`],
       unmetReasons,
       date: new Date().toISOString().split('T')[0],
+      tier: null,
     }, 'REDUCE');
   }
 
@@ -668,17 +669,38 @@ function leverageCheck(
     unmetReasons.push(`⚠️ VIX ${vix.toFixed(1)} 안정 + 이격도 ${disparity.toFixed(1)}% → 횡보 원금잠식 위험 (보조조건)`);
   }
 
+  // === 3단계 티어 분류 (HARD > MEDIUM > SOFT) ===
+  // 영상1 원전(기존 -25/35/<300K=HARD) 보존 + 저점 유사 구간(-5/-15) 확대.
+  // 모든 티어는 3조건 AND (이격·VIX·ICSA). ICSA 게이트는 공통.
+  let tier: LeverageTier | null = null;
+  let tierSignal: Signal = 'HOLD';
+  let tierCap = 0;
+  const icsaOk = icsa !== null && icsa < 300000;
+  if (disparity !== null && vix !== null && icsaOk) {
+    if (disparity <= -25 && vix >= 35) {
+      tier = 'HARD'; tierSignal = 'STRONG_BUY'; tierCap = 15;
+    } else if (disparity <= -15 && vix >= 30) {
+      tier = 'MEDIUM'; tierSignal = 'BUY'; tierCap = 10;
+    } else if (disparity <= -5 && vix >= 30) {
+      tier = 'SOFT'; tierSignal = 'BUY'; tierCap = 5;
+    }
+  }
+
   const today = new Date().toISOString().split('T')[0];
-  let signal: Signal = met === 3 ? 'BUY' : 'HOLD';
+  let signal: Signal = tierSignal;
   const baseSignal = signal;
   const overrides: string[] = [];
-  const decisionReasons = met === 3
-    ? [...reasons, '3조건 충족 → 2x ETF 최대 15% 허용']
-    : [...reasons, `${3 - met}개 조건 미충족 → 레버리지 불허`];
+  const decisionReasons = tier !== null
+    ? [
+        ...reasons,
+        `LEVERAGE_TIER: ${tier} (이격 ${disparity!.toFixed(1)}%, VIX ${vix!.toFixed(1)}, ICSA ${Math.round(icsa! / 1000)}K) → ${tierCap}% 상한`,
+      ]
+    : [...reasons, `티어 미발동(HARD/MEDIUM/SOFT 조건 모두 미충족) → 레버리지 불허`];
 
   // === 시간 기반 청산 (영상1 §전략C) ===
   const entryDate = readLeverageEntry();
-  if (signal === 'BUY') {
+  const isEntryActive = signal === 'BUY' || signal === 'STRONG_BUY';
+  if (isEntryActive) {
     if (!entryDate) {
       writeLeverageEntry(today);
       decisionReasons.push(`레버리지 진입일 ${today} 기록 (상한 ${LEVERAGE_FORCE_EXIT_DAYS}일)`);
@@ -702,9 +724,9 @@ function leverageCheck(
       }
     }
   } else if (entryDate) {
-    // BUY 아닌 상태 → 포지션 종료로 간주, 진입일 리셋
+    // BUY/STRONG_BUY 아닌 상태 → 포지션 종료로 간주, 진입일 리셋
     clearLeverageEntry();
-    decisionReasons.push(`신호 종료 → 진입일 기록 삭제 (다음 BUY 시 재기록)`);
+    decisionReasons.push(`신호 종료 → 진입일 기록 삭제 (다음 진입 시 재기록)`);
   }
 
   return withSignalExplanation({
@@ -717,6 +739,7 @@ function leverageCheck(
     reasons: decisionReasons,
     unmetReasons,
     date: today,
+    tier,
   }, baseSignal, overrides);
 }
 

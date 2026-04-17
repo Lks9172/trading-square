@@ -39,6 +39,8 @@ export interface RegimeState {
 // ── 자산 신호 ──
 export type Signal = 'STRONG_BUY' | 'BUY' | 'HOLD' | 'REDUCE' | 'SELL';
 
+export type LeverageTier = 'HARD' | 'MEDIUM' | 'SOFT';
+
 export interface AssetSignal {
   asset: string;
   signal: Signal;
@@ -49,6 +51,8 @@ export interface AssetSignal {
   reasons: string[];
   unmetReasons: string[];
   date: string;
+  // LEVERAGE 전용 3단계 티어 (SOFT/MEDIUM/HARD). null 은 미발동.
+  tier?: LeverageTier | null;
 }
 
 // ── 비중 ──
