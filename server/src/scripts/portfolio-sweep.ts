@@ -417,6 +417,55 @@ async function main() {
     console.log(`\n(주의) 위 composed 는 BASE_ALLOCATIONS 자동 교체 대상이 아니다. 사용자 검토 후 별도 커밋으로 반영.`);
   }
 
+  // Fix #3 (walk-forward OOS): 과적합 진단.
+  //   train window: 2016-01-01 ~ 2023-12-31 — 이 구간으로 composed 재백테스트
+  //   test window:  2024-01-01 ~ 현재 — composed 후보만 OOS 평가
+  //   alpha_decay = train_alpha − test_alpha (%p). 15%p 초과 시 과적합 경고.
+  let walkForwardBlock: null | {
+    train: { from: string; to: string; return_pct: number; max_drawdown: number; alpha_pct: number };
+    test:  { from: string; to: string; return_pct: number; max_drawdown: number; alpha_pct: number };
+    alpha_decay: number;
+    overfit_warning: boolean;
+  } = null;
+  if (walkForward) {
+    const TRAIN_FROM = '2016-01-01';
+    const TRAIN_TO   = '2023-12-31';
+    const TEST_FROM  = '2024-01-01';
+    const TEST_TO    = new Date().toISOString().slice(0, 10);
+
+    const composedTrain = await backtest(composed, 0, histories, fredHistories, dxyHist, histories.nasdaq, { ...btOpts, from: TRAIN_FROM, to: TRAIN_TO });
+    const baseTrain     = await backtest(CURRENT_PRD, 0, histories, fredHistories, dxyHist, histories.nasdaq, { ...btOpts, from: TRAIN_FROM, to: TRAIN_TO });
+    const composedTest  = await backtest(composed, 0, histories, fredHistories, dxyHist, histories.nasdaq, { ...btOpts, from: TEST_FROM,  to: TEST_TO });
+    const baseTest      = await backtest(CURRENT_PRD, 0, histories, fredHistories, dxyHist, histories.nasdaq, { ...btOpts, from: TEST_FROM,  to: TEST_TO });
+
+    const trainAlpha = composedTrain.return_pct - baseTrain.return_pct;
+    const testAlpha  = composedTest.return_pct  - baseTest.return_pct;
+    const alphaDecay = trainAlpha - testAlpha;
+    const overfit = alphaDecay > 15;
+
+    console.log(`\n=== WALK-FORWARD OOS (train ${TRAIN_FROM}~${TRAIN_TO} / test ${TEST_FROM}~${TEST_TO}) ===`);
+    console.log(`  TRAIN composed=${composedTrain.return_pct}% (dd ${composedTrain.max_drawdown}%)  base=${baseTrain.return_pct}%  α=${trainAlpha.toFixed(2)}%p`);
+    console.log(`  TEST  composed=${composedTest.return_pct}%  (dd ${composedTest.max_drawdown}%)  base=${baseTest.return_pct}%   α=${testAlpha.toFixed(2)}%p`);
+    console.log(`  alpha_decay = train_α - test_α = ${alphaDecay.toFixed(2)}%p${overfit ? '  ⚠️ 15%p 초과 — 과적합 의심' : ''}`);
+
+    walkForwardBlock = {
+      train: {
+        from: TRAIN_FROM, to: TRAIN_TO,
+        return_pct: composedTrain.return_pct,
+        max_drawdown: composedTrain.max_drawdown,
+        alpha_pct: parseFloat(trainAlpha.toFixed(2)),
+      },
+      test: {
+        from: TEST_FROM, to: TEST_TO,
+        return_pct: composedTest.return_pct,
+        max_drawdown: composedTest.max_drawdown,
+        alpha_pct: parseFloat(testAlpha.toFixed(2)),
+      },
+      alpha_decay: parseFloat(alphaDecay.toFixed(2)),
+      overfit_warning: overfit,
+    };
+  }
+
   // 9차 후속 Fix #3: --output 플래그가 지정된 경우 JSON 저장.
   //   빈 문자열('') 또는 '--output' 단독 → 자동 경로 (server/data/sweep-results/top-decile-<ISO>.json).
   //   명시적 경로가 있으면 그대로 사용. 상위 디렉토리는 자동 생성.
@@ -426,6 +475,8 @@ async function main() {
       ranAt,
       mode,
       N,
+      txCostBps,
+      walkForward: walkForwardBlock,
       baseline: {
         r1y: base1y.return_pct,
         r3y: base3y.return_pct,
