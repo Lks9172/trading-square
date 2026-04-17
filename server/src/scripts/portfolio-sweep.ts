@@ -26,6 +26,8 @@
  * 이 스크립트는 BASE_ALLOCATIONS 를 자동 덮어쓰지 않는다. 출력만 제시하며, 실제 반영은 별도 커밋.
  */
 
+import fs from 'fs/promises';
+import path from 'path';
 import { readHistory } from '../state/history-store';
 import { classifyRegime } from '../engines/regime';
 import { computeSignals } from '../engines/signals';
@@ -144,15 +146,21 @@ async function backtest(
   return { return_pct: parseFloat((pv - 100).toFixed(2)), max_drawdown: parseFloat(maxDD.toFixed(2)) };
 }
 
-/** CLI 파싱 — --mode=decile | --mode=top1 (기본) + positional N. 환경변수도 허용. */
-function parseArgs(): { mode: 'top1' | 'decile'; N: number } {
+/** CLI 파싱 — --mode=decile | --mode=top1 (기본) + positional N + --output=<path>. 환경변수도 허용. */
+function parseArgs(): { mode: 'top1' | 'decile'; N: number; outputPath: string | null } {
   const rawArgs = process.argv.slice(2);
   let mode: 'top1' | 'decile' = 'top1';
   let nArg: string | undefined;
+  let outputPath: string | null = null;
   for (const a of rawArgs) {
     if (a.startsWith('--mode=')) {
       const m = a.slice(7).toLowerCase();
       if (m === 'decile' || m === 'top1') mode = m;
+    } else if (a.startsWith('--output=')) {
+      outputPath = a.slice('--output='.length) || null;
+    } else if (a === '--output') {
+      // 값 없는 플래그 → 기본 경로 사용 (아래 main 에서 결정).
+      outputPath = '';
     } else if (/^\d+$/.test(a)) {
       nArg = a;
     }
@@ -160,13 +168,25 @@ function parseArgs(): { mode: 'top1' | 'decile'; N: number } {
   const envMode = (process.env.PORTFOLIO_SWEEP_MODE || '').toLowerCase();
   if (envMode === 'decile' || envMode === 'top1') mode = mode === 'top1' && envMode ? (envMode as 'top1' | 'decile') : mode;
   if (envMode === 'decile') mode = 'decile';
+  // 환경변수로도 --output 토글 지원.
+  if (outputPath === null && process.env.PORTFOLIO_SWEEP_OUTPUT) {
+    outputPath = process.env.PORTFOLIO_SWEEP_OUTPUT;
+  }
   const N = parseInt(nArg || '80', 10);
-  return { mode, N };
+  return { mode, N, outputPath };
 }
 
 async function main() {
-  const { mode, N } = parseArgs();
-  console.log(`[portfolio-sweep] mode=${mode} N=${N}/regime`);
+  const { mode, N, outputPath } = parseArgs();
+  console.log(`[portfolio-sweep] mode=${mode} N=${N}/regime${outputPath !== null ? ` output=${outputPath || '(auto)'}` : ''}`);
+  // 9차 후속 Fix #3: 국면별 결과 구조 (current / top1 / decileMean / diff).
+  const perRegimeOut: Record<string, {
+    current: Record<string, number>;
+    top1: Record<string, number>;
+    decileMean: Record<string, number>;
+    diff: Record<string, number>;
+    top1Score: { r1y: number; r3y: number; r5y: number; r10y: number; dd10y: number; score: number } | null;
+  }> = {};
 
   const assets: Record<string, { key: string; source: string }> = {
     nasdaq: { key: 'NASDAQ', source: 'yahoo' }, gold: { key: 'GOLD', source: 'yahoo' },
@@ -254,6 +274,27 @@ async function main() {
 
     bestPerRegime[regime] = top5[0];
     decilePerRegime[regime] = meanRow;
+
+    // 9차 후속 Fix #3: 구조화 결과 수집 (diff = decileMean - current, %p).
+    const current = CURRENT_PRD[regime];
+    const diff: Record<string, number> = {};
+    for (const k of ASSETS) {
+      diff[k] = (meanRow[k] ?? 0) - (current[k] ?? 0);
+    }
+    perRegimeOut[regime] = {
+      current: { ...current },
+      top1: { ...top5[0].row },
+      decileMean: { ...meanRow },
+      diff,
+      top1Score: {
+        r1y: top5[0].r1y.return_pct,
+        r3y: top5[0].r3y.return_pct,
+        r5y: top5[0].r5y.return_pct,
+        r10y: top5[0].r10y.return_pct,
+        dd10y: top5[0].r10y.max_drawdown,
+        score: top5[0].score,
+      },
+    };
   }
 
   // composed optimal: mode 에 따라 top1 또는 top-decile 평균 합침.
@@ -279,6 +320,52 @@ async function main() {
   console.log(`  10Y: ${c10y.return_pct}% (dd ${c10y.max_drawdown}%) Δ vs PRD = ${(c10y.return_pct - base10y.return_pct).toFixed(2)}%p`);
   if (mode === 'decile') {
     console.log(`\n(주의) 위 composed 는 BASE_ALLOCATIONS 자동 교체 대상이 아니다. 사용자 검토 후 별도 커밋으로 반영.`);
+  }
+
+  // 9차 후속 Fix #3: --output 플래그가 지정된 경우 JSON 저장.
+  //   빈 문자열('') 또는 '--output' 단독 → 자동 경로 (server/data/sweep-results/top-decile-<ISO>.json).
+  //   명시적 경로가 있으면 그대로 사용. 상위 디렉토리는 자동 생성.
+  if (outputPath !== null) {
+    const ranAt = new Date().toISOString();
+    const payload = {
+      ranAt,
+      mode,
+      N,
+      baseline: {
+        r1y: base1y.return_pct,
+        r3y: base3y.return_pct,
+        r5y: base5y.return_pct,
+        r10y: base10y.return_pct,
+        dd10y: base10y.max_drawdown,
+      },
+      composed: {
+        template: composed,
+        r1y: c1y.return_pct,
+        r3y: c3y.return_pct,
+        r5y: c5y.return_pct,
+        r10y: c10y.return_pct,
+        dd10y: c10y.max_drawdown,
+        delta: {
+          r1y: parseFloat((c1y.return_pct - base1y.return_pct).toFixed(2)),
+          r3y: parseFloat((c3y.return_pct - base3y.return_pct).toFixed(2)),
+          r5y: parseFloat((c5y.return_pct - base5y.return_pct).toFixed(2)),
+          r10y: parseFloat((c10y.return_pct - base10y.return_pct).toFixed(2)),
+        },
+      },
+      perRegime: perRegimeOut,
+    };
+
+    let resolved: string;
+    if (outputPath === '') {
+      const stamp = ranAt.replace(/[:.]/g, '-');
+      const prefix = mode === 'decile' ? 'top-decile' : 'top1';
+      resolved = path.resolve(process.cwd(), 'data/sweep-results', `${prefix}-${stamp}.json`);
+    } else {
+      resolved = path.resolve(process.cwd(), outputPath);
+    }
+    await fs.mkdir(path.dirname(resolved), { recursive: true });
+    await fs.writeFile(resolved, JSON.stringify(payload, null, 2));
+    console.log(`\n[sweep-output] JSON 저장 → ${resolved}`);
   }
 }
 
