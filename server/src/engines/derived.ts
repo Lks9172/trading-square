@@ -1995,5 +1995,74 @@ export async function computeDerived(
     /* FX+외인 복합 게이트 실패는 파이프라인 막지 않음 */
   }
 
+  // === GEOPOLITICAL_UNWIND_EVENT + SHORT_COVER_SUSPECTED (9차 gap TOP3 Fix #2) ===
+  // stt_kospi 4:58 + 5:06 — 지정학 리스크 해소 시점에 KOSPI↑/USDKRW↓/WTI↓ 동시 급변 관찰.
+  // 3축 중 2+ 충족: EVENT=1, 3축 전부: EVENT=2, 아니면 0.
+  // 외인 순매수 1조+ 동반 시 숏커버링 의심 (SHORT_COVER_SUSPECTED=1).
+  //   축 1: KOSPI 일봉 변동 ≥ +5%
+  //   축 2: USDKRW 일봉 변동 ≤ -1.5%
+  //   축 3: WTI 일봉 변동 ≤ -10%
+  try {
+    const kospiH = await readHistory('yahoo', 'KOSPI');
+    const fxH = await readHistory('yahoo', 'USDKRW');
+    const wtiH = await readHistory('yahoo', 'WTI');
+
+    const pct1d = (hist: Array<{ value: number }>): number | null => {
+      if (hist.length < 2) return null;
+      const cur = hist[hist.length - 1].value;
+      const prev = hist[hist.length - 2].value;
+      if (!Number.isFinite(cur) || !Number.isFinite(prev) || prev === 0) return null;
+      return ((cur - prev) / prev) * 100;
+    };
+
+    const kospiPct = pct1d(kospiH);
+    const fxPct = pct1d(fxH);
+    const wtiPct = pct1d(wtiH);
+
+    if (kospiPct === null || fxPct === null || wtiPct === null) {
+      d.GEOPOLITICAL_UNWIND_EVENT = {
+        name: 'geopolitical_unwind_event',
+        value: null,
+        date: dt,
+        formula: `데이터 부족 (KOSPI=${kospiPct ?? 'n/a'} / USDKRW=${fxPct ?? 'n/a'} / WTI=${wtiPct ?? 'n/a'})`,
+      };
+    } else {
+      const axKospi = kospiPct >= 5;
+      const axFx = fxPct <= -1.5;
+      const axWti = wtiPct <= -10;
+      const hitCount = (axKospi ? 1 : 0) + (axFx ? 1 : 0) + (axWti ? 1 : 0);
+      const eventLevel = hitCount >= 3 ? 2 : hitCount >= 2 ? 1 : 0;
+      d.GEOPOLITICAL_UNWIND_EVENT = {
+        name: 'geopolitical_unwind_event',
+        value: eventLevel,
+        date: dt,
+        formula: `3축 [KOSPI${axKospi ? 'Y' : 'N'}(${kospiPct.toFixed(2)}%) · FX${axFx ? 'Y' : 'N'}(${fxPct.toFixed(2)}%) · WTI${axWti ? 'Y' : 'N'}(${wtiPct.toFixed(2)}%)] ${hitCount}개 충족 → ${eventLevel === 2 ? '3축 전부' : eventLevel === 1 ? '2축' : '미충족'} (stt_kospi 4:58/5:06)`,
+      };
+
+      // SHORT_COVER_SUSPECTED: EVENT >= 1 AND 외인 1D 순매수 >= 10000 (1조, 억원 단위)
+      const foreignNet1D = d.KOSPI_FOREIGN_NET_1D?.value ?? null;
+      if (eventLevel >= 1 && foreignNet1D !== null) {
+        const shortCover = foreignNet1D >= 10000 ? 1 : 0;
+        d.SHORT_COVER_SUSPECTED = {
+          name: 'short_cover_suspected',
+          value: shortCover,
+          date: dt,
+          formula: `EVENT=${eventLevel} AND 외인 1D 순매수 ${foreignNet1D}억원 ${foreignNet1D >= 10000 ? '≥' : '<'} 1조 → ${shortCover ? '숏커버 의심' : '해당 없음'}`,
+        };
+      } else {
+        d.SHORT_COVER_SUSPECTED = {
+          name: 'short_cover_suspected',
+          value: eventLevel === 0 ? 0 : null,
+          date: dt,
+          formula: eventLevel === 0
+            ? 'EVENT 미발동 → 숏커버 판정 대상 아님'
+            : `EVENT=${eventLevel} 이나 외인 순매수 결측`,
+        };
+      }
+    }
+  } catch {
+    /* 점프 이벤트 감지 실패는 파이프라인 막지 않음 */
+  }
+
   return d;
 }
