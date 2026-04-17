@@ -142,6 +142,16 @@ function latestBefore(arr: Array<{ date: string; value: number }>, date: string)
 
 interface Result { return_pct: number; max_drawdown: number; }
 
+interface BacktestOpts {
+  /** 일일 allocation diff 에 적용할 편도 거래비용 (basis points). 기본 5bp.
+   *  계산: Σ|Δpct|/2 × (bps/10000) — buy/sell 페어 평균이므로 /2.
+   *  0 설정 시 비활성. */
+  txCostBps?: number;
+  /** 샘플 날짜 필터. [fromDate, toDate] (ISO YYYY-MM-DD) 사이만 backtest. 미지정 시 전체 days 만큼 뒤에서 자른다. */
+  from?: string;
+  to?: string;
+}
+
 async function backtest(
   variant: Template,
   days: number,
@@ -149,10 +159,19 @@ async function backtest(
   fredHistories: Record<string, Array<{ date: string; value: number }>>,
   dxyHist: Array<{ date: string; value: number }>,
   nasdaqFull: Array<{ date: string; value: number }>,
+  opts: BacktestOpts = {},
 ): Promise<Result> {
-  const baseSlice = nasdaqFull.slice(-Math.min(days, nasdaqFull.length));
+  const txCostBps = opts.txCostBps ?? 5;
+  const txCostRate = txCostBps / 10000; // 5bp → 0.0005
+  let baseSlice: Array<{ date: string; value: number }>;
+  if (opts.from || opts.to) {
+    baseSlice = nasdaqFull.filter((p) => (!opts.from || p.date >= opts.from) && (!opts.to || p.date <= opts.to));
+  } else {
+    baseSlice = nasdaqFull.slice(-Math.min(days, nasdaqFull.length));
+  }
   const fredKeys = Object.keys(fredHistories);
   let pv = 100; let peak = 100; let maxDD = 0;
+  let prevAlloc: Record<string, number> | null = null;
   for (let i = 1; i < baseSlice.length; i++) {
     const date = baseSlice[i].date;
     const prevDate = baseSlice[i - 1].date;
@@ -178,18 +197,41 @@ async function backtest(
       const p1 = latestBefore(h, prevDate); const p2 = latestBefore(h, date);
       if (p1 && p2 && p1 > 0) dayR += (pct / 100) * ((p2 - p1) / p1);
     }
+    // Fix #2: 거래 비용 — 전일 alloc 대비 |Δ| 합의 절반 × 수수료율.
+    //   buy/sell 페어이므로 /2. 5bp 기본. 0 설정 시 비활성.
+    if (txCostRate > 0 && prevAlloc) {
+      let diffAbs = 0;
+      const keys = new Set([...Object.keys(alloc.allocations), ...Object.keys(prevAlloc)]);
+      for (const k of keys) {
+        const a = alloc.allocations[k] ?? 0;
+        const b = prevAlloc[k] ?? 0;
+        diffAbs += Math.abs(a - b);
+      }
+      const turnover = (diffAbs / 2) / 100; // %p → 비율
+      dayR -= turnover * txCostRate;
+    }
+    prevAlloc = { ...alloc.allocations };
     pv *= 1 + dayR; if (pv > peak) peak = pv;
     const dd = ((pv - peak) / peak) * 100; if (dd < maxDD) maxDD = dd;
   }
   return { return_pct: parseFloat((pv - 100).toFixed(2)), max_drawdown: parseFloat(maxDD.toFixed(2)) };
 }
 
-/** CLI 파싱 — --mode=decile | --mode=top1 (기본) + positional N + --output=<path>. 환경변수도 허용. */
-function parseArgs(): { mode: 'top1' | 'decile'; N: number; outputPath: string | null } {
+/** CLI 파싱 — --mode=decile | --mode=top1 (기본) + positional N + --output=<path>
+ *  + --tx-cost=<bps> (기본 5) + --walk-forward. 환경변수도 허용. */
+function parseArgs(): {
+  mode: 'top1' | 'decile';
+  N: number;
+  outputPath: string | null;
+  txCostBps: number;
+  walkForward: boolean;
+} {
   const rawArgs = process.argv.slice(2);
   let mode: 'top1' | 'decile' = 'top1';
   let nArg: string | undefined;
   let outputPath: string | null = null;
+  let txCostBps = 5;
+  let walkForward = false;
   for (const a of rawArgs) {
     if (a.startsWith('--mode=')) {
       const m = a.slice(7).toLowerCase();
@@ -199,6 +241,11 @@ function parseArgs(): { mode: 'top1' | 'decile'; N: number; outputPath: string |
     } else if (a === '--output') {
       // 값 없는 플래그 → 기본 경로 사용 (아래 main 에서 결정).
       outputPath = '';
+    } else if (a.startsWith('--tx-cost=')) {
+      const v = parseFloat(a.slice('--tx-cost='.length));
+      if (!Number.isNaN(v) && v >= 0) txCostBps = v;
+    } else if (a === '--walk-forward') {
+      walkForward = true;
     } else if (/^\d+$/.test(a)) {
       nArg = a;
     }
@@ -211,12 +258,13 @@ function parseArgs(): { mode: 'top1' | 'decile'; N: number; outputPath: string |
     outputPath = process.env.PORTFOLIO_SWEEP_OUTPUT;
   }
   const N = parseInt(nArg || '80', 10);
-  return { mode, N, outputPath };
+  return { mode, N, outputPath, txCostBps, walkForward };
 }
 
 async function main() {
-  const { mode, N, outputPath } = parseArgs();
-  console.log(`[portfolio-sweep] mode=${mode} N=${N}/regime${outputPath !== null ? ` output=${outputPath || '(auto)'}` : ''}`);
+  const { mode, N, outputPath, txCostBps, walkForward } = parseArgs();
+  const btOpts: BacktestOpts = { txCostBps };
+  console.log(`[portfolio-sweep] mode=${mode} N=${N}/regime tx-cost=${txCostBps}bp${walkForward ? ' walk-forward=on' : ''}${outputPath !== null ? ` output=${outputPath || '(auto)'}` : ''}`);
   // 9차 후속 Fix #3: 국면별 결과 구조 (current / top1 / decileMean / diff).
   const perRegimeOut: Record<string, {
     current: Record<string, number>;
@@ -238,10 +286,10 @@ async function main() {
   for (const k of fredKeys) fredHistories[k] = await readHistory('fred', k);
   const dxyHist = await readHistory('yahoo', 'DXY');
 
-  const base1y = await backtest(CURRENT_PRD, 252, histories, fredHistories, dxyHist, histories.nasdaq);
-  const base3y = await backtest(CURRENT_PRD, 756, histories, fredHistories, dxyHist, histories.nasdaq);
-  const base5y = await backtest(CURRENT_PRD, 1260, histories, fredHistories, dxyHist, histories.nasdaq);
-  const base10y = await backtest(CURRENT_PRD, 2520, histories, fredHistories, dxyHist, histories.nasdaq);
+  const base1y = await backtest(CURRENT_PRD, 252, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
+  const base3y = await backtest(CURRENT_PRD, 756, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
+  const base5y = await backtest(CURRENT_PRD, 1260, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
+  const base10y = await backtest(CURRENT_PRD, 2520, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
   console.log(`\n=== BASELINE (현 PRD) ===`);
   console.log(`  1Y:  ${base1y.return_pct}% (DD ${base1y.max_drawdown}%)`);
   console.log(`  3Y:  ${base3y.return_pct}% (DD ${base3y.max_drawdown}%)`);
@@ -268,10 +316,10 @@ async function main() {
       for (const [k, v] of Object.entries(reasons)) regimeReject[k] = (regimeReject[k] || 0) + v;
       const variant: Template = JSON.parse(JSON.stringify(CURRENT_PRD));
       variant[regime] = row as any;
-      const r1 = await backtest(variant, 252, histories, fredHistories, dxyHist, histories.nasdaq);
-      const r3 = await backtest(variant, 756, histories, fredHistories, dxyHist, histories.nasdaq);
-      const r5 = await backtest(variant, 1260, histories, fredHistories, dxyHist, histories.nasdaq);
-      const r10 = await backtest(variant, 2520, histories, fredHistories, dxyHist, histories.nasdaq);
+      const r1 = await backtest(variant, 252, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
+      const r3 = await backtest(variant, 756, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
+      const r5 = await backtest(variant, 1260, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
+      const r10 = await backtest(variant, 2520, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
       const sc = scoreFn(r1, r3, r5, r10);
       samples.push({ row, r1y: r1, r3y: r3, r5y: r5, r10y: r10, score: sc });
       if ((i + 1) % 5 === 0) process.stderr.write(`  ${i + 1}/${N}\n`);
@@ -351,10 +399,10 @@ async function main() {
   for (const r of REGIMES) {
     composed[r] = (mode === 'decile' ? decilePerRegime[r] : bestPerRegime[r].row) as any;
   }
-  const c1y = await backtest(composed, 252, histories, fredHistories, dxyHist, histories.nasdaq);
-  const c3y = await backtest(composed, 756, histories, fredHistories, dxyHist, histories.nasdaq);
-  const c5y = await backtest(composed, 1260, histories, fredHistories, dxyHist, histories.nasdaq);
-  const c10y = await backtest(composed, 2520, histories, fredHistories, dxyHist, histories.nasdaq);
+  const c1y = await backtest(composed, 252, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
+  const c3y = await backtest(composed, 756, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
+  const c5y = await backtest(composed, 1260, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
+  const c10y = await backtest(composed, 2520, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
 
   const header = mode === 'decile'
     ? 'COMPOSED (국면별 top-decile 평균) — BASE_ALLOCATIONS 재선정 후보'
