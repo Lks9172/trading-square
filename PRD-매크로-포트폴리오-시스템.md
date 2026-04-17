@@ -315,7 +315,7 @@
   - 2: 2차 분할매수 구간 (강한 조정) — 목표 비중의 33% 추가 투입
   - 3: 3차 분할매수 구간 (공포 극대화) — 나머지 34% 투입
 - **과열 배너** (OVERHEATED 시): "⚠️ 과열 구간 감지: 현금 +20%, 금 +5%로 방어 강화. 나스닥/한국/신흥국/구리 비중이 자동 축소됨."
-- **레버리지 게이트**: 허용/불허 상태 표시 (허용 시 최대 15%)
+- **레버리지 게이트**: 3단계 티어 표시 (SOFT 5% / MEDIUM 10% / HARD 15% / 미발동 0%)
 
 ---
 
@@ -547,15 +547,28 @@ score = 위 조건 중 충족 개수 (보조 포함 total=7)
   - level null (CHASE_LEVEL 미발급): 기존 binary CHASE_WARNING override 경로 유지 (하위 호환)
 ```
 
-**레버리지 허용 조건 (영상 1 기준):**
+**레버리지 허용 조건 (영상 1 원전 + 10차 Fix: 3단계 티어):**
+
+영상 1 원전(-25/35/<300K=HARD)을 보존하면서, 저점 유사 구간을 확대해 발동
+빈도를 실용 수준으로 조정. 실측상 지난 5년간 HARD 단일 조건은 0일 발동(너무 희소).
 
 ```
-IF 이격도 <= -25%
-AND VIX >= 35
-AND 실업수당 < 300K
-THEN leverage_allowed = true
-  → 2x ETF 허용, 총자산 15% 이내
-  → 목표 수익 20~30% 달성 시 일반 ETF로 복귀
+공통 게이트: 실업수당 < 300K (AND)
+
+IF 이격도 <= -25% AND VIX >= 35 → HARD 티어
+  → STRONG_BUY, 총자산 15% 이내
+
+ELIF 이격도 <= -15% AND VIX >= 30 → MEDIUM 티어
+  → BUY, 총자산 10% 이내
+
+ELIF 이격도 <= -5% AND VIX >= 30 → SOFT 티어
+  → BUY, 총자산 5% 이내
+
+ELSE → 티어 미발동, HOLD, 0% (레버리지 불허)
+
+판정 우선순위: HARD > MEDIUM > SOFT
+목표 수익 20~30% 달성 또는 60/90일 타이머 만료 시 REDUCE (일반 ETF로 복귀)
+LEVERAGE_TIER_RAW derived 발행 (0=none / 1=SOFT / 2=MEDIUM / 3=HARD)
 ```
 
 **위험 신호:**
@@ -1076,24 +1089,31 @@ IF position ≤ 0.1 (하단 근접, 원화 강세 극단):
 
 레버리지(2x ETF)는 극한 신호일 때만 허용하며, 자동 타이머로 관리된다 (영상 1 "2~3개월 짧게").
 
-**allocation 게이트 (감사 Fix #3):**
+**allocation 게이트 (감사 Fix #3 + 10차 Fix: 티어별 상한):**
 
 ```
-leverageAllowed = leverageSignal === 'BUY' || leverageSignal === 'STRONG_BUY'
+leverageCap = HARD → 15%, MEDIUM → 10%, SOFT → 5%, 없음 → 0%
+leverageAllowed = leverageCap > 0 AND signal ∈ {BUY, STRONG_BUY}
 
 기존은 === 'BUY' 만 통과시켜 STRONG_BUY 로 승격 시 레버리지 0% 로 비대칭 처리되는 모순 존재.
 3/3 조건 충족 후 승격된 STRONG_BUY 에서도 레버리지 허용되도록 수정.
+normalize 이후 leverageCap 초과분은 cash 로 이관.
 ```
 
-**진입 조건 (3개 모두 충족):**
+**진입 조건 (3단계 티어, 10차 Fix):**
 
 ```
-1. 나스닥 STRONG_BUY 신호
-2. 이격도 <= -25%
-3. VIX >= 35
-4. 실업수당 < 300K
+공통 게이트: 실업수당 < 300K
 
-→ 4개 조건 모두 만족 시에만 레버리지 허용
+HARD  : 이격도 ≤ -25% AND VIX ≥ 35 → STRONG_BUY, 15% 상한 (영상1 원전)
+MEDIUM: 이격도 ≤ -15% AND VIX ≥ 30 → BUY, 10% 상한
+SOFT  : 이격도 ≤ -5%  AND VIX ≥ 30 → BUY, 5%  상한
+
+판정 우선순위: HARD > MEDIUM > SOFT
+  → 티어 미발동 시 HOLD, 0% (레버리지 불허)
+
+배경: 영상1 원전(HARD) 단독은 실측 5년간 0일 발동. 저점 유사 구간(SOFT/MEDIUM)
+확대로 발동 빈도 실용화. 리스크는 티어별 상한(5/10/15%)으로 분할 통제.
 ```
 
 **자동 관리 (영상 1 §211-232 "시스템적 투자 규칙"):**
