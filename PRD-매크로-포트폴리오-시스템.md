@@ -584,13 +584,18 @@ gold_score = Σ(충족 조건 × 가중치) / 8.0 × 100
 < 30: REDUCE
 ```
 
-**8차 TOP7 추가 — GOLD_PRIORITY_SCORE 보조 조건:**
+**8차 TOP7 추가 — GOLD_PRIORITY_SCORE 보조 조건 (4축 완성):**
 
 ```
-GOLD_PRIORITY_SCORE: derived 2축 (REAL_YIELD_TREND 가중 4, DXY_TREND 가중 3) / 7 → 0~1
-  - ≥ 0.7: reasons += "금 우선순위 스코어 ≥ 0.7 → 실질금리·DXY 2축 금 매수 강화"
+GOLD_PRIORITY_SCORE: derived 4축 가중합 / 10 → 0~1
+  - 축 1 (가중 4): REAL_YIELD_TREND < 0 (실질금리 하락)
+  - 축 2 (가중 3): DXY_TREND < -0.5 (달러 단기 약세)
+  - 축 3 (가중 2): manualInputs.cbBuying === true (중앙은행 매수)
+  - 축 4 (가중 1): manualInputs.geoRisk >= 3 (지정학 위험 고조)
+  → 총합 / 10 → 0~1 정규화
+  - ≥ 0.7: reasons += "금 우선순위 스코어 ≥ 0.7 → 4축 (실질금리·DXY·CB매수·지정학) 금 매수 강화"
   - ≤ 0.3: unmetReasons += "금 우호 축 부족"
-  (cbBuying/geoRisk 2축은 manualInputs 접근 제약으로 위 main 신호에서 재가산)
+  (과거 일자 재계산 등 manualInputs 미전달 시 2축 폴백 /7 동작)
 ```
 
 **예외 규칙 (영상 2):**
@@ -844,6 +849,21 @@ IF 국면 == RISK_ON:
 - **PANIC_BUT_OK**: 레버리지 10% 허용 → 영상 1 "저점 집중 2~3개월 짧게" 구현
 - **STAGFLATION** (영상4 §145): 물가↑+성장↓ → 금·은 방어, 위험자산 -50% 수준 축소
 - **BOND_VIGILANTE** (영상4 §137-147): 장기금리 급등 → 현금·금 극단 방어 (gold 35 최대치)
+
+**재선정 도구 — Top-Decile Sweep (샘플 내 과적합 완화):**
+
+현재 수치는 Monte Carlo sweep **top1** (단일 최적해) 결과라 샘플 내 과적합 리스크가 있다.
+이를 보완하기 위해 `server/src/scripts/portfolio-sweep.ts` 에 `--mode=decile` 옵션 추가:
+상위 10% 조합의 **평균 비중** 을 regime 별로 출력한다 (robust 재선정 후보).
+
+```bash
+# 실행 (연산 비용 큼 — 수동 트리거)
+cd server && npx tsx src/scripts/portfolio-sweep.ts --mode=decile
+# 출력: regime 별 top1 / top10% 평균 / 현재 BASE diff 표
+```
+
+**실제 BASE_ALLOCATIONS 숫자 교체는 별도 세션에서 검증 후 사용자 승인 거쳐 진행.**
+이 도구는 후보 제시만 수행하며, 자동 덮어쓰기는 하지 않는다.
 
 **핵심 통찰:**
 - NASDAQ과 달리 한국(KOSPI) + 신흥국은 **환율과 달러 약세**에 민감
