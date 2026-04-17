@@ -2064,5 +2064,69 @@ export async function computeDerived(
     /* 점프 이벤트 감지 실패는 파이프라인 막지 않음 */
   }
 
+  // === NASDAQ/KOSPI CHASE_LEVEL 계층화 (9차 gap TOP3 Fix #3) ===
+  // video3 추격금지 원칙을 0/1/2/3 soft/medium/hard 로 정량화.
+  //   0 (none): 조건 없음
+  //   1 (soft): 이격도 ≥ +15% 또는 streak ≥ 15일
+  //   2 (medium): level=1 조건 + VIX < 15 (방심 구간)
+  //   3 (hard): streak ≥ 25일 또는 이격도 ≥ +20%
+  // 기존 NASDAQ_CHASE_WARNING / KOSPI_CHASE_WARNING (binary) 는 signals.ts 소비 중이라 병렬 유지.
+  // 히스테리시스는 기존 flagPersistence 로 WARNING 만 대상, LEVEL 은 raw 값.
+  try {
+    const vixForLevel = val(raw, 'VIXCLS');
+    const computeChaseLevel = (disparity: number | null, streak: number | null): { level: number | null; reason: string } => {
+      if (disparity === null && streak === null) return { level: null, reason: '이격도·streak 결측' };
+      // HARD 우선 검사
+      const hardDisparity = disparity !== null && disparity >= 20;
+      const hardStreak = streak !== null && streak >= 25;
+      if (hardDisparity || hardStreak) {
+        const parts: string[] = [];
+        if (hardStreak) parts.push(`streak ${streak}일`);
+        if (hardDisparity) parts.push(`이격 +${disparity!.toFixed(1)}%`);
+        return { level: 3, reason: `${parts.join(' + ')} → 3(hard)` };
+      }
+      const softDisparity = disparity !== null && disparity >= 15;
+      const softStreak = streak !== null && streak >= 15;
+      if (softDisparity || softStreak) {
+        const parts: string[] = [];
+        if (softStreak) parts.push(`streak ${streak}일`);
+        if (softDisparity) parts.push(`이격 +${disparity!.toFixed(1)}%`);
+        // level 2 = soft + VIX < 15
+        if (vixForLevel !== null && vixForLevel < 15) {
+          return { level: 2, reason: `${parts.join(' + ')} + VIX ${vixForLevel.toFixed(1)}<15 → 2(medium, 방심구간)` };
+        }
+        return { level: 1, reason: `${parts.join(' + ')} → 1(soft)` };
+      }
+      return {
+        level: 0,
+        reason: `이격 ${disparity?.toFixed(1) ?? 'n/a'}% / streak ${streak ?? 'n/a'}일 — 추격 조건 미충족`,
+      };
+    };
+
+    // NASDAQ
+    const nDisparity = d.NASDAQ_DISPARITY?.value ?? null;
+    const nStreak = d.NASDAQ_DISPARITY_STREAK_OVERHEATED?.value ?? null;
+    const nasdaqResult = computeChaseLevel(nDisparity, nStreak);
+    d.NASDAQ_CHASE_LEVEL = {
+      name: 'nasdaq_chase_level',
+      value: nasdaqResult.level === null ? null : Math.max(0, Math.min(3, nasdaqResult.level)),
+      date: dt,
+      formula: `${nasdaqResult.reason} (video3 추격금지 0/1/2/3 계층)`,
+    };
+
+    // KOSPI
+    const kDisparity = d.KOSPI_DISPARITY?.value ?? null;
+    const kStreak = d.KOSPI_DISPARITY_STREAK_OVERHEATED?.value ?? null;
+    const kospiResult = computeChaseLevel(kDisparity, kStreak);
+    d.KOSPI_CHASE_LEVEL = {
+      name: 'kospi_chase_level',
+      value: kospiResult.level === null ? null : Math.max(0, Math.min(3, kospiResult.level)),
+      date: dt,
+      formula: `${kospiResult.reason} (video3 추격금지 0/1/2/3 계층)`,
+    };
+  } catch {
+    /* CHASE_LEVEL 실패는 파이프라인 막지 않음 */
+  }
+
   return d;
 }
