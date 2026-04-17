@@ -1,17 +1,38 @@
 import { Router, Request, Response } from 'express';
-import { readHistory } from '../state/history-store';
+import { readHistory, recomputeFullDerivedForDate } from '../state/history-store';
 import { classifyRegime } from '../engines/regime';
 import { computeSignals } from '../engines/signals';
 import { computeAllocation } from '../engines/allocation';
 import { DEFAULT_PROFILE } from '../state/cache';
 import { MarketDataPoint, DerivedIndicator } from '../types/indicators';
+import { inferAutoManualInputsFromState, mergeEffectiveManualInputs } from '../services/policy-inputs';
 
 const router = Router();
+
+// 2026-04 개선: /portfolio?years=N 은 N년 × 252일 루프 (recomputeDerived + regime +
+// signals + allocation) — 무거운 연산. KST 07:00 append 외에 결과가 바뀔 일 없으므로
+// in-memory TTL 캐시 적용. 기본 6h (append cycle 2배), years 별 독립.
+interface PortfolioCacheEntry {
+  value: unknown;
+  at: number;
+}
+const portfolioCache = new Map<number, PortfolioCacheEntry>();
+const PORTFOLIO_TTL_MS = 6 * 60 * 60 * 1000;
+
+function regimeBandFromValue(value: number): number {
+  if (value >= 100) return 5;
+  if (value >= 80) return 4;
+  if (value >= 60) return 3;
+  if (value >= 40) return 2;
+  if (value >= 20) return 1;
+  return 0;
+}
 
 router.get('/summary', async (_req: Request, res: Response) => {
   try {
     const nasdaqHist = await readHistory('yahoo', 'NASDAQ');
     const regimeHist = await readHistory('signal', 'REGIME');
+    const regimeLabelHist = await readHistory('signal', 'REGIME_LABEL');
     const nasdaqSignalHist = await readHistory('signal', 'NASDAQ');
 
     if (!nasdaqHist.length || !regimeHist.length) {
@@ -41,10 +62,16 @@ router.get('/summary', async (_req: Request, res: Response) => {
         if (dd < maxDrawdown) maxDrawdown = dd;
       }
 
-      const regimeSlice = regimeHist.slice(-Math.min(days, regimeHist.length));
+      const regimeSlice = (regimeLabelHist.length > 0 ? regimeLabelHist : regimeHist).slice(-Math.min(days, regimeLabelHist.length > 0 ? regimeLabelHist.length : regimeHist.length));
       let regimeChanges = 0;
       for (let i = 1; i < regimeSlice.length; i++) {
-        if (regimeSlice[i].value !== regimeSlice[i - 1].value) regimeChanges++;
+        const prev = regimeLabelHist.length > 0
+          ? regimeSlice[i - 1].value
+          : regimeBandFromValue(regimeSlice[i - 1].value);
+        const current = regimeLabelHist.length > 0
+          ? regimeSlice[i].value
+          : regimeBandFromValue(regimeSlice[i].value);
+        if (current !== prev) regimeChanges++;
       }
 
       return {
@@ -77,6 +104,13 @@ router.get('/portfolio', async (req: Request, res: Response) => {
     const yearsParam = parseInt(String(req.query.years || '3'), 10);
     const days = Math.min(yearsParam * 252, 1260);
 
+    // 2026-04 개선: TTL 캐시 히트 시 즉시 반환 (연산 0ms).
+    const cached = portfolioCache.get(yearsParam);
+    if (cached && Date.now() - cached.at < PORTFOLIO_TTL_MS) {
+      res.json(cached.value);
+      return;
+    }
+
     const assets: Record<string, { key: string; source: string }> = {
       nasdaq: { key: 'NASDAQ', source: 'yahoo' },
       gold: { key: 'GOLD', source: 'yahoo' },
@@ -87,17 +121,44 @@ router.get('/portfolio', async (req: Request, res: Response) => {
       leverage: { key: 'TQQQ', source: 'yahoo' },  // 3x 나스닥 ETF — leverage 비중 실현 수익률
     };
 
+    // 2026-04 개선: history 읽기 병렬화 (기존 순차 await 으로 16개 file I/O 누적).
+    const assetEntries = Object.entries(assets);
+    const fredKeys = ['DGS10', 'T10YIE', 'T10Y2Y', 'VIXCLS', 'BAMLH0A0HYM2', 'STLFSI4', 'ICSA', 'UNRATE', 'EFFR'];
+    const [
+      assetResults,
+      fredResults,
+      dxyHist,
+      wtiHistory,
+      hygHistory,
+      iefHistory,
+      wm2nsHistory,
+      dgs30History,
+      indproHistory,
+      usdkrwHistory,
+      fearGreedHistory,
+      pcRatioHistory,
+      aaiiHistory,
+      naaimHistory,
+    ] = await Promise.all([
+      Promise.all(assetEntries.map(([, { key, source }]) => readHistory(source, key))),
+      Promise.all(fredKeys.map((k) => readHistory('fred', k))),
+      readHistory('yahoo', 'DXY'),
+      readHistory('yahoo', 'WTI'),
+      readHistory('yahoo', 'HYG'),
+      readHistory('yahoo', 'IEF'),
+      readHistory('fred', 'WM2NS'),
+      readHistory('fred', 'DGS30'),
+      readHistory('fred', 'INDPRO'),
+      readHistory('yahoo', 'USDKRW'),
+      readHistory('cnn', 'FEAR_GREED'),
+      readHistory('sentiment', 'PC_RATIO_10D'),
+      readHistory('sentiment', 'AAII_BULL_BEAR_SPREAD'),
+      readHistory('sentiment', 'NAAIM_EXPOSURE'),
+    ]);
     const histories: Record<string, Array<{ date: string; value: number }>> = {};
-    for (const [name, { key, source }] of Object.entries(assets)) {
-      histories[name] = await readHistory(source, key);
-    }
-
-    const fredKeys = ['DGS10', 'T10YIE', 'T10Y2Y', 'VIXCLS', 'BAMLH0A0HYM2', 'STLFSI4', 'ICSA', 'UNRATE'];
+    assetEntries.forEach(([name], i) => { histories[name] = assetResults[i]; });
     const fredHistories: Record<string, Array<{ date: string; value: number }>> = {};
-    for (const key of fredKeys) {
-      fredHistories[key] = await readHistory('fred', key);
-    }
-    const dxyHist = await readHistory('yahoo', 'DXY');
+    fredKeys.forEach((k, i) => { fredHistories[k] = fredResults[i]; });
 
     const nasdaqHist = histories.nasdaq;
     if (nasdaqHist.length < 10) {
@@ -129,25 +190,60 @@ router.get('/portfolio', async (req: Request, res: Response) => {
       }
       const dxyVal = latestBefore(dxyHist, prevDate);
       if (dxyVal !== null) raw['DXY'] = { code: 'DXY', value: dxyVal, date: prevDate, source: 'YAHOO' };
-
-      const derived: Record<string, DerivedIndicator> = {};
-      const dgs10 = raw.DGS10?.value;
-      const t10yie = raw.T10YIE?.value;
-      if (dgs10 !== undefined && t10yie !== undefined) {
-        derived.REAL_YIELD = { name: 'real_yield', value: dgs10 - t10yie, date: prevDate, formula: '' };
+      const rawDefs: Array<[string, Array<{ date: string; value: number }>, MarketDataPoint['source']]> = [
+        ['NASDAQ', nasdaqHist, 'YAHOO'],
+        ['GOLD', histories.gold, 'YAHOO'],
+        ['SILVER', histories.silver, 'YAHOO'],
+        ['COPPER', histories.copper, 'YAHOO'],
+        ['KOSPI', histories.korea, 'YAHOO'],
+        ['WTI', wtiHistory, 'YAHOO'],
+        ['USDKRW', usdkrwHistory, 'YAHOO'],
+        ['FEAR_GREED', fearGreedHistory, 'CNN'],
+        ['PC_RATIO_10D', pcRatioHistory, 'CBOE'],
+        ['AAII_BULL_BEAR_SPREAD', aaiiHistory, 'CALC'],
+        ['NAAIM_EXPOSURE', naaimHistory, 'CALC'],
+      ];
+      for (const [key, hist, source] of rawDefs) {
+        const value = latestBefore(hist, prevDate);
+        if (value !== null) raw[key] = { code: key, value, date: prevDate, source };
       }
 
-      const nasdaqEligible = nasdaqHist.filter((p) => p.date <= prevDate);
-      if (nasdaqEligible.length >= 200) {
-        const sma200 = nasdaqEligible.slice(-200).reduce((s, p) => s + p.value, 0) / 200;
-        const current = nasdaqEligible[nasdaqEligible.length - 1].value;
-        derived.NASDAQ_DISPARITY = { name: 'nasdaq_disparity_200', value: ((current - sma200) / sma200) * 100, date: prevDate, formula: '' };
-        derived.NASDAQ_ABOVE_200DMA = { name: 'nasdaq_above_200dma', value: current > sma200 ? 1 : 0, date: prevDate, formula: '' };
-      }
+      const derived: Record<string, DerivedIndicator> = await recomputeFullDerivedForDate(
+        prevDate,
+        raw,
+        nasdaqHist,
+        {},
+        {
+          todayIso: '',
+          kospiHistory: histories.korea,
+          hygHistory,
+          iefHistory,
+          m2Wm2nsHistory: wm2nsHistory,
+          dgs30History,
+          dxyHistory: dxyHist,
+          wtiHistory,
+          indproHistory,
+          usdkrwHistory,
+        },
+      );
 
-      const regime = classifyRegime({ raw, derived, manualInputs: DEFAULT_PROFILE.manualInputs });
-      const signals = computeSignals(raw, derived, regime, DEFAULT_PROFILE);
-      const allocation = computeAllocation(regime.regime, regime.score, signals, derived, raw, 'long');
+      const effectiveInputs = mergeEffectiveManualInputs(
+        DEFAULT_PROFILE.manualInputs,
+        inferAutoManualInputsFromState({
+          raw,
+          derived,
+          effrHistory: fredHistories.EFFR.filter((p) => p.date <= prevDate).slice(-60).reverse(),
+          t10y2yHistory: fredHistories.T10Y2Y.filter((p) => p.date <= prevDate).slice(-10).reverse(),
+          icsaHistory: fredHistories.ICSA.filter((p) => p.date <= prevDate).slice(-10).reverse(),
+          goldHistory: histories.gold.filter((p) => p.date <= prevDate).slice(-60).reverse(),
+          dxyHistory: dxyHist.filter((p) => p.date <= prevDate).slice(-60).reverse(),
+        }),
+        DEFAULT_PROFILE.manualInputs,
+      );
+      const effectiveProfile = { ...DEFAULT_PROFILE, manualInputs: effectiveInputs };
+      const regime = classifyRegime({ raw, derived, manualInputs: effectiveInputs });
+      const signals = computeSignals(raw, derived, regime, effectiveProfile);
+      const allocation = computeAllocation(regime.regime, regime.score, signals, derived, raw, 'long', undefined, effectiveProfile);
 
       let dailyReturn = 0;
       for (const [assetName, pct] of Object.entries(allocation.allocations)) {
@@ -194,7 +290,7 @@ router.get('/portfolio', async (req: Request, res: Response) => {
 
     const lastEntry = portfolioSeries[portfolioSeries.length - 1] || { portfolio: 100, buyhold: 100 };
 
-    res.json({
+    const payload = {
       years: yearsParam,
       data_points: portfolioSeries.length,
       portfolio: {
@@ -209,7 +305,9 @@ router.get('/portfolio', async (req: Request, res: Response) => {
       },
       alpha: parseFloat(((lastEntry.portfolio - 100) - (lastEntry.buyhold - 100)).toFixed(2)),
       series: portfolioSeries,
-    });
+    };
+    portfolioCache.set(yearsParam, { value: payload, at: Date.now() });
+    res.json(payload);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Portfolio backtest failed' });
   }
