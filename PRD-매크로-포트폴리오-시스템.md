@@ -876,16 +876,41 @@ IF 국면 == RISK_ON:
 이를 보완하기 위해 `server/src/scripts/portfolio-sweep.ts` 에 `--mode=decile` 옵션 추가:
 상위 10% 조합의 **평균 비중** 을 regime 별로 출력한다 (robust 재선정 후보).
 
+**영상 원칙 envelope 제약 (10차 개선)** — Monte Carlo 후보 필터:
+
+| 제약 | 적용 레짐 | 근거 |
+|---|---|---|
+| cash ≥ 5 | 전 레짐 | 최소 현금 쿠션 |
+| gold ≥ 5 | RISK_ON/NEUTRAL/CAUTION/CORRECTION | 구조적 헷지 |
+| emerging ≤ 15 | 전 레짐 | 신흥국 노출 상한 |
+| emerging ≤ 10 | CORRECTION/PANIC/RECESSION | FX 악화 시 외인 이탈 |
+| silver ≤ 5 | CAUTION/CORRECTION | 경기확장 전용 (영상5 정합) |
+
+제약 위반 샘플은 자동 drop + 재샘플링. reject 통계는 레짐별 로그.
+
+**Walk-forward OOS (과적합 진단):**
+- train: 2016-01-01 ~ 2023-12-31 / test: 2024-01-01 ~ 현재
+- alpha_decay = train_α − test_α (%p) 측정, 15%p 초과 시 과적합 경고
+- `--walk-forward` 플래그 지정 시 활성
+
+**거래 비용:** 일일 allocation diff 절댓값 합의 절반 × 5bp (`--tx-cost=<bps>` 기본 5bp, 0 비활성).
+
 ```bash
-# 실행 (연산 비용 큼 — 수동 트리거)
+# 기본 (envelope 제약 + tx-cost 5bp, N=100)
 cd server && npx tsx src/scripts/portfolio-sweep.ts --mode=decile
 # 출력: regime 별 top1 / top10% 평균 / 현재 BASE diff 표
 
-# 9차 후속 Fix #3: --output 플래그로 JSON 저장
-cd server && PORTFOLIO_SWEEP_MODE=decile npx tsx src/scripts/portfolio-sweep.ts 40 --output
+# 권장 (walk-forward + JSON 저장, N=100)
+cd server && PORTFOLIO_SWEEP_MODE=decile npx tsx src/scripts/portfolio-sweep.ts 100 --walk-forward --tx-cost=5 --output
 # 저장 경로: server/data/sweep-results/top-decile-<ISO-timestamp>.json (자동 생성)
 #   또는 --output=<path> 로 명시 경로 지정
-# JSON 스키마: { ranAt, mode, N, baseline, composed, perRegime:{ [regime]: {current, top1, decileMean, diff, top1Score} } }
+# 연산 여유 있으면 N=200 권장 (수렴 안정성)
+# JSON 스키마: {
+#   ranAt, mode, N, txCostBps, walkForward:{train,test,alpha_decay,overfit_warning},
+#   baseline, composed,
+#   perRegime:{ [regime]: {current, top1, decileMean, diff, top1Score,
+#                          sampleStats, sampleWarning, activeDays, envelopeViolations} }
+# }
 ```
 
 **실제 BASE_ALLOCATIONS 숫자 교체는 별도 세션에서 검증 후 사용자 승인 거쳐 진행.**
