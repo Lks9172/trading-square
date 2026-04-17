@@ -66,9 +66,41 @@ const CONSTRAINTS: Record<Regime, Record<string, [number, number]>> = {
 const REGIMES: Regime[] = ['RISK_ON', 'NEUTRAL', 'CAUTION', 'CORRECTION', 'PANIC_BUT_OK', 'RECESSION_RISK'];
 const ASSETS = ['cash', 'nasdaq', 'leverage', 'gold', 'silver', 'copper', 'korea', 'emerging'];
 
-/** 제약 내에서 랜덤 균등 샘플 → 정규화하여 합 100. 제약 밖이면 재시도. */
-function sampleRow(regime: Regime): Record<string, number> {
+/**
+ * 영상 원칙 envelope 제약 — Monte Carlo 후보 필터.
+ *   - 모든 레짐 cash ≥ 5 (최소 현금 쿠션)
+ *   - RISK_ON/NEUTRAL/CAUTION/CORRECTION gold ≥ 5 (구조적 헷지)
+ *   - 모든 레짐 emerging ≤ 15, FX 악화 구간(CORRECTION/PANIC/RECESSION) emerging ≤ 10
+ *   - CAUTION/CORRECTION silver ≤ 5 (경기확장 아닌 국면에서 과대 금지 — video5 정합)
+ * sweep 후보 생성 시 위반 조합은 reject → 재샘플링. reject 통계는 호출부에서 집계.
+ * PANIC/RECESSION 은 gold 하한 미적용 (타 방어 자산 우선 구조).
+ */
+function validateEnvelopeConstraints(
+  alloc: Record<string, number>,
+  regime: Regime,
+): { ok: boolean; reason?: string } {
+  if ((alloc.cash ?? 0) < 5) return { ok: false, reason: `${regime} cash<5` };
+  if ((regime === 'RISK_ON' || regime === 'NEUTRAL' || regime === 'CAUTION' || regime === 'CORRECTION')
+      && (alloc.gold ?? 0) < 5) {
+    return { ok: false, reason: `${regime} gold<5` };
+  }
+  if ((alloc.emerging ?? 0) > 15) return { ok: false, reason: `${regime} emerging>15` };
+  if ((regime === 'CORRECTION' || regime === 'PANIC_BUT_OK' || regime === 'RECESSION_RISK')
+      && (alloc.emerging ?? 0) > 10) {
+    return { ok: false, reason: `${regime} emerging>10 (FX)` };
+  }
+  if ((regime === 'CAUTION' || regime === 'CORRECTION') && (alloc.silver ?? 0) > 5) {
+    return { ok: false, reason: `${regime} silver>5 (non-expansion)` };
+  }
+  return { ok: true };
+}
+
+/** 제약 내에서 랜덤 균등 샘플 → 정규화하여 합 100. 제약 밖이면 재시도.
+ *  반환 `rejected` 는 validateEnvelopeConstraints 로 drop 한 횟수. */
+function sampleRow(regime: Regime): { row: Record<string, number>; rejected: number; reasons: Record<string, number> } {
   const cs = CONSTRAINTS[regime];
+  const reasons: Record<string, number> = {};
+  let rejected = 0;
   for (let attempt = 0; attempt < 500; attempt++) {
     const row: Record<string, number> = {};
     for (const a of ASSETS) {
@@ -86,15 +118,21 @@ function sampleRow(regime: Regime): Record<string, number> {
     }
     if (!valid) continue;
     // 반올림 오차 보정
-    let s2 = Object.values(scaled).reduce((s, v) => s + v, 0);
+    const s2 = Object.values(scaled).reduce((s, v) => s + v, 0);
     if (s2 !== 100) {
       scaled.nasdaq += 100 - s2;
       if (scaled.nasdaq < cs.nasdaq[0] || scaled.nasdaq > cs.nasdaq[1]) continue;
     }
-    return scaled;
+    const envelopeCheck = validateEnvelopeConstraints(scaled, regime);
+    if (!envelopeCheck.ok) {
+      rejected += 1;
+      if (envelopeCheck.reason) reasons[envelopeCheck.reason] = (reasons[envelopeCheck.reason] || 0) + 1;
+      continue;
+    }
+    return { row: scaled, rejected, reasons };
   }
-  // fallback: current PRD row
-  return { ...CURRENT_PRD[regime] };
+  // fallback: current PRD row (500회 실패 시 — envelope 체크 없이 반환)
+  return { row: { ...CURRENT_PRD[regime] }, rejected, reasons };
 }
 
 function latestBefore(arr: Array<{ date: string; value: number }>, date: string): number | null {
@@ -222,8 +260,12 @@ async function main() {
   for (const regime of REGIMES) {
     process.stderr.write(`\n[${regime}] sampling N=${N} (1Y+3Y+5Y+10Y) ...\n`);
     const samples: Array<{ row: Record<string, number>; r1y: Result; r3y: Result; r5y: Result; r10y: Result; score: number }> = [];
+    let regimeRejected = 0;
+    const regimeReject: Record<string, number> = {};
     for (let i = 0; i < N; i++) {
-      const row = sampleRow(regime);
+      const { row, rejected, reasons } = sampleRow(regime);
+      regimeRejected += rejected;
+      for (const [k, v] of Object.entries(reasons)) regimeReject[k] = (regimeReject[k] || 0) + v;
       const variant: Template = JSON.parse(JSON.stringify(CURRENT_PRD));
       variant[regime] = row as any;
       const r1 = await backtest(variant, 252, histories, fredHistories, dxyHist, histories.nasdaq);
@@ -271,6 +313,11 @@ async function main() {
     }
     console.log(`[top-decile mean] N=${topDecile.length}/${samples.length} → ${JSON.stringify(meanRow)}`);
     console.log(`[top1 vs decile diff] ${Object.keys(top5[0].row).map((k) => `${k}:${top5[0].row[k]}→${meanRow[k]}`).join(' ')}`);
+    // Fix #1: envelope 제약 reject 통계.
+    if (regimeRejected > 0) {
+      const reasonStr = Object.entries(regimeReject).sort((a, b) => b[1] - a[1]).map(([r, c]) => `${r}×${c}`).join(', ');
+      console.log(`[envelope-reject] ${regime} total=${regimeRejected} (${reasonStr})`);
+    }
 
     bestPerRegime[regime] = top5[0];
     decilePerRegime[regime] = meanRow;
