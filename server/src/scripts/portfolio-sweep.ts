@@ -267,7 +267,7 @@ async function main() {
   const btOpts: BacktestOpts = { txCostBps };
   console.log(`[portfolio-sweep] mode=${mode} N=${N}/regime tx-cost=${txCostBps}bp${walkForward ? ' walk-forward=on' : ''}${outputPath !== null ? ` output=${outputPath || '(auto)'}` : ''}`);
   if (N < 100) console.log(`  (권장) N=100 이상 — 연산 여유 있으면 200 권장 (수렴 안정성).`);
-  // 9차 후속 Fix #3 + 이번 Fix #4/#5: 국면별 결과 구조.
+  // 9차 후속 Fix #3 + 이번 Fix #4/#5/#6: 국면별 결과 구조.
   const perRegimeOut: Record<string, {
     current: Record<string, number>;
     top1: Record<string, number>;
@@ -275,6 +275,9 @@ async function main() {
     diff: Record<string, number>;
     top1Score: { r1y: number; r3y: number; r5y: number; r10y: number; dd10y: number; score: number } | null;
     sampleStats: { requested: number; valid: number; rejected: number; rejectReasons: Record<string, number> };
+    sampleWarning: string | null;
+    activeDays: number;
+    envelopeViolations: string[]; // Fix #6: decileMean 이 envelope 어긴 항목들
   }> = {};
 
   const assets: Record<string, { key: string; source: string }> = {
@@ -288,6 +291,31 @@ async function main() {
   const fredHistories: Record<string, Array<{ date: string; value: number }>> = {};
   for (const k of fredKeys) fredHistories[k] = await readHistory('fred', k);
   const dxyHist = await readHistory('yahoo', 'DXY');
+
+  // Fix #5: 레짐 활성일 scan — 전체 10Y 기간 각 레짐 classifyRegime 호출 횟수.
+  //   RISK_ON/NEUTRAL 외 레짐이 30일 미만이면 sweep 결과 신뢰도 낮음 경고.
+  const regimeActiveDays: Record<string, number> = {};
+  {
+    const scanSlice = histories.nasdaq.slice(-Math.min(2520, histories.nasdaq.length));
+    for (let i = 1; i < scanSlice.length; i++) {
+      const prevDate = scanSlice[i - 1].date;
+      const raw: Record<string, MarketDataPoint> = {};
+      for (const k of Object.keys(fredHistories)) { const v = latestBefore(fredHistories[k], prevDate); if (v !== null) raw[k] = { code: k, value: v, date: prevDate, source: 'FRED' }; }
+      const dxyVal = latestBefore(dxyHist, prevDate); if (dxyVal !== null) raw.DXY = { code: 'DXY', value: dxyVal, date: prevDate, source: 'YAHOO' };
+      const derived: Record<string, DerivedIndicator> = {};
+      if (raw.DGS10 && raw.T10YIE) derived.REAL_YIELD = { name: 'real_yield', value: raw.DGS10.value - raw.T10YIE.value, date: prevDate, formula: '' };
+      const nqEl = histories.nasdaq.filter((p) => p.date <= prevDate);
+      if (nqEl.length >= 200) {
+        const sma200 = nqEl.slice(-200).reduce((s, p) => s + p.value, 0) / 200;
+        const cur = nqEl[nqEl.length - 1].value;
+        derived.NASDAQ_DISPARITY = { name: 'nasdaq_disparity_200', value: ((cur - sma200) / sma200) * 100, date: prevDate, formula: '' };
+        derived.NASDAQ_ABOVE_200DMA = { name: 'nasdaq_above_200dma', value: cur > sma200 ? 1 : 0, date: prevDate, formula: '' };
+      }
+      const rr = classifyRegime({ raw, derived, manualInputs: DEFAULT_PROFILE.manualInputs });
+      regimeActiveDays[rr.regime] = (regimeActiveDays[rr.regime] || 0) + 1;
+    }
+    console.log(`\n[regime active-days 10Y scan] ${JSON.stringify(regimeActiveDays)}`);
+  }
 
   const base1y = await backtest(CURRENT_PRD, 252, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
   const base3y = await backtest(CURRENT_PRD, 756, histories, fredHistories, dxyHist, histories.nasdaq, btOpts);
@@ -399,8 +427,32 @@ async function main() {
         rejected: regimeRejected,
         rejectReasons: regimeReject,
       },
+      // Fix #5: 저표본 레짐 경고. RISK_ON/NEUTRAL 외 레짐 활성일 < 30 이면 라벨.
+      activeDays: regimeActiveDays[regime] || 0,
+      sampleWarning: ((): string | null => {
+        const d = regimeActiveDays[regime] || 0;
+        if (regime !== 'RISK_ON' && regime !== 'NEUTRAL' && d < 30) {
+          return `표본 부족 (활성일 ${d} < 30) — 신뢰도 낮음`;
+        }
+        return null;
+      })(),
+      // Fix #6: decileMean envelope 준수 체크. sampleRow 재샘플링에도 meanRow 정규화 과정에서 ±2 허용오차로 위반 가능.
+      envelopeViolations: ((): string[] => {
+        const violations: string[] = [];
+        if ((meanRow.cash ?? 0) < 5) violations.push(`cash=${meanRow.cash} (기준 ≥5)`);
+        if ((regime === 'RISK_ON' || regime === 'NEUTRAL' || regime === 'CAUTION' || regime === 'CORRECTION')
+            && (meanRow.gold ?? 0) < 5) violations.push(`gold=${meanRow.gold} (기준 ≥5)`);
+        if ((meanRow.emerging ?? 0) > 15) violations.push(`emerging=${meanRow.emerging} (기준 ≤15)`);
+        if ((regime === 'CORRECTION' || regime === 'PANIC_BUT_OK' || regime === 'RECESSION_RISK')
+            && (meanRow.emerging ?? 0) > 10) violations.push(`emerging=${meanRow.emerging} (FX 악화 기준 ≤10)`);
+        if ((regime === 'CAUTION' || regime === 'CORRECTION') && (meanRow.silver ?? 0) > 5)
+          violations.push(`silver=${meanRow.silver} (경기확장 아님 기준 ≤5)`);
+        return violations;
+      })(),
     };
-    console.log(`[sample-stats] ${regime} valid=${samples.length}/${N} (envelope-rejected ${regimeRejected})`);
+    const activeDaysStr = regimeActiveDays[regime] || 0;
+    const warnTag = perRegimeOut[regime].sampleWarning ? `  ⚠️ ${perRegimeOut[regime].sampleWarning}` : '';
+    console.log(`[sample-stats] ${regime} valid=${samples.length}/${N} (envelope-rejected ${regimeRejected}) activeDays=${activeDaysStr}${warnTag}`);
   }
 
   // composed optimal: mode 에 따라 top1 또는 top-decile 평균 합침.
@@ -426,6 +478,24 @@ async function main() {
   console.log(`  10Y: ${c10y.return_pct}% (dd ${c10y.max_drawdown}%) Δ vs PRD = ${(c10y.return_pct - base10y.return_pct).toFixed(2)}%p`);
   if (mode === 'decile') {
     console.log(`\n(주의) 위 composed 는 BASE_ALLOCATIONS 자동 교체 대상이 아니다. 사용자 검토 후 별도 커밋으로 반영.`);
+  }
+
+  // Fix #6: 영상 원칙 준수 체크 레포트 — decile-mean 후보가 envelope 제약 몇 개 위반하는지 집계.
+  {
+    let totalViolations = 0;
+    const violationLines: string[] = [];
+    for (const r of REGIMES) {
+      const v = perRegimeOut[r]?.envelopeViolations || [];
+      totalViolations += v.length;
+      for (const item of v) violationLines.push(`  - ${r} ${item} — 위반`);
+    }
+    if (totalViolations > 0) {
+      console.log(`\n⚠️ 영상 원칙 준수 검토 (decile-mean 후보 기준, 총 ${totalViolations}건):`);
+      for (const line of violationLines) console.log(line);
+      console.log(`→ 검증 필요 — envelope 제약 재조정 또는 BASE_ALLOCATIONS 수동 반영 시 주의`);
+    } else {
+      console.log(`\n✓ 영상 원칙 준수 검토: 모든 decile-mean 후보가 envelope 제약 내.`);
+    }
   }
 
   // Fix #3 (walk-forward OOS): 과적합 진단.
