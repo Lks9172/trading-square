@@ -2077,3 +2077,30 @@ Docker 로그가 container 재시작 시 휘발돼 5분 스냅샷·KST 07:00 app
 
 - client(Next 16) 측 브라우저 RUM 계측 여부는 추후 판단 (우선순위 낮음, 서버 사이클 진단이 더 시급했음).
 - metrics / logs signal 확장(OTel Collector 분리, Loki 연동) — 현 단계는 traces only.
+
+## 13. 성능 최적화 (2026-04 추가)
+
+### 13.1 FRED probe 빈도/타임아웃 조정
+
+로그 관측 결과 collector cycle 이 간헐적으로 17~22s 로 지연되는 원인이
+FRED verification probe 의 10s axios timeout 과 5분 간격 과잉 호출이었음.
+
+- `FRED_VERIFY_INTERVAL_MS`: 5min → **15min** (FRED 자체 일간 갱신이라 5분 probe 과잉)
+- `fetchSeriesLatest` timeout 인자화 (기본 10s / probe 시 5s fail-fast)
+- `probeFredSource`: retry 0 + timeout 5s
+
+### 13.2 `/api/backtest/portfolio` 3계층 캐싱
+
+년 버튼(1Y/3Y/5Y) 전환마다 서버가 N × 252일 일별 루프 (recomputeFullDerivedForDate
++ classifyRegime + computeSignals + computeAllocation) 를 반복 계산해 1~5s
+체감 지연이 발생.
+
+1. **서버 메모리 TTL 캐시**: `portfolioCache: Map<years, {value, at}>`, TTL 6h.
+   KST 07:00 append 이후 자연 expire. 동일 파라미터 재호출 0ms 응답.
+2. **History 읽기 병렬화**: 16개 `readHistory` 순차 await → `Promise.all`.
+   첫 비캐시 호출의 I/O 절반 이하로 단축.
+3. **클라이언트 prefetch + map 캐시**: `BacktestPanel` mount 시 1/3/5Y 동시
+   요청, `portfolios: Record<years, PortfolioResult>` 로 보관. 버튼은 캐시
+   swap 이라 전환 체감 즉시. 버튼 상태 (캐시됨/prefetch 중/로딩) 시각 힌트.
+
+결과: 첫 페이지 방문 시 3개 년 병렬 prefetch → 이후 전환 0ms.
