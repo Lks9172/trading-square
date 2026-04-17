@@ -613,6 +613,86 @@ function reconstructStagflation(
 }
 
 /**
+ * date 시점 REAL_YIELD_TREND + STAGFLATION_VERIFIED 재구성 (9차 후속 Fix #1).
+ *
+ * 라이브 derived.ts § "STAGFLATION_VERIFIED" 와 동일 룰:
+ *   axis1 = STAGFLATION_WARNING === 1
+ *   axis2 = REAL_YIELD_TREND > 0
+ *   axis3 = GOLD 20D 변화 < 0
+ *   verified = axis1 AND axis2 AND axis3 → 1
+ *
+ * REAL_YIELD_TREND 는 라이브에서 fetchFredHistory('DGS10'/'T10YIE', 40) 를 쓰지만
+ * 백필 경로에서는 저장된 DGS10/T10YIE 히스토리를 date 기준 latest-at-or-before 로 스냅.
+ * GOLD 20D 는 저장된 yahoo:GOLD 히스토리를 date 기준 필터 후 사용.
+ *
+ * 결측 시 STAGFLATION_VERIFIED.value = null (0 대체 금지). REAL_YIELD_TREND 는
+ * 계산 가능한 경우에만 발급 → signals.ts 의 dv() null 가드로 자연 스킵.
+ */
+function reconstructStagflationVerified(
+  date: string,
+  dgs10Hist: HistoryPoint[],
+  t10yieHist: HistoryPoint[],
+  goldHist: HistoryPoint[],
+  derivedSoFar: Record<string, DerivedIndicator>,
+): Record<string, DerivedIndicator> {
+  const out: Record<string, DerivedIndicator> = {};
+  const target = dateToTime(date);
+
+  // 1) REAL_YIELD_TREND — 라이브와 동일 공식: recent5 평균 - older(15~20)5 평균.
+  //   fetchFredHistory(latest-first) vs 저장 히스토리(date asc) 순서 차이 방어적 처리.
+  let ryTrend: number | null = null;
+  const dgs10E = dgs10Hist.filter((p) => dateToTime(p.date) <= target);
+  const t10yieE = t10yieHist.filter((p) => dateToTime(p.date) <= target);
+  if (dgs10E.length >= 20 && t10yieE.length >= 20) {
+    // 저장 히스토리는 date asc → slice(-5) = recent, slice(-20,-15) = 15~20일 전.
+    const dgs10Recent = dgs10E.slice(-5).reduce((s, p) => s + p.value, 0) / 5;
+    const dgs10Older = dgs10E.slice(-20, -15).reduce((s, p) => s + p.value, 0) / 5;
+    const t10yieRecent = t10yieE.slice(-5).reduce((s, p) => s + p.value, 0) / 5;
+    const t10yieOlder = t10yieE.slice(-20, -15).reduce((s, p) => s + p.value, 0) / 5;
+    const ryRecent = dgs10Recent - t10yieRecent;
+    const ryOlder = dgs10Older - t10yieOlder;
+    ryTrend = parseFloat((ryRecent - ryOlder).toFixed(4));
+    out.REAL_YIELD_TREND = {
+      name: 'real_yield_trend',
+      value: ryTrend,
+      date,
+      formula: '실질금리 최근5일평균 - 15~20일전평균 (음수=하락추세)',
+    };
+  }
+
+  // 2) STAGFLATION_VERIFIED — axis1 (derivedSoFar.STAGFLATION_WARNING) · axis2 (ryTrend) · axis3 (GOLD 20D).
+  const warningVal = derivedSoFar.STAGFLATION_WARNING?.value ?? null;
+  let gold20dChange: number | null = null;
+  const goldE = goldHist.filter((p) => dateToTime(p.date) <= target);
+  if (goldE.length >= 21) {
+    const gCur = goldE[goldE.length - 1].value;
+    const g20 = goldE[goldE.length - 21].value;
+    if (g20 > 0) gold20dChange = ((gCur - g20) / g20) * 100;
+  }
+
+  if (warningVal === null || ryTrend === null || gold20dChange === null) {
+    out.STAGFLATION_VERIFIED = {
+      name: 'stagflation_verified',
+      value: null, // 결측 명시 — 0 대체 금지.
+      date,
+      formula: `데이터 부족 (WARNING=${warningVal ?? 'n/a'} / REAL_YIELD_TREND=${ryTrend ?? 'n/a'} / GOLD_20D=${gold20dChange ?? 'n/a'})`,
+    };
+  } else {
+    const axisWarning = warningVal === 1;
+    const axisRyUp = ryTrend > 0;
+    const axisGoldDown = gold20dChange < 0;
+    const verified = axisWarning && axisRyUp && axisGoldDown ? 1 : 0;
+    out.STAGFLATION_VERIFIED = {
+      name: 'stagflation_verified',
+      value: verified,
+      date,
+      formula: `WARNING=${axisWarning ? 'Y' : 'N'} · 실질금리↑=${axisRyUp ? 'Y' : 'N'}(${ryTrend.toFixed(3)}) · 금↓=${axisGoldDown ? 'Y' : 'N'}(${gold20dChange.toFixed(2)}%) — ${verified ? '인과 체인 확증' : 'WARNING 단독 또는 확증 실패'} (video2 §67-68)`,
+    };
+  }
+  return out;
+}
+
+/**
  * ISO 주 번호 기반 bucket key (YYYY-WWW). 월요일 시작 주 기준.
  * 단순 구현 — 목요일 규칙 ISO-8601. daily close 만 있으므로 주봉 close 는 해당 주의 마지막 영업일 close.
  */
@@ -753,6 +833,10 @@ export async function recomputeFullDerivedForDate(
     wtiHistory?: HistoryPoint[];
     indproHistory?: HistoryPoint[];
     usdkrwHistory?: HistoryPoint[];
+    // 9차 후속 Fix #1: STAGFLATION_VERIFIED 백필 — REAL_YIELD_TREND + GOLD 20D 재구성 입력.
+    dgs10History?: HistoryPoint[];
+    t10yieHistory?: HistoryPoint[];
+    goldHistory?: HistoryPoint[];
   },
 ): Promise<Record<string, DerivedIndicator>> {
   // 오늘 날짜 anchor 면 라이브 derived 를 그대로 사용 (NEW: 단일 스냅샷 신선도 보존).
@@ -823,6 +907,14 @@ export async function recomputeFullDerivedForDate(
     const icsaRaw = raw.ICSA?.value ?? null;
     for (const [k, v] of Object.entries(
       reconstructStagflation(date, ctx.wtiHistory, ctx.indproHistory, icsaRaw, derived),
+    )) {
+      derived[k] = v;
+    }
+  }
+  // 9차 후속 Fix #1: STAGFLATION_VERIFIED (+ REAL_YIELD_TREND) — STAGFLATION_WARNING 채워진 뒤 호출.
+  if (ctx?.dgs10History && ctx?.t10yieHistory && ctx?.goldHistory) {
+    for (const [k, v] of Object.entries(
+      reconstructStagflationVerified(date, ctx.dgs10History, ctx.t10yieHistory, ctx.goldHistory, derived),
     )) {
       derived[k] = v;
     }
@@ -956,6 +1048,10 @@ export async function refreshComputedHistories(options?: { force?: boolean }) {
       wtiHistory,
       indproHistory,
       usdkrwHistory,
+      // 9차 후속 Fix #1: STAGFLATION_VERIFIED 백필 입력.
+      dgs10History: histories['fred:DGS10'] || [],
+      t10yieHistory: histories['fred:T10YIE'] || [],
+      goldHistory: histories['yahoo:GOLD'] || [],
     });
     if (dateToTime(anchor.date) >= oneYearAgoMs) {
       const nonNullKeys = Object.values(derived).filter((d) => d.value !== null).length;

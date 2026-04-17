@@ -1042,18 +1042,30 @@ export async function computeDerived(
     //   축 1: STAGFLATION_WARNING === 1
     //   축 2: REAL_YIELD_TREND > 0 (실질금리 상승)
     //   축 3: GOLD 20D 변화 < 0 (금 하락)
+    // Fix #1 (후속): GOLD 20D 는 readHistory('yahoo','GOLD') 우선, 실패 시 live fetch.
+    //   → 백필 경로에서도 동일 로직 재사용 가능 (history-store.ts reconstructStagflationVerified).
     try {
       const warningVal = d.STAGFLATION_WARNING?.value ?? null;
       const ryTrend = d.REAL_YIELD_TREND?.value ?? null;
       let gold20dChange: number | null = null;
       try {
-        const goldHistVerify = await fetchYahooHistory('GC=F', 30);
-        if (goldHistVerify.length >= 21) {
-          const gCur = goldHistVerify[0].close;
-          const g20 = goldHistVerify[20].close;
+        const storedGold = await readHistory('yahoo', 'GOLD');
+        if (storedGold.length >= 21) {
+          const gCur = storedGold[storedGold.length - 1].value;
+          const g20 = storedGold[storedGold.length - 21].value;
           if (g20 > 0) gold20dChange = ((gCur - g20) / g20) * 100;
         }
-      } catch { /* 금 히스토리 실패 허용 */ }
+      } catch { /* 저장 히스토리 실패 → live fallback */ }
+      if (gold20dChange === null) {
+        try {
+          const goldHistVerify = await fetchYahooHistory('GC=F', 30);
+          if (goldHistVerify.length >= 21) {
+            const gCur = goldHistVerify[0].close;
+            const g20 = goldHistVerify[20].close;
+            if (g20 > 0) gold20dChange = ((gCur - g20) / g20) * 100;
+          }
+        } catch { /* 금 히스토리 실패 허용 */ }
+      }
 
       if (warningVal === null || ryTrend === null || gold20dChange === null) {
         d.STAGFLATION_VERIFIED = {
