@@ -1035,6 +1035,48 @@ export async function computeDerived(
         ? '스태그플레이션 2축 동시 충족 — CPI 상승 압력 + 성장 둔화 (영상4 §145)'
         : '스태그플레이션 조건 미충족',
     };
+
+    // === STAGFLATION_VERIFIED (9차 gap TOP3 Fix #1) ===
+    // video2 §67-68 "전쟁→유가↑→인플레↑→금리인하 꺾임→실질금리↑→금↓" 인과 체인 확증.
+    // 3축 모두 충족 시에만 1. 결측 시 null.
+    //   축 1: STAGFLATION_WARNING === 1
+    //   축 2: REAL_YIELD_TREND > 0 (실질금리 상승)
+    //   축 3: GOLD 20D 변화 < 0 (금 하락)
+    try {
+      const warningVal = d.STAGFLATION_WARNING?.value ?? null;
+      const ryTrend = d.REAL_YIELD_TREND?.value ?? null;
+      let gold20dChange: number | null = null;
+      try {
+        const goldHistVerify = await fetchYahooHistory('GC=F', 30);
+        if (goldHistVerify.length >= 21) {
+          const gCur = goldHistVerify[0].close;
+          const g20 = goldHistVerify[20].close;
+          if (g20 > 0) gold20dChange = ((gCur - g20) / g20) * 100;
+        }
+      } catch { /* 금 히스토리 실패 허용 */ }
+
+      if (warningVal === null || ryTrend === null || gold20dChange === null) {
+        d.STAGFLATION_VERIFIED = {
+          name: 'stagflation_verified',
+          value: null,
+          date: dt,
+          formula: `데이터 부족 (WARNING=${warningVal ?? 'n/a'} / REAL_YIELD_TREND=${ryTrend ?? 'n/a'} / GOLD_20D=${gold20dChange ?? 'n/a'})`,
+        };
+      } else {
+        const axisWarning = warningVal === 1;
+        const axisRyUp = ryTrend > 0;
+        const axisGoldDown = gold20dChange < 0;
+        const verified = axisWarning && axisRyUp && axisGoldDown ? 1 : 0;
+        d.STAGFLATION_VERIFIED = {
+          name: 'stagflation_verified',
+          value: verified,
+          date: dt,
+          formula: `WARNING=${axisWarning ? 'Y' : 'N'} · 실질금리↑=${axisRyUp ? 'Y' : 'N'}(${ryTrend.toFixed(3)}) · 금↓=${axisGoldDown ? 'Y' : 'N'}(${gold20dChange.toFixed(2)}%) — ${verified ? '인과 체인 확증' : 'WARNING 단독 또는 확증 실패'} (video2 §67-68)`,
+        };
+      }
+    } catch {
+      /* STAGFLATION_VERIFIED 실패는 파이프라인 막지 않음 */
+    }
   }
 
   const nasdaqDisparity = d.NASDAQ_DISPARITY?.value ?? null;
