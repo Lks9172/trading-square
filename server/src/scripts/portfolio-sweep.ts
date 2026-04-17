@@ -257,7 +257,8 @@ function parseArgs(): {
   if (outputPath === null && process.env.PORTFOLIO_SWEEP_OUTPUT) {
     outputPath = process.env.PORTFOLIO_SWEEP_OUTPUT;
   }
-  const N = parseInt(nArg || '80', 10);
+  // Fix #4: 기본 N 100 (이전 80). 여유 있으면 200 권장.
+  const N = parseInt(nArg || '100', 10);
   return { mode, N, outputPath, txCostBps, walkForward };
 }
 
@@ -265,13 +266,15 @@ async function main() {
   const { mode, N, outputPath, txCostBps, walkForward } = parseArgs();
   const btOpts: BacktestOpts = { txCostBps };
   console.log(`[portfolio-sweep] mode=${mode} N=${N}/regime tx-cost=${txCostBps}bp${walkForward ? ' walk-forward=on' : ''}${outputPath !== null ? ` output=${outputPath || '(auto)'}` : ''}`);
-  // 9차 후속 Fix #3: 국면별 결과 구조 (current / top1 / decileMean / diff).
+  if (N < 100) console.log(`  (권장) N=100 이상 — 연산 여유 있으면 200 권장 (수렴 안정성).`);
+  // 9차 후속 Fix #3 + 이번 Fix #4/#5: 국면별 결과 구조.
   const perRegimeOut: Record<string, {
     current: Record<string, number>;
     top1: Record<string, number>;
     decileMean: Record<string, number>;
     diff: Record<string, number>;
     top1Score: { r1y: number; r3y: number; r5y: number; r10y: number; dd10y: number; score: number } | null;
+    sampleStats: { requested: number; valid: number; rejected: number; rejectReasons: Record<string, number> };
   }> = {};
 
   const assets: Record<string, { key: string; source: string }> = {
@@ -389,7 +392,15 @@ async function main() {
         dd10y: top5[0].r10y.max_drawdown,
         score: top5[0].score,
       },
+      // Fix #4: 샘플 통계 — 요청 N, envelope 통과 수, reject 통계.
+      sampleStats: {
+        requested: N,
+        valid: samples.length,
+        rejected: regimeRejected,
+        rejectReasons: regimeReject,
+      },
     };
+    console.log(`[sample-stats] ${regime} valid=${samples.length}/${N} (envelope-rejected ${regimeRejected})`);
   }
 
   // composed optimal: mode 에 따라 top1 또는 top-decile 평균 합침.
