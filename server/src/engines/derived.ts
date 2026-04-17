@@ -2140,5 +2140,34 @@ export async function computeDerived(
     /* CHASE_LEVEL 실패는 파이프라인 막지 않음 */
   }
 
+  // === LEVERAGE_TIER_RAW 관측용 파생 ===
+  // signals.ts 와 동일 기준 재계산 (중복 정의지만 관측/로깅 편의).
+  // 0=none, 1=SOFT, 2=MEDIUM, 3=HARD. 판정 우선순위 HARD > MEDIUM > SOFT.
+  try {
+    const disp = d.NASDAQ_DISPARITY?.value ?? null;
+    const vix = raw.VIXCLS?.value ?? null;
+    const icsa = raw.ICSA?.value ?? null;
+    const icsaOk = icsa !== null && icsa < 300000;
+    let level: number | null = null;
+    let label = 'none';
+    if (disp !== null && vix !== null && icsaOk) {
+      if (disp <= -25 && vix >= 35) { level = 3; label = 'HARD'; }
+      else if (disp <= -15 && vix >= 30) { level = 2; label = 'MEDIUM'; }
+      else if (disp <= -5 && vix >= 30) { level = 1; label = 'SOFT'; }
+      else { level = 0; }
+    }
+    const dispStr = disp !== null ? `${disp.toFixed(1)}%` : 'n/a';
+    const vixStr = vix !== null ? vix.toFixed(1) : 'n/a';
+    const icsaStr = icsa !== null ? `${Math.round(icsa / 1000)}K` : 'n/a';
+    d.LEVERAGE_TIER_RAW = {
+      name: 'leverage_tier_raw',
+      value: level,
+      date: today(),
+      formula: `이격 ${dispStr} / VIX ${vixStr} / ICSA ${icsaStr} → ${label} (0=none,1=SOFT,2=MEDIUM,3=HARD)`,
+    };
+  } catch {
+    /* LEVERAGE_TIER_RAW 실패는 파이프라인 막지 않음 */
+  }
+
   return d;
 }
