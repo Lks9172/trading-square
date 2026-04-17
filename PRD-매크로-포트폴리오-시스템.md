@@ -538,6 +538,13 @@ score = 위 조건 중 충족 개수 (보조 포함 total=7)
 
 + 과열 REDUCE override (감사 Fix #2): 4개 체크 중 2+ 충족 시 signal = REDUCE
   — 이격 +25%, F&G ≥ 85, VIX < 16, NASDAQ_CHASE_WARNING (이격률 ±15% 20일 지속)
+
++ CHASE_LEVEL 계층화 override (9차 후속 Fix #2): NASDAQ_CHASE_LEVEL / KOSPI_CHASE_LEVEL 소비
+  - level 0: 무동작
+  - level 1 (soft, 이격≥15% 또는 streak≥15일): unmetReasons 에 관측 경고만 추가, 신호 불변
+  - level 2 (medium, soft + VIX<15 방심구간): STRONG_BUY → BUY (한 단계 강등)
+  - level 3 (hard, 이격≥20% 또는 streak≥25일): STRONG_BUY/BUY → HOLD (기존 CHASE_WARNING 동등)
+  - level null (CHASE_LEVEL 미발급): 기존 binary CHASE_WARNING override 경로 유지 (하위 호환)
 ```
 
 **레버리지 허용 조건 (영상 1 기준):**
@@ -860,6 +867,12 @@ IF 국면 == RISK_ON:
 # 실행 (연산 비용 큼 — 수동 트리거)
 cd server && npx tsx src/scripts/portfolio-sweep.ts --mode=decile
 # 출력: regime 별 top1 / top10% 평균 / 현재 BASE diff 표
+
+# 9차 후속 Fix #3: --output 플래그로 JSON 저장
+cd server && PORTFOLIO_SWEEP_MODE=decile npx tsx src/scripts/portfolio-sweep.ts 40 --output
+# 저장 경로: server/data/sweep-results/top-decile-<ISO-timestamp>.json (자동 생성)
+#   또는 --output=<path> 로 명시 경로 지정
+# JSON 스키마: { ranAt, mode, N, baseline, composed, perRegime:{ [regime]: {current, top1, decileMean, diff, top1Score} } }
 ```
 
 **실제 BASE_ALLOCATIONS 숫자 교체는 별도 세션에서 검증 후 사용자 승인 거쳐 진행.**
@@ -1723,6 +1736,10 @@ append cron 은 `0 22 * * *` (UTC) → `0 7 * * *` (KST) 로 표기만 변경 �
   - 축 3: `GOLD` 20D 변화 `< 0` (금 하락)
 - formula 에 3축 Y/N + 값 명시 (단서 투명성)
 - 용도: WARNING 단독 발동과 실제 스태그플레이션 진입을 분리, 오판 차단
+- **9차 후속 Fix #1: 히스토리 재계산 경로 편입**
+  - 라이브 경로: 금 20D 소스를 `readHistory('yahoo','GOLD')` 우선 + `fetchYahooHistory('GC=F')` fallback
+  - 백필 경로: `recomputeFullDerivedForDate` 가 `reconstructStagflationVerified` 헬퍼로 REAL_YIELD_TREND(DGS10·T10YIE 저장 히스토리) + GOLD 20D 재구성 → 과거 스냅샷에도 VERIFIED 채움
+  - 결측 시 `value: null` 유지 (0 대체 금지)
 
 **2. GEOPOLITICAL_UNWIND_EVENT + SHORT_COVER_SUSPECTED (Fix #2) — 점프 이벤트**
 - 근거: stt_kospi 4:58·5:06 — 지정학 리스크 해소 시점 KOSPI↑/USDKRW↓/WTI↓ 동시 급변
