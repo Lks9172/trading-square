@@ -144,6 +144,109 @@ export async function computeDerived(
     };
   }
 
+  // === 구리-주식 방향 괴리 감지 (11차 2026-04) — video2 원문 정합 ===
+  // video2 §3부: "주식 차트는 아직 괜찮은데 구리가 먼저 빠지고 있다면 경고 신호.
+  //   반대로 주식 횡보하는데 구리가 먼저 오르고 있다면 경기 회복의 신호".
+  // 구리가 주식보다 2~3개월 선행 → 방향 괴리 감지로 추세 전환 조기 경보.
+  //   NASDAQ 20일 추세 (수익률%) vs COPPER 20일 추세 비교.
+  //   DIVERGENCE_BEARISH: 주식 ≥ 0 AND 구리 ≤ -3% → 경고 (주식 과열 or 경기 선행하락)
+  //   DIVERGENCE_BULLISH: 주식 ≤ 0 AND 구리 ≥ +3% → 경기 회복 조기 신호
+  try {
+    const nasdaqHist20 = await fetchYahooHistory('^IXIC', 25);
+    const copperHist20 = await fetchYahooHistory('HG=F', 25);
+    if (nasdaqHist20.length >= 21 && copperHist20.length >= 21) {
+      const nq0 = nasdaqHist20[nasdaqHist20.length - 21].close;
+      const nq1 = nasdaqHist20[nasdaqHist20.length - 1].close;
+      const cu0 = copperHist20[copperHist20.length - 21].close;
+      const cu1 = copperHist20[copperHist20.length - 1].close;
+      const nqPct = nq0 > 0 ? ((nq1 - nq0) / nq0) * 100 : 0;
+      const cuPct = cu0 > 0 ? ((cu1 - cu0) / cu0) * 100 : 0;
+      let divergence = 0;
+      let label = 'aligned';
+      if (nqPct >= 0 && cuPct <= -3) {
+        divergence = -1;
+        label = 'bearish';
+      } else if (nqPct <= 0 && cuPct >= 3) {
+        divergence = 1;
+        label = 'bullish';
+      }
+      d.COPPER_STOCK_DIVERGENCE = {
+        name: 'copper_stock_divergence',
+        value: divergence,
+        date: today(),
+        formula:
+          `NASDAQ 20D ${nqPct.toFixed(2)}% vs COPPER 20D ${cuPct.toFixed(2)}%. ` +
+          `-1=bearish(주식↑+구리↓, 경기선행하락 경고) / +1=bullish(주식↓+구리↑, 경기회복 조기) / 0=aligned. ` +
+          `video2 §3부 "구리 2~3개월 선행" 정합. 현재 ${label}.`,
+      };
+    }
+  } catch {
+    /* COPPER_STOCK_DIVERGENCE 실패는 파이프라인 막지 않음 */
+  }
+
+  // === 금구리비 "하락 전환" 추세 감지 (11차 2026-04) — video2 원문 정합 ===
+  // video2 §3부: "경기 회복 신호 3가지 동시 — ISM 바닥 반등 + 금구리비 하락 전환 + 실업수당 감소".
+  // 기존 COPPER_GOLD_RATIO 는 절대값만. "하락 전환" 시점 감지를 위해 추세값 신규.
+  //   최근 5일 평균 CGR vs 15~20일 전 CGR 비교해 변화율 산출 (양수 = 상승, 음수 = 하락).
+  //   value > 0.005 (+0.5%)  → 상승 (구리 강세, 경기 회복 전조)
+  //   value < -0.005 (-0.5%) → 하락 (구리 약세, 경기 둔화)
+  //   |value| ≤ 0.005 → 횡보
+  //   "하락 전환" 은 단순 음수가 아니라 직전 구간은 양수/중립이었다가 최근 음수로 꺾인 패턴.
+  //   → 별도 플래그 COPPER_GOLD_RATIO_DOWNTURN 으로 표현.
+  try {
+    const copperHist = await fetchYahooHistory('HG=F', 40);
+    const goldHist = await fetchYahooHistory('GC=F', 40);
+    if (copperHist.length >= 25 && goldHist.length >= 25) {
+      // 최근 5일 평균 vs 15~20일 전 평균 CGR 비교.
+      const cgrSeries = copperHist
+        .map((c) => {
+          const matchGold = goldHist.find((g) => g.date === c.date);
+          return matchGold ? c.close / matchGold.close : null;
+        })
+        .filter((v): v is number => v !== null)
+        .slice(-25);
+      if (cgrSeries.length >= 25) {
+        const recent5 = cgrSeries.slice(-5).reduce((s, v) => s + v, 0) / 5;
+        const prev5 = cgrSeries.slice(-20, -15).reduce((s, v) => s + v, 0) / 5;
+        const trendPct = prev5 > 0 ? (recent5 - prev5) / prev5 : 0;
+        d.COPPER_GOLD_RATIO_TREND = {
+          name: 'copper_gold_ratio_trend',
+          value: parseFloat(trendPct.toFixed(5)),
+          date: today(),
+          formula:
+            '최근 5영업일 CGR 평균 vs 15~20일 전 5영업일 CGR 평균 변화율. ' +
+            '양수=구리 상승(경기회복), 음수=구리 하락(경기둔화). video2 "금구리비 하락 전환" 추세 감지.',
+        };
+        // 상승 전환 플래그 (경기회복 전조, video2 "금구리비 하락 전환 = 구리 상승"):
+        //   CGR = 구리/금 이므로 영상 "금구리비 하락 전환" ≡ CGR 상승 전환.
+        //   최근 5일 대비 이전 10~15일 구간이 중립/하락이었다가 최근 5일 상승 꺾임.
+        const mid5 = cgrSeries.slice(-15, -10).reduce((s, v) => s + v, 0) / 5;
+        const midToPrevPct = mid5 > 0 ? (prev5 - mid5) / mid5 : 0;
+        const isUpturn = trendPct > 0.005 && midToPrevPct <= 0.005;
+        d.COPPER_GOLD_RATIO_UPTURN = {
+          name: 'copper_gold_ratio_upturn',
+          value: isUpturn ? 1 : 0,
+          date: today(),
+          formula:
+            `video2 "금구리비 하락 전환" (=CGR 상승 전환) 감지: 최근 5D CGR 추세 ${(trendPct * 100).toFixed(2)}% > +0.5% ` +
+            `AND 이전 10~15일은 중립/하락 (${(midToPrevPct * 100).toFixed(2)}%). 1=상승전환(경기회복 전조), 0=아님.`,
+        };
+        // 하락 전환 플래그 (경기둔화 전조):
+        const isDownturn = trendPct < -0.005 && midToPrevPct >= -0.005;
+        d.COPPER_GOLD_RATIO_DOWNTURN = {
+          name: 'copper_gold_ratio_downturn',
+          value: isDownturn ? 1 : 0,
+          date: today(),
+          formula:
+            `CGR 하락 전환 (경기둔화 전조): 최근 5D CGR 추세 ${(trendPct * 100).toFixed(2)}% < -0.5% ` +
+            `AND 이전 10~15일은 중립/상승 (${(midToPrevPct * 100).toFixed(2)}%). 1=하락전환, 0=아님.`,
+        };
+      }
+    }
+  } catch {
+    /* CGR trend 실패는 파이프라인 막지 않음 */
+  }
+
   try {
     const nasdaqHistory = await fetchYahooHistory('^IXIC', 400);
     if (nasdaqHistory.length >= 200) {
@@ -1394,7 +1497,24 @@ export async function computeDerived(
         name: 'kospi_foreign_extreme',
         value: summary.foreignExtreme === 'overheated' ? 1 : summary.foreignExtreme === 'oversold' ? -1 : 0,
         date: summary.latestDate,
-        formula: '20D 순매수 합 ≥+3조 → 과열(+1) / ≤-3조 → 과매도(-1) / 중립(0)',
+        formula: '20D 순매수 합 ≥+3조 → 과열(+1) / ≤-3조 → 과매도(-1) / 중립(0). 일상 방향성 전환 감지용.',
+      };
+
+      // === 역사적 대량매도 감지 (11차 2026-04) — stt_kospi 원문 정합 ===
+      // stt_kospi: "2~3월 외국인이 코스피에서 45~60조 원을 팔았습니다" (2개월 누적 = 월 22~30조).
+      // 20영업일 ≈ 월간 기준으로 ±20조 (±200,000억) 돌파는 2025년 2~3월 수준의 공황성/랠리성
+      // 대량 이벤트. 기존 ±3조 임계(KOSPI_FOREIGN_EXTREME)와 구분해 규모 계층화.
+      //   -1 = 역사적 공황성 매도 (반등 후보, stt_kospi "숨고르기 후 재상승" 시점)
+      //   +1 = 역사적 대규모 매수 (과열, 2024 WGBI 편입 이후 드묾)
+      //    0 = 중립
+      const HISTORIC_THRESHOLD_KRW = 200000; // 20조 (억원 단위)
+      d.KOSPI_FOREIGN_HISTORIC_EXTREME = {
+        name: 'kospi_foreign_historic_extreme',
+        value:
+          summary.foreignNet20D >= HISTORIC_THRESHOLD_KRW ? 1 :
+          summary.foreignNet20D <= -HISTORIC_THRESHOLD_KRW ? -1 : 0,
+        date: summary.latestDate,
+        formula: `20D 순매수 합 ≥+20조 → 역사적 과열(+1) / ≤-20조 → 역사적 공황(-1). stt_kospi "2025년 2~3월 45~60조 매도" 수준 감지 (월 22~30조 ≈ 20영업일 ±20조).`,
       };
 
       // === 개인 순매수 시리즈 (8차 TOP7 Fix #1) ===
