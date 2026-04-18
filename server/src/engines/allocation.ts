@@ -22,8 +22,13 @@ import { ASSET_TO_ALLOC_KEY } from './asset-keys';
 //   본 커밋 스코프에서는 BASE 숫자 변경 없음 — TODO 주석만 명시.
 const BASE_ALLOCATIONS: Record<Regime, Record<string, number>> = {
   RISK_ON:        { cash: 8,  nasdaq: 32, leverage: 0,  gold: 7,  silver: 10, copper: 6,  korea: 18, emerging: 19 },
-  NEUTRAL:        { cash: 8,  nasdaq: 38, leverage: 0,  gold: 14, silver: 8,  copper: 7,  korea: 14, emerging: 11 },
-  CAUTION:        { cash: 28, nasdaq: 29, leverage: 0,  gold: 21, silver: 7,  copper: 4,  korea: 11, emerging: 0  },
+  // 11차 재선정 (2026-04, top-decile, N=30, --walk-forward, --tx-cost=5bp).
+  //   CANDIDATE 조건(활성일 ≥ 100 AND envelopeViolations = 0) 통과 레짐만 교체.
+  //   overfit_warning=false, alpha_decay=-21.16%p (test α 오히려 큼 → 과적합 아님).
+  //   기존 CAUTION.cash=28 은 신규 envelope (video5_analysis cash ≥ 30) 위반 — 교체로 정합 달성.
+  //   TODO §15 "top1 → top-decile 이관" 본 커밋에서 해소.
+  NEUTRAL:        { cash: 12, nasdaq: 40, leverage: 0,  gold: 24, silver: 6,  copper: 5,  korea: 10, emerging: 3  },
+  CAUTION:        { cash: 33, nasdaq: 21, leverage: 0,  gold: 25, silver: 4,  copper: 5,  korea: 10, emerging: 2  },
   CORRECTION:     { cash: 13, nasdaq: 35, leverage: 0,  gold: 19, silver: 8,  copper: 5,  korea: 11, emerging: 9  },
   PANIC_BUT_OK:   { cash: 15, nasdaq: 35, leverage: 10, gold: 20, silver: 5,  copper: 5,  korea: 5,  emerging: 5  },
   RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0,  copper: 0,  korea: 5,  emerging: 5  },
