@@ -2289,6 +2289,178 @@ export async function computeDerived(
     /* LEVERAGE_TIER_RAW 실패는 파이프라인 막지 않음 */
   }
 
+  // === N1 GOLD_SEASONAL (12차 2026-04) — video2 §4부 "금의 계절성" 정합 ===
+  // 20년 금(GC=F) 월별 평균 수익률 중 상위 4개월 = 강시즌(+1), 하위 4개월 = 약시즌(-1).
+  //   강시즌에 매수 보너스, 약시즌 경계 (보조조건).
+  try {
+    const gh = await fetchYahooHistory('GC=F', 365 * 20);
+    if (gh.length >= 252 * 5) {
+      const byMonth: Record<number, number[]> = {};
+      for (let m = 1; m <= 12; m++) byMonth[m] = [];
+      // 각 연월의 월초/월말 수익률 추출
+      const byYM = new Map<string, { first: number; last: number }>();
+      for (const p of gh) {
+        const ym = p.date.slice(0, 7); // YYYY-MM
+        const entry = byYM.get(ym);
+        if (!entry) byYM.set(ym, { first: p.close, last: p.close });
+        else entry.last = p.close;
+      }
+      for (const [ym, { first, last }] of byYM) {
+        const mo = parseInt(ym.slice(5, 7), 10);
+        if (first > 0) byMonth[mo].push((last - first) / first);
+      }
+      const avgByMonth: Array<{ m: number; avg: number }> = [];
+      for (let m = 1; m <= 12; m++) {
+        const arr = byMonth[m];
+        const avg = arr.length > 0 ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
+        avgByMonth.push({ m, avg });
+      }
+      avgByMonth.sort((a, b) => b.avg - a.avg);
+      const topSet = new Set(avgByMonth.slice(0, 4).map((x) => x.m));
+      const bottomSet = new Set(avgByMonth.slice(-4).map((x) => x.m));
+      const curMonth = new Date().getMonth() + 1;
+      const curAvg = avgByMonth.find((x) => x.m === curMonth)?.avg ?? 0;
+      const season = topSet.has(curMonth) ? 1 : bottomSet.has(curMonth) ? -1 : 0;
+      d.GOLD_SEASONAL = {
+        name: 'gold_seasonal',
+        value: season,
+        date: today(),
+        formula:
+          `20년 금 월별 평균 수익률 기반. 현재 월 ${curMonth} 평균 ${(curAvg * 100).toFixed(2)}%. ` +
+          `상위 4개월 강시즌(+1) / 하위 4개월 약시즌(-1) / 중립(0). video2 §4부 정합.`,
+      };
+    }
+  } catch {
+    /* GOLD_SEASONAL 실패 skip */
+  }
+
+  // === N2 CB_GOLD_STRUCTURAL_DEMAND (12차 2026-04) — video2 §1부 "중앙은행 구조 매수" proxy ===
+  // video2 "3년 연속 1000톤+" 정합. WGC 직접 데이터 부재 → 환경 proxy:
+  //   (a) 12M 금 수익률 > 10% (대세 상승)
+  //   (b) DXY 12M 약세 (달러 약세 → 중앙은행 달러 비중 축소 경향)
+  //   (c) 실질금리 하락 추세 (REAL_YIELD_TREND < 0)
+  // 3가지 중 2개 이상 충족 시 1 (구조 매수 환경), 아니면 0.
+  try {
+    const gh = await fetchYahooHistory('GC=F', 260);
+    const dxyFull = await fetchYahooHistory('DX-Y.NYB', 260);
+    if (gh.length >= 250 && dxyFull.length >= 250) {
+      const g0 = gh[gh.length - 252]?.close;
+      const g1 = gh[gh.length - 1]?.close;
+      const dx0 = dxyFull[dxyFull.length - 252]?.close;
+      const dx1 = dxyFull[dxyFull.length - 1]?.close;
+      const goldYoy = g0 && g0 > 0 ? (g1 - g0) / g0 : 0;
+      const dxyYoy = dx0 && dx0 > 0 ? (dx1 - dx0) / dx0 : 0;
+      const realYieldTrend = d.REAL_YIELD_TREND?.value ?? 0;
+      const aGoldUp = goldYoy > 0.1 ? 1 : 0;
+      const bDxyDown = dxyYoy < 0 ? 1 : 0;
+      const cRyDown = realYieldTrend < 0 ? 1 : 0;
+      const metCount = aGoldUp + bDxyDown + cRyDown;
+      d.CB_GOLD_STRUCTURAL_DEMAND = {
+        name: 'cb_gold_structural_demand',
+        value: metCount >= 2 ? 1 : 0,
+        date: today(),
+        formula:
+          `환경 proxy 3조건: 금12M ${(goldYoy * 100).toFixed(1)}%>10%[${aGoldUp}], ` +
+          `DXY12M ${(dxyYoy * 100).toFixed(1)}%<0[${bDxyDown}], REAL_YIELD_TREND ${realYieldTrend.toFixed(3)}<0[${cRyDown}]. ` +
+          `2개↑=1(구조 매수 환경). video2 §1부 "3년 연속 1000톤+" proxy.`,
+      };
+    }
+  } catch {
+    /* skip */
+  }
+
+  // (N3 NASDAQ_STRATEGY_B_COMPLETE 는 signals.ts 에서 계산 — manualInputs 접근 필요)
+
+// === N4 TAIL_RISK_LEVEL (12차 2026-04) — video4 §꼬리 위험 ===
+  // 수집된 SKEW/VVIX/OVX 를 signal 에 통합.
+  //   SKEW > 150 → 꼬리 위험 주의 (참여자 downside 보호 과도 = 역설적 안정 or 불안)
+  //   VVIX > 120 → VIX 자체 변동성 과열
+  //   OVX > 50  → 유가 변동성 경계
+  // 3개 중 2개 이상 발동 = 2 (고위험), 1개 = 1, 0개 = 0.
+  try {
+    const skew = raw.SKEW?.value ?? null;
+    const vvix = raw.VVIX?.value ?? null;
+    const ovx = raw.OVX?.value ?? null;
+    const skewHit = skew !== null && skew > 150 ? 1 : 0;
+    const vvixHit = vvix !== null && vvix > 120 ? 1 : 0;
+    const ovxHit = ovx !== null && ovx > 50 ? 1 : 0;
+    const tailCount = skewHit + vvixHit + ovxHit;
+    const level = tailCount >= 2 ? 2 : tailCount >= 1 ? 1 : 0;
+    d.TAIL_RISK_LEVEL = {
+      name: 'tail_risk_level',
+      value: level,
+      date: today(),
+      formula:
+        `SKEW ${skew?.toFixed(1) ?? 'n/a'}>150[${skewHit}], VVIX ${vvix?.toFixed(1) ?? 'n/a'}>120[${vvixHit}], ` +
+        `OVX ${ovx?.toFixed(1) ?? 'n/a'}>50[${ovxHit}]. 합 ${tailCount} → level ${level} (0=정상,1=경계,2=고위험).`,
+    };
+  } catch {
+    /* skip */
+  }
+
+  // === N5 FNG_TIER (12차 2026-04) — 노션 대시보드 5단계 정합 ===
+  // 0-24 극공포(-2), 25-44 공포(-1), 45-55 중립(0), 56-74 탐욕(+1), 75-100 극탐욕(+2).
+  // 부호 매핑: 음수 = 시장 공포(매수 기회), 양수 = 시장 탐욕(매도 주의).
+  try {
+    const fng = raw.FEAR_GREED?.value ?? null;
+    if (fng !== null) {
+      let tier: number;
+      let label: string;
+      if (fng < 25) { tier = -2; label = '극공포'; }
+      else if (fng < 45) { tier = -1; label = '공포'; }
+      else if (fng < 56) { tier = 0; label = '중립'; }
+      else if (fng < 75) { tier = 1; label = '탐욕'; }
+      else { tier = 2; label = '극탐욕'; }
+      d.FNG_TIER = {
+        name: 'fng_tier',
+        value: tier,
+        date: today(),
+        formula: `F&G ${fng} → ${label} (tier ${tier}). 0-24=-2, 25-44=-1, 45-55=0, 56-74=+1, 75-100=+2.`,
+      };
+    }
+  } catch {
+    /* skip */
+  }
+
+  // === N6 WRESBAL_ABSOLUTE_LEVEL (12차 2026-04) — 노션 "지급준비금 3조 이상 안전" ===
+  // 단위: millions of dollars. 3조 임계 = >= 3_000_000.
+  try {
+    const wr = raw.WRESBAL?.value ?? null;
+    if (wr !== null) {
+      const level = wr >= 3_000_000 ? 1 : 0;
+      d.WRESBAL_ABSOLUTE_LEVEL = {
+        name: 'wresbal_absolute_level',
+        value: level,
+        date: today(),
+        formula: `WRESBAL ${Math.round(wr / 1000).toLocaleString()}M달러 → ` +
+          `${level === 1 ? '안전(≥3조, 은행 유동성 충분)' : '부족 경고(<3조)'}. 노션 대시보드 기준.`,
+      };
+    }
+  } catch {
+    /* skip */
+  }
+
+  // === N7 RRP_ABSOLUTE_LEVEL (12차 2026-04) — 노션 "RRP 1000억/50-200/50 이하" ===
+  // 단위: billions of dollars. 임계 100B / 50B.
+  try {
+    const rrp = raw.RRPONTSYD?.value ?? null;
+    if (rrp !== null) {
+      let level: number;
+      let label: string;
+      if (rrp >= 100) { level = 1; label = '완화(≥100B, 유동성 잔존)'; }
+      else if (rrp >= 50) { level = 0; label = '거의 소진(50-100B)'; }
+      else { level = -1; label = '바닥(<50B)'; }
+      d.RRP_ABSOLUTE_LEVEL = {
+        name: 'rrp_absolute_level',
+        value: level,
+        date: today(),
+        formula: `RRPONTSYD ${rrp.toFixed(2)}B달러 → ${label}. 노션 대시보드 기준 (100B/50B 임계).`,
+      };
+    }
+  } catch {
+    /* skip */
+  }
+
   // === INSTITUTIONAL_NASDAQ_EXPOSURE_PCT + FLOW (11차 #8, 2026-04) ===
   // 영상4 §기관리포트: "말은 거짓말 할 수 있지만 돈은 거짓말을 하지 않거든요".
   // Phase 1: 현재 시점 메가캡 비중 스냅샷.
