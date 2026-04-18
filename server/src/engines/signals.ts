@@ -320,6 +320,13 @@ function nasdaqSignal(
     const magnitude = instFlow === -2 ? '강한 ' : '';
     overheatFlags.push(`INSTITUTIONAL_NASDAQ_FLOW ${magnitude}매도 (레벨 ${instFlow}, 13F 분기 비교, video4 §기관)`);
   }
+  // 12차 Phase 3 신규: 섹터별 집단 이동 — TECH 섹터 감축 시 NASDAQ 과열 플래그 보강
+  // FIN / ENERGY 는 NASDAQ 에 직접 영향 약해 관측 전용 (summary 표시는 별도 컴포넌트).
+  const techFlow = dv(derived, 'INSTITUTIONAL_SECTOR_TECH_FLOW');
+  if (techFlow !== null && techFlow <= -1) {
+    const magnitude = techFlow === -2 ? '강한 ' : '';
+    overheatFlags.push(`INSTITUTIONAL_SECTOR_TECH_FLOW ${magnitude}매도 (레벨 ${techFlow}, 13F 기술주 집단 이탈, video4)`);
+  }
   // 12차 N4: 꼬리 위험 (SKEW/VVIX/OVX) 고레벨 — video4 §꼬리
   const tailRisk = dv(derived, 'TAIL_RISK_LEVEL');
   if (tailRisk !== null && tailRisk >= 2) {
