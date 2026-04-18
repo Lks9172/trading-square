@@ -231,6 +231,27 @@ function nasdaqSignal(
   if (xlk !== null && xlk > 0) { reasons.push(`XLK 기술섹터 +${xlk.toFixed(1)}% → 성장주 랠리 질 양호 (보조조건)`); }
   else if (xlk !== null && xlk < 0) { unmetReasons.push(`XLK 기술섹터 ${xlk.toFixed(1)}% → 성장주 주도력 약함 (보조조건)`); }
 
+  // 13차 N8: DMA 수렴 (video3 §수렴 "폭발 직전")
+  const dmaConv = dv(derived, 'DMA_CONVERGENCE_LEVEL');
+  if (dmaConv !== null) {
+    if (dmaConv === 2) reasons.push('🟢 DMA 극수렴 (CV≤1.5%, video3 "폭발 직전" — 진입 타이밍 관찰)');
+    else if (dmaConv === 1) reasons.push('DMA 수렴 (CV≤3%, video3 에너지 응축)');
+    else if (dmaConv === -2) reasons.push('DMA 극확산 (CV>8%, 강추세 진행중)');
+  }
+  // 13차 A7/A3 가점: 반대 방향 (overheat 플래그는 하단 override 블록에서 처리)
+  {
+    const econDiv = dv(derived, 'ECONOMY_STOCK_DIVERGENCE');
+    const wtiCuLag = dv(derived, 'WTI_COPPER_LAG_LEVEL');
+    if (econDiv === 1) {
+      reasons.push('✓ ECONOMY_STOCK_DIVERGENCE 회복 저점 (ISM≥50 + 이격도<-10%) — 매수 기회');
+      met += 1;
+    }
+    if (wtiCuLag === 1) {
+      reasons.push('✓ WTI_COPPER_LAG 회복 조기 (유가 과거 약세 → 구리 현재 강세, video2 §3부) +1');
+      met += 1;
+    }
+  }
+
   // 12차 N3: 전략B 5가지 겹침 가점 — video1 "확신 깊이 최대"
   // 차트(200DMA↓ or 이격도<-10%) + 유동성(확장) + 정책(완화) + 지정학(낮음) + 모멘텀(XLK>0)
   {
@@ -337,6 +358,16 @@ function nasdaqSignal(
   const hyRaw = v(raw, 'BAMLH0A0HYM2');
   if (hyRaw !== null && hyRaw >= 5 && hyRaw < 8) {
     overheatFlags.push(`HY OAS ${hyRaw.toFixed(1)}% — 노션 "5-7% 주의" 구간 신용 스트레스`);
+  }
+  // 13차 A7: 주가-경제 괴리 유동성 왜곡 — video4 "실물 약한데 주가 오른다"
+  const econStockDiv = dv(derived, 'ECONOMY_STOCK_DIVERGENCE');
+  if (econStockDiv === -1) {
+    overheatFlags.push('ECONOMY_STOCK_DIVERGENCE 유동성 왜곡 (ISM<50 + 이격도>+10%, video4)');
+  }
+  // 13차 A3: 유가-구리 교차래그 경기 둔화 임박
+  const wtiCopperLag = dv(derived, 'WTI_COPPER_LAG_LEVEL');
+  if (wtiCopperLag === -1) {
+    overheatFlags.push('WTI_COPPER_LAG 둔화 임박 (유가 과거 급등 → 구리 현재 약세, video2 §3부)');
   }
   if (overheatFlags.length >= 2 && signal !== 'SELL') {
     signal = 'REDUCE';

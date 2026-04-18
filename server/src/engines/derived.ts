@@ -1556,17 +1556,63 @@ export async function computeDerived(
       };
 
       // === 외국인-환율 괴리 (ATM화) 지수 (영상5 §112 "환율 5% 상승 대비 외국인 매도 2배 과잉") ===
-      // USDKRW 20일 변화율 × 예상매도 계수(3조/1% 상승) 로 기대 외국인 순매도 산출.
-      // 실제 순매도가 기대치의 절대값 대비 2배 이상이면 ATM화 (과잉) 경고 → 반발 조기신호.
+      // USDKRW 20일 변화율 × 예상매도 계수 로 기대 외국인 순매도 산출.
+      // 13차 B3 개선 (2026-04): 기존 -30000 하드코딩 대신 **최근 1년 rolling 회귀 계수** 사용.
+      //   관측 불가 시 stt_kospi 영상 기본값 -30000 으로 fallback.
       try {
         const usdkrwHist = await readHistory('yahoo', 'USDKRW');
         if (usdkrwHist.length >= 20) {
           const curFx = usdkrwHist[usdkrwHist.length - 1].value;
           const oldFx = usdkrwHist[usdkrwHist.length - 20].value;
           const fxChangePct = ((curFx - oldFx) / oldFx) * 100;
-          const expectedSell = fxChangePct * -30000; // 환율 1% 상승당 기대 매도 -3조 (음수, 억원 단위)
+
+          // β 계수 추정 (최근 1년 관측치, no-intercept LS)
+          //   x_i = FX 20D change%, y_i = foreign net 20D 누적 (억원)
+          let beta = -30000;
+          let betaSource = 'stt_kospi 영상 기본값';
+          try {
+            const foreignHistKr = await readHistory('krx', 'KOSPI_FOREIGN_NET_1D');
+            if (foreignHistKr.length >= 60) {
+              const obs: Array<{ x: number; y: number }> = [];
+              for (let k = 20; k < Math.min(foreignHistKr.length, 252); k++) {
+                const fDate = foreignHistKr[foreignHistKr.length - 1 - k].date;
+                let fxEnd = -1;
+                for (let j = usdkrwHist.length - 1; j >= 0; j--) {
+                  if (usdkrwHist[j].date <= fDate) { fxEnd = j; break; }
+                }
+                if (fxEnd < 20) continue;
+                const fxOld = usdkrwHist[fxEnd - 20].value;
+                const fxCur = usdkrwHist[fxEnd].value;
+                if (fxOld <= 0) continue;
+                const xPct = ((fxCur - fxOld) / fxOld) * 100;
+                let netSum = 0;
+                for (let j = 0; j < 20; j++) {
+                  const idx = foreignHistKr.length - 1 - k + j;
+                  if (idx >= 0 && idx < foreignHistKr.length) netSum += foreignHistKr[idx].value;
+                }
+                obs.push({ x: xPct, y: netSum });
+              }
+              if (obs.length >= 30) {
+                const sumXY = obs.reduce((s, o) => s + o.x * o.y, 0);
+                const sumXX = obs.reduce((s, o) => s + o.x * o.x, 0);
+                if (sumXX > 0) {
+                  beta = sumXY / sumXX;
+                  betaSource = `rolling 회귀 n=${obs.length}`;
+                }
+              }
+            }
+          } catch {
+            /* KRX history 실패 시 fallback */
+          }
+
+          const expectedSell = fxChangePct * beta;
           const actualNet = summary.foreignNet20D;
-          // stt_kospi 회귀: 환율 1% 상승당 외국인 ~3조(=30000억) 순매도 경향
+          d.FX_FOREIGN_BETA = {
+            name: 'fx_foreign_beta',
+            value: parseFloat(beta.toFixed(0)),
+            date: summary.latestDate,
+            formula: `환율 1%↑당 외국인 20D 순매수 계수 (억원). 현재 β=${beta.toFixed(0)} / ${betaSource}. stt_kospi 기본 -30000.`,
+          };
           d.KOSPI_FX_20D_CHANGE_PCT = {
             name: 'kospi_fx_20d_change_pct',
             value: parseFloat(fxChangePct.toFixed(3)),
@@ -1577,7 +1623,7 @@ export async function computeDerived(
             name: 'kospi_foreign_expected_sell_krw',
             value: parseFloat(expectedSell.toFixed(0)),
             date: summary.latestDate,
-            formula: 'FX20D × -30000 (억원). stt_kospi 회귀: 환율 1% 상승당 외국인 ~3조 순매도',
+            formula: `FX20D × β (β=${beta.toFixed(0)}, 억원). 13차 rolling 회귀, stt_kospi 기본 -30000.`,
           };
           d.KOSPI_FOREIGN_ACTUAL_SELL_KRW = {
             name: 'kospi_foreign_actual_sell_krw',
@@ -2370,6 +2416,112 @@ export async function computeDerived(
   }
 
   // (N3 NASDAQ_STRATEGY_B_COMPLETE 는 signals.ts 에서 계산 — manualInputs 접근 필요)
+
+  // === N8 DMA_CONVERGENCE_LEVEL (13차 2026-04) — video3 §수렴 "이평선 모이면 폭발 직전" ===
+  // 5개 주요 DMA (5/20/60/120/200) 의 **현재 값 표준편차 / 평균** (변동계수 CV) 기반.
+  // CV 작을수록 이평선 수렴 = 에너지 응축. 이후 방향 폭발 기대.
+  //   CV ≤ 1.5% → level +2 (극수렴, 폭발 직전)
+  //   CV ≤ 3.0% → level +1 (수렴)
+  //   CV ≤ 5.0% → level 0 (정상)
+  //   CV ≤ 8.0% → level -1 (확산)
+  //   CV > 8.0% → level -2 (극확산, 추세 강세)
+  try {
+    const nasdaqHistFull = await fetchYahooHistory('^IXIC', 400);
+    if (nasdaqHistFull.length >= 200) {
+      const closes = nasdaqHistFull.map((h) => h.close);
+      const cur = closes[closes.length - 1];
+      const sma = (n: number) => {
+        if (closes.length < n) return null;
+        const slice = closes.slice(-n);
+        return slice.reduce((s, v) => s + v, 0) / n;
+      };
+      const mas = [5, 20, 60, 120, 200].map((n) => sma(n)).filter((v): v is number => v !== null);
+      if (mas.length === 5) {
+        const mean = mas.reduce((s, v) => s + v, 0) / mas.length;
+        const variance = mas.reduce((s, v) => s + (v - mean) ** 2, 0) / mas.length;
+        const std = Math.sqrt(variance);
+        const cv = mean > 0 ? (std / mean) * 100 : 0;
+        let level: number;
+        if (cv <= 1.5) level = 2;
+        else if (cv <= 3.0) level = 1;
+        else if (cv <= 5.0) level = 0;
+        else if (cv <= 8.0) level = -1;
+        else level = -2;
+        d.DMA_CONVERGENCE_LEVEL = {
+          name: 'dma_convergence_level',
+          value: level,
+          date: today(),
+          formula:
+            `NASDAQ 5/20/60/120/200 DMA CV ${cv.toFixed(2)}% (현재 ${cur.toFixed(0)}, 평균 ${mean.toFixed(0)}, σ ${std.toFixed(0)}). ` +
+            `+2(≤1.5% 극수렴, 폭발 직전) / +1(≤3%) / 0(≤5%) / -1(≤8% 확산) / -2(>8% 강추세). video3 §수렴 정합.`,
+        };
+      }
+    }
+  } catch {
+    /* DMA_CONVERGENCE 실패 skip */
+  }
+
+  // === A3 WTI_COPPER_LAG_CORRELATION (13차 2026-04) — video2 §3부 ===
+  // "오일 단기 급등 → 구리 2~3개월 후 타격" (유가가 경기 선행 아닌 cost burden)
+  // WTI 60일 전 수익률 vs COPPER 현재 수익률. 양수 = WTI 과거 약세 → COPPER 현재 강세.
+  //   값 > +0.1 (+10%) → 경기 회복 조기 (유가 과거 안정 + 구리 현재 상승)
+  //   값 < -0.1 (-10%) → 경기 둔화 임박 (유가 과거 급등 → 구리 현재 하락)
+  //   |값| ≤ 0.1 → 중립
+  try {
+    const wtiHist = await fetchYahooHistory('CL=F', 120);
+    const copperHistLag = await fetchYahooHistory('HG=F', 120);
+    if (wtiHist.length >= 80 && copperHistLag.length >= 80) {
+      // WTI 60일 전 대비 90일 전 수익률 (t-90 ~ t-60 구간 변화)
+      const wti_t90 = wtiHist[wtiHist.length - 90]?.close;
+      const wti_t60 = wtiHist[wtiHist.length - 60]?.close;
+      const wtiOldRet = wti_t90 && wti_t90 > 0 ? (wti_t60 - wti_t90) / wti_t90 : 0;
+      // COPPER 최근 30일 수익률
+      const cu_t30 = copperHistLag[copperHistLag.length - 30]?.close;
+      const cu_t0 = copperHistLag[copperHistLag.length - 1]?.close;
+      const cuRecentRet = cu_t30 && cu_t30 > 0 ? (cu_t0 - cu_t30) / cu_t30 : 0;
+      // 신호: WTI 과거 약세(-) AND COPPER 현재 강세(+) = 경기 회복 조기
+      //      WTI 과거 급등(+) AND COPPER 현재 하락(-) = 경기 둔화 임박
+      let level = 0;
+      let label = 'neutral';
+      if (wtiOldRet < -0.05 && cuRecentRet > 0.05) { level = 1; label = 'recovery_early'; }
+      else if (wtiOldRet > 0.1 && cuRecentRet < -0.05) { level = -1; label = 'slowdown_imminent'; }
+      d.WTI_COPPER_LAG_LEVEL = {
+        name: 'wti_copper_lag_level',
+        value: level,
+        date: today(),
+        formula:
+          `WTI t-90~t-60 ${(wtiOldRet * 100).toFixed(1)}% / COPPER 최근30D ${(cuRecentRet * 100).toFixed(1)}%. ` +
+          `+1(유가과거약세+구리현재강세=회복조기) / -1(유가과거급등+구리현재약세=둔화임박) / 0. ${label}. video2 §3부.`,
+      };
+    }
+  } catch {
+    /* skip */
+  }
+
+  // === A7 ECONOMY_STOCK_DIVERGENCE (13차 2026-04) — video4 "실물 약한데 주가 오른다" ===
+  // ISM_PROXY < 50 (경기 수축) AND NASDAQ_DISPARITY > +10 (과열) = 유동성 왜곡 경고.
+  //   반대 (ISM ≥ 50 AND disparity < -10) = 경기 회복 + 저점 = 매수 기회.
+  try {
+    const ismVal = d.ISM_PROXY?.value ?? null;
+    const dispVal = d.NASDAQ_DISPARITY?.value ?? null;
+    if (ismVal !== null && dispVal !== null) {
+      let level = 0;
+      let label = 'aligned';
+      if (ismVal < 50 && dispVal > 10) { level = -1; label = 'liquidity_distortion'; }
+      else if (ismVal >= 50 && dispVal < -10) { level = 1; label = 'recovery_bottom'; }
+      d.ECONOMY_STOCK_DIVERGENCE = {
+        name: 'economy_stock_divergence',
+        value: level,
+        date: today(),
+        formula:
+          `ISM ${ismVal.toFixed(1)} / NASDAQ 이격도 ${dispVal.toFixed(1)}%. ` +
+          `-1(ISM<50+이격>+10=유동성왜곡) / +1(ISM≥50+이격<-10=회복저점) / 0. ${label}. video4 §유동성 왜곡.`,
+      };
+    }
+  } catch {
+    /* skip */
+  }
+
 
 // === N4 TAIL_RISK_LEVEL (12차 2026-04) — video4 §꼬리 위험 ===
   // 수집된 SKEW/VVIX/OVX 를 signal 에 통합.
