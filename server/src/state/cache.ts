@@ -12,25 +12,26 @@ import { computeExecutionPlans } from '../engines/execution_plan';
 import { getUSPriceSource } from '../utils/market-hours';
 import { hardenFlag } from '../services/flagPersistence';
 import { withSpan } from '../observability/trace';
+import { childLogger, serializeError } from '../services/logger';
+import { DEFAULT_MANUAL_INPUTS, mergeEffectiveManualInputs } from '../services/policy-inputs';
+import { logDecisionDetails } from '../services/decision-logging';
+
+const log = childLogger({ module: 'state.cache' });
 
 export const DEFAULT_PROFILE: UserProfile = {
   riskTolerance: 'moderate',
   investmentHorizon: 'long',
-  leverageEnabled: false,
+  leverageEnabled: true,
   includeCrypto: false,
   includeKR: true,
-  manualInputs: {
-    policyDirection: 0,
-    geoRisk: 2,
-    cbBuying: true,
-    ismPmi: null,
-  },
+  manualInputs: DEFAULT_MANUAL_INPUTS,
 };
 
 export const CACHE_TTL = 5 * 60 * 1000;
 
 let cachedSnapshot: SystemSnapshot | null = null;
 let cacheTime = 0;
+const inFlightSnapshots = new Map<string, Promise<SystemSnapshot>>();
 
 function latestDates(raw: SystemSnapshot['raw'], derived: SystemSnapshot['derived']) {
   return {
@@ -45,23 +46,25 @@ let cachedAutoInputs: { policyDirection: number; geoRisk: number; cbBuying: bool
 
 export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapshot> {
   return withSpan('macrosquare.snapshot.build', async (rootSpan) => {
+  const startedAt = Date.now();
   const apiKey = process.env.FRED_API_KEY || '';
 
   if (!cachedAutoInputs) {
     try {
       cachedAutoInputs = await computeAutoManualInputs(apiKey);
-    } catch {
+      log.info({ autoInputs: cachedAutoInputs }, 'cached auto inputs initialized');
+    } catch (error) {
+      log.warn({ error: serializeError(error) }, 'cached auto inputs initialization failed, using defaults');
       cachedAutoInputs = { policyDirection: 0, geoRisk: 2, cbBuying: true, ismPmi: null };
     }
   }
 
-  const isDefaultManual =
-    profile.manualInputs.policyDirection === DEFAULT_PROFILE.manualInputs.policyDirection &&
-    profile.manualInputs.geoRisk === DEFAULT_PROFILE.manualInputs.geoRisk &&
-    profile.manualInputs.cbBuying === DEFAULT_PROFILE.manualInputs.cbBuying;
-
-  const autoInputsWithIsm = { ...cachedAutoInputs, ismPmi: cachedAutoInputs.ismPmi ?? profile.manualInputs.ismPmi ?? null };
-  const effectiveInputs = isDefaultManual ? autoInputsWithIsm : profile.manualInputs;
+  const effectiveInputs = mergeEffectiveManualInputs(
+    profile.manualInputs,
+    cachedAutoInputs,
+    DEFAULT_PROFILE.manualInputs,
+  );
+  const isDefaultManual = effectiveInputs !== profile.manualInputs;
   const effectiveProfile: UserProfile = { ...profile, manualInputs: effectiveInputs };
 
   const raw = await collectAll(apiKey);
@@ -78,10 +81,16 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
   }
 
   const smartMoney = await withSpan('macrosquare.collector.smartMoney', () =>
-    fetchInsiderSummary().catch(() => null),
+    fetchInsiderSummary().catch((error) => {
+      log.warn({ error: serializeError(error) }, 'smart money collector failed, using null');
+      return null;
+    }),
   );
   const calendar = await withSpan('macrosquare.collector.calendar', () =>
-    fetchEconomicCalendar(apiKey).catch(() => []),
+    fetchEconomicCalendar(apiKey).catch((error) => {
+      log.warn({ error: serializeError(error) }, 'calendar collector failed, using empty list');
+      return [];
+    }),
   );
   const derived = await withSpan('macrosquare.engine.derived', (s) =>
     computeDerived(raw, effectiveInputs).then((d) => {
@@ -145,7 +154,10 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
   }
 
   const regime = await withSpan('macrosquare.engine.regime', (s) => {
-    const r = classifyRegime({ raw, derived, manualInputs: effectiveInputs, smartMoneyScore: smartMoney?.score ?? 0 });
+    const r = classifyRegime(
+      { raw, derived, manualInputs: effectiveInputs, smartMoneyScore: smartMoney?.score ?? 0 },
+      { includeExplanation: true },
+    );
     s.setAttribute('regime.label', r.regime);
     s.setAttribute('regime.score', r.score);
     return Promise.resolve(r);
@@ -156,22 +168,49 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
     return Promise.resolve(r);
   });
   const allocation = await withSpan('macrosquare.engine.allocation', () =>
-    Promise.resolve(computeAllocation(regime.regime, regime.score, signals, derived, raw, effectiveProfile.investmentHorizon)),
+    Promise.resolve(
+      computeAllocation(
+        regime.regime,
+        regime.score,
+        signals,
+        derived,
+        raw,
+        effectiveProfile.investmentHorizon,
+        undefined,
+        effectiveProfile,
+        { includeExplanation: true },
+      ),
+    ),
   );
   const executionPlans = await withSpan('macrosquare.engine.executionPlan', () =>
     Promise.resolve(computeExecutionPlans(raw, derived, signals, allocation, regime)),
   );
   rootSpan.setAttribute('snapshot.regime', regime.regime);
   rootSpan.setAttribute('snapshot.regime_score', regime.score);
+  rootSpan.setAttribute('snapshot.duration_ms', Date.now() - startedAt);
   const fetchedAt = new Date().toISOString();
+
+  logDecisionDetails({ raw, derived, regime, signals, allocation });
+
+  log.info({
+    durationMs: Date.now() - startedAt,
+    rawKeys: Object.keys(raw).length,
+    derivedKeys: Object.keys(derived).length,
+    signalCount: signals.length,
+    regime: regime.regime,
+    regimeScore: regime.score,
+    usPriceSource,
+    smartMoneyPresent: Boolean(smartMoney),
+    calendarEvents: calendar.length,
+  }, 'snapshot build completed');
 
   return {
     timestamp: fetchedAt,
     raw,
     derived,
-    regime,
+    regime: { ...regime, explanation: undefined },
     signals,
-    allocation,
+    allocation: { ...allocation, explanation: undefined },
     meta: {
       fetchedAt,
       cacheTtlMs: CACHE_TTL,
@@ -230,13 +269,44 @@ export function writeCache(snapshot: SystemSnapshot) {
   cacheTime = Date.now();
 }
 
+function snapshotCacheKey(profile: UserProfile) {
+  return JSON.stringify({
+    riskTolerance: profile.riskTolerance,
+    investmentHorizon: profile.investmentHorizon,
+    leverageEnabled: profile.leverageEnabled,
+    includeCrypto: profile.includeCrypto,
+    includeKR: profile.includeKR,
+    manualInputs: profile.manualInputs,
+  });
+}
+
+export function resetSnapshotStateForTests() {
+  cachedSnapshot = null;
+  cacheTime = 0;
+  cachedAutoInputs = null;
+  inFlightSnapshots.clear();
+}
+
 export async function getSnapshot(profile: UserProfile, force = false) {
   const now = Date.now();
   if (!force && cachedSnapshot && now - cacheTime < CACHE_TTL) {
     return cachedSnapshot;
   }
 
-  const snapshot = await buildSnapshot(profile);
-  writeCache(snapshot);
-  return snapshot;
+  const key = snapshotCacheKey(profile);
+  const existing = inFlightSnapshots.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const pending = buildSnapshot(profile)
+    .then((snapshot) => {
+      writeCache(snapshot);
+      return snapshot;
+    })
+    .finally(() => {
+      inFlightSnapshots.delete(key);
+    });
+  inFlightSnapshots.set(key, pending);
+  return pending;
 }

@@ -1,6 +1,7 @@
 import axios from 'axios';
-import * as XLSX from 'xlsx';
 import { MarketDataPoint } from '../types/indicators';
+import { childLogger, serializeError } from '../services/logger';
+import { readSourceCacheWithin, writeSourceCache } from '../services/source-cache';
 
 export interface SentimentPoint {
   value: number | null;
@@ -16,6 +17,54 @@ const HEADERS = {
 };
 
 const TIMEOUT_MS = 10000;
+const log = childLogger({ module: 'collector.sentiment' });
+const SENTIMENT_CACHE_MAX_AGE_MS = {
+  PC_RATIO: 7 * 24 * 60 * 60 * 1000,
+  AAII_BULL_BEAR_SPREAD: 21 * 24 * 60 * 60 * 1000,
+  NAAIM_EXPOSURE: 21 * 24 * 60 * 60 * 1000,
+} as const;
+
+async function useSentimentCache(metric: keyof typeof SENTIMENT_CACHE_MAX_AGE_MS): Promise<SentimentPoint | null> {
+  const cached = await readSourceCacheWithin<SentimentPoint>(`sentiment-${metric}`, SENTIMENT_CACHE_MAX_AGE_MS[metric]);
+  if (!cached) return null;
+  log.warn({
+    metric,
+    ageMs: cached.ageMs,
+    updatedAt: cached.updatedAt,
+    source: cached.value.source,
+  }, 'sentiment metric live fetch failed, serving cached value');
+  return cached.value;
+}
+
+function ageDaysFromAsOf(asOf: string | null | undefined): number | null {
+  if (!asOf) return null;
+  return Math.floor((Date.now() - new Date(`${asOf}T00:00:00Z`).getTime()) / 86400000);
+}
+
+export function shouldRefreshSentimentMetric(
+  metric: keyof typeof SENTIMENT_CACHE_MAX_AGE_MS,
+  cached: SentimentPoint | null,
+): boolean {
+  if (!cached?.asOf) return true;
+  const ageDays = ageDaysFromAsOf(cached.asOf);
+  if (ageDays === null) return true;
+  if (metric === 'AAII_BULL_BEAR_SPREAD') return ageDays > 8;
+  if (metric === 'NAAIM_EXPOSURE') return ageDays > 8;
+  return true;
+}
+
+async function getSentimentCadenceCache(metric: keyof typeof SENTIMENT_CACHE_MAX_AGE_MS): Promise<SentimentPoint | null> {
+  const cached = await readSourceCacheWithin<SentimentPoint>(`sentiment-${metric}`, SENTIMENT_CACHE_MAX_AGE_MS[metric]);
+  if (!cached) return null;
+  if (shouldRefreshSentimentMetric(metric, cached.value)) return null;
+  log.info({
+    metric,
+    ageMs: cached.ageMs,
+    asOf: cached.value.asOf,
+    source: cached.value.source,
+  }, 'sentiment metric source-fresh cache hit');
+  return cached.value;
+}
 
 // ---- CBOE Put/Call Ratio (자체 집계) -------------------------------------
 // 2026-04: CBOE 공식 PCR_ALL.csv 403, Yahoo ^CPC/^CPCE/^CPCI 404 로 모두 막힘.
@@ -83,68 +132,82 @@ export async function fetchCBOEPutCall(): Promise<SentimentPoint> {
 }
 
 // ---- AAII Bull/Bear Spread ---------------------------------------------
-// 2026-04 리서치: stooq 유료화 이후, AAII 공식 XLS 가 실제로는 200 OK (기존 코드
-// 주석이 403 으로 잘못 판단). SENTIMENT 시트 row 7~ 에서 Date(Excel serial) +
-// Bullish/Bearish/Spread(소수) 직접 파싱.
-const AAII_XLS_URL = 'https://www.aaii.com/files/surveys/sentiment.xls';
+// 2026-04 운영 로그 기준: aaii.com XLS/page 는 Incapsula 403 이 빈번.
+// 공식 Substack feed(insights.aaii.com/feed) 에는 최신 Sentiment Survey 본문이 포함되어
+// Bullish / Neutral / Bearish 수치를 직접 파싱 가능하다.
+const AAII_FEED_URL = 'https://insights.aaii.com/feed';
 
-function excelSerialToISO(serial: number): string {
-  // Excel date serial: 1900-01-01 = 1, 단 1900 윤년 버그로 -25569 offset → UNIX ms 환산.
-  const ms = Math.round((serial - 25569) * 86400 * 1000);
-  return new Date(ms).toISOString().slice(0, 10);
+function parseSignedPercentToken(token: string | undefined): number | null {
+  if (!token) return null;
+  const normalized = token.replace(/[−–—]/g, '-').replace(/,/g, '').trim();
+  const value = parseFloat(normalized);
+  return Number.isFinite(value) ? value : null;
 }
 
 export async function fetchAAIIBullBear(): Promise<SentimentPoint> {
   try {
-    const { data } = await axios.get<ArrayBuffer>(AAII_XLS_URL, {
-      headers: { ...HEADERS, Accept: 'application/vnd.ms-excel' },
+    const { data: xml } = await axios.get<string>(AAII_FEED_URL, {
+      headers: { ...HEADERS, Accept: 'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8' },
       timeout: 20000,
-      responseType: 'arraybuffer',
+      responseType: 'text',
     });
-    const wb = XLSX.read(Buffer.from(data), { type: 'buffer' });
-    const ws = wb.Sheets['SENTIMENT'];
-    if (!ws) {
-      return { value: null, asOf: null, source: 'AAII', error: 'SENTIMENT 시트 없음' };
+
+    const itemMatch = xml.match(
+      /<item><title><!\[CDATA\[(AAII Sentiment Survey:.*?|Sentiment Survey:.*?)\]\]><\/title>.*?<link>(.*?)<\/link>.*?<pubDate>(.*?)<\/pubDate>.*?<content:encoded><!\[CDATA\[(.*?)\]\]><\/content:encoded>/s,
+    );
+    if (!itemMatch) {
+      return { value: null, asOf: null, source: 'AAII:SUBSTACK', error: 'AAII Sentiment Survey item 미발견' };
     }
-    const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true }) as unknown[][];
 
-    // 최신 유효 행 역방향 탐색. Date serial 범위 40000~55000 (1999~2050) 내만 인정.
-    for (let i = rows.length - 1; i >= 7; i -= 1) {
-      const row = rows[i];
-      if (!Array.isArray(row) || row.length < 7) continue;
-      const serial = row[0];
-      if (typeof serial !== 'number' || serial < 40000 || serial > 55000) continue;
+    const [, , link, pubDate, content] = itemMatch;
+    const bullishMatch = content.match(/Bullish:\s*([0-9.]+)%/i);
+    const bearishMatch = content.match(/Bearish:\s*([0-9.]+)%/i);
+    const neutralMatch = content.match(/Neutral:\s*([0-9.]+)%/i);
+    const reportedSpreadMatch = content.match(/bull-bear spread[\s\S]{0,160}?to\s*([−–—-]?[0-9.]+)%/i);
 
-      const bullish = row[1] as number;
-      const bearish = row[3] as number;
-      const spread = row[6] as number; // Bullish - Bearish, 소수 (0.0724 = 7.24%)
+    const bullish = bullishMatch ? parseFloat(bullishMatch[1]) : NaN;
+    const bearish = bearishMatch ? parseFloat(bearishMatch[1]) : NaN;
+    const neutral = neutralMatch ? parseFloat(neutralMatch[1]) : NaN;
+    const reportedSpread = parseSignedPercentToken(reportedSpreadMatch?.[1]);
+    const spread = bullish - bearish;
 
-      if (
-        !Number.isFinite(bullish) ||
-        !Number.isFinite(bearish) ||
-        !Number.isFinite(spread)
-      ) {
-        continue;
-      }
-
+    if (!Number.isFinite(bullish) || !Number.isFinite(bearish) || !Number.isFinite(spread)) {
       return {
-        value: parseFloat((spread * 100).toFixed(2)), // -7.24 형태 (pp)
-        asOf: excelSerialToISO(serial),
-        source: 'AAII',
-        extra: {
-          bull: parseFloat((bullish * 100).toFixed(2)),
-          bear: parseFloat((bearish * 100).toFixed(2)),
-        },
+        value: null,
+        asOf: null,
+        source: 'AAII:SUBSTACK',
+        error: 'AAII feed item 에서 bullish/bearish/spread 파싱 실패',
       };
     }
-    return { value: null, asOf: null, source: 'AAII', error: '유효한 최신 행 없음' };
+
+    if (reportedSpread !== null && Math.abs(reportedSpread - spread) > 0.25) {
+      log.warn({
+        source: link,
+        bull: bullish,
+        bear: bearish,
+        computedSpread: parseFloat(spread.toFixed(2)),
+        reportedSpread,
+      }, 'AAII reported spread mismatched component math, using bullish-bearish');
+    }
+
+    return {
+      value: parseFloat(spread.toFixed(2)),
+      asOf: new Date(pubDate).toISOString().slice(0, 10),
+      source: 'AAII:SUBSTACK',
+      extra: {
+        bull: parseFloat(bullish.toFixed(2)),
+        bear: parseFloat(bearish.toFixed(2)),
+        neutral: Number.isFinite(neutral) ? parseFloat(neutral.toFixed(2)) : null,
+        reportedSpread: reportedSpread !== null ? parseFloat(reportedSpread.toFixed(2)) : null,
+      },
+    };
   } catch (e) {
     const msg = (e as { response?: { status?: number }; message?: string })?.response?.status || (e as Error)?.message;
     return {
       value: null,
       asOf: null,
-      source: 'AAII',
-      error: `AAII XLS fetch 실패: ${msg}`,
+      source: 'AAII:SUBSTACK',
+      error: `AAII feed fetch 실패: ${msg}`,
     };
   }
 }
@@ -206,17 +269,29 @@ export async function fetchNAAIM(): Promise<SentimentPoint> {
 
 // ---- 집계: 5분 스냅샷 cycle 에서 호출 ----------------------------------
 export async function fetchAllSentiment(): Promise<Record<string, MarketDataPoint>> {
+  const startedAt = Date.now();
+  const [aaiiFreshCache, naaimFreshCache] = await Promise.all([
+    getSentimentCadenceCache('AAII_BULL_BEAR_SPREAD'),
+    getSentimentCadenceCache('NAAIM_EXPOSURE'),
+  ]);
   const [pcr, aaii, naaim] = await Promise.allSettled([
     fetchCBOEPutCall(),
-    fetchAAIIBullBear(),
-    fetchNAAIM(),
+    aaiiFreshCache ? Promise.resolve(aaiiFreshCache) : fetchAAIIBullBear(),
+    naaimFreshCache ? Promise.resolve(naaimFreshCache) : fetchNAAIM(),
   ]);
 
   const out: Record<string, MarketDataPoint> = {};
   const today = new Date().toISOString().split('T')[0];
 
-  const pcrVal = pcr.status === 'fulfilled' ? pcr.value : null;
+  const pcrLive = pcr.status === 'fulfilled' && pcr.value.value !== null;
+  let pcrVal = pcr.status === 'fulfilled' ? pcr.value : null;
+  if (!pcrVal || pcrVal.value === null) {
+    pcrVal = await useSentimentCache('PC_RATIO');
+  }
   if (pcrVal && pcrVal.value !== null) {
+    if (pcrLive) {
+      await writeSourceCache('sentiment-PC_RATIO', pcrVal, { metric: 'PC_RATIO' });
+    }
     out.PC_RATIO = {
       code: 'PC_RATIO',
       value: pcrVal.value,
@@ -231,27 +306,81 @@ export async function fetchAllSentiment(): Promise<Record<string, MarketDataPoin
         source: 'CBOE',
       };
     }
+    log.info({
+      metric: 'PC_RATIO',
+      source: pcrVal.source,
+      value: pcrVal.value,
+      asOf: pcrVal.asOf,
+      extra: pcrVal.extra,
+    }, 'sentiment metric collected');
+  } else {
+    log.warn({
+      metric: 'PC_RATIO',
+      error: pcr.status === 'rejected' ? serializeError(pcr.reason) : pcrVal?.error,
+    }, 'sentiment metric unavailable');
   }
 
-  const aaiiVal = aaii.status === 'fulfilled' ? aaii.value : null;
+  const aaiiLive = !aaiiFreshCache && aaii.status === 'fulfilled' && aaii.value.value !== null;
+  let aaiiVal = aaii.status === 'fulfilled' ? aaii.value : null;
+  if (!aaiiVal || aaiiVal.value === null) {
+    aaiiVal = await useSentimentCache('AAII_BULL_BEAR_SPREAD');
+  }
   if (aaiiVal && aaiiVal.value !== null) {
+    if (aaiiLive) {
+      await writeSourceCache('sentiment-AAII_BULL_BEAR_SPREAD', aaiiVal, { metric: 'AAII_BULL_BEAR_SPREAD' });
+    }
     out.AAII_BULL_BEAR_SPREAD = {
       code: 'AAII_BULL_BEAR_SPREAD',
       value: aaiiVal.value,
       date: aaiiVal.asOf ?? today,
       source: 'CALC',
     };
+    log.info({
+      metric: 'AAII_BULL_BEAR_SPREAD',
+      source: aaiiVal.source,
+      value: aaiiVal.value,
+      asOf: aaiiVal.asOf,
+      extra: aaiiVal.extra,
+    }, 'sentiment metric collected');
+  } else {
+    log.warn({
+      metric: 'AAII_BULL_BEAR_SPREAD',
+      error: aaii.status === 'rejected' ? serializeError(aaii.reason) : aaiiVal?.error,
+    }, 'sentiment metric unavailable');
   }
 
-  const naaimVal = naaim.status === 'fulfilled' ? naaim.value : null;
+  const naaimLive = !naaimFreshCache && naaim.status === 'fulfilled' && naaim.value.value !== null;
+  let naaimVal = naaim.status === 'fulfilled' ? naaim.value : null;
+  if (!naaimVal || naaimVal.value === null) {
+    naaimVal = await useSentimentCache('NAAIM_EXPOSURE');
+  }
   if (naaimVal && naaimVal.value !== null) {
+    if (naaimLive) {
+      await writeSourceCache('sentiment-NAAIM_EXPOSURE', naaimVal, { metric: 'NAAIM_EXPOSURE' });
+    }
     out.NAAIM_EXPOSURE = {
       code: 'NAAIM_EXPOSURE',
       value: naaimVal.value,
       date: naaimVal.asOf ?? today,
       source: 'CALC',
     };
+    log.info({
+      metric: 'NAAIM_EXPOSURE',
+      source: naaimVal.source,
+      value: naaimVal.value,
+      asOf: naaimVal.asOf,
+    }, 'sentiment metric collected');
+  } else {
+    log.warn({
+      metric: 'NAAIM_EXPOSURE',
+      error: naaim.status === 'rejected' ? serializeError(naaim.reason) : naaimVal?.error,
+    }, 'sentiment metric unavailable');
   }
+
+  log.info({
+    durationMs: Date.now() - startedAt,
+    returnedKeys: Object.keys(out),
+  }, 'sentiment collection completed');
 
   return out;
 }
