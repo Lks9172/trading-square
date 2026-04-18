@@ -36,7 +36,12 @@ const BASE_ALLOCATIONS: Record<Regime, Record<string, number>> = {
   //   "DXY 약세 → 신흥국 수혜" 관점. sweep baseline 2016-2026 NASDAQ 강세 편향 일부 상쇄.
   //   sweep 알파 존중하되 향후 DXY 역전 시나리오 여유 확보.
   NEUTRAL:        { cash: 12, nasdaq: 38, leverage: 0,  gold: 24, silver: 6,  copper: 5,  korea: 10, emerging: 5  },
-  CAUTION:        { cash: 33, nasdaq: 21, leverage: 0,  gold: 25, silver: 4,  copper: 5,  korea: 10, emerging: 2  },
+  // CAUTION 12차 재선정 (2026-04-18, top-decile N=30 walk-forward --tx-cost=5bp,
+  //   Yahoo 기반 신규 derived 3종 반영 후). TRAIN α +2.66%p, TEST α +21.01%p,
+  //   alpha_decay=-17.69%p (과적합 없음). 영상 정합 강화 방향: silver 4→1(video2
+  //   경기둔화 강화), gold 25→28(구조헷지 강화), nasdaq 21→25(신규 derived 방어
+  //   장치 덕 공격성 확보), emerging 2→0(stt_kospi FX 악화 정합).
+  CAUTION:        { cash: 33, nasdaq: 25, leverage: 0,  gold: 28, silver: 1,  copper: 5,  korea: 8,  emerging: 0  },
   // 11차 envelope 수동 시정 (2026-04): 기존 cash=13/silver=8 이 envelope 규칙
   //   `cash ≥ 30` (video5_analysis §3.3 "숨고르기 30-40%") 및 `silver ≤ 5` (video2
   //   "경기둔화 = 은 하락") 을 이중 위반. sweep 활성일 29일로 BLOCKED 이라 수동 편집:
