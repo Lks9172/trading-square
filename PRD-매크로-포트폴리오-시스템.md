@@ -876,24 +876,26 @@ IF 국면 == RISK_ON:
 이를 보완하기 위해 `server/src/scripts/portfolio-sweep.ts` 에 `--mode=decile` 옵션 추가:
 상위 10% 조합의 **평균 비중** 을 regime 별로 출력한다 (robust 재선정 후보).
 
-**영상 원칙 envelope 제약 (10차 개선 + 11차 Fix B)** — Monte Carlo 후보 필터:
+**영상 원칙 envelope 제약 (10차 + 11차 원문 정합 재조정)** — Monte Carlo 후보 필터:
 
-| 제약 | 적용 레짐 | 근거 |
+| 제약 | 적용 레짐 | 원문 근거 |
 |---|---|---|
 | cash ≥ 5 | 전 레짐 | 최소 현금 쿠션 |
-| gold ≥ 5 | RISK_ON/NEUTRAL/CAUTION/CORRECTION | 구조적 헷지 |
+| gold ≥ 5 | RISK_ON/NEUTRAL/CAUTION/CORRECTION | 구조적 헷지 (video2 실질금리·달러·중앙은행 매수) |
 | emerging ≤ 15 | 전 레짐 | 신흥국 노출 상한 |
-| emerging ≤ 10 | CORRECTION/PANIC/RECESSION | FX 악화 시 외인 이탈 |
-| silver ≤ 5 | CAUTION/CORRECTION | 경기확장 전용 (영상5 정합) |
-| nasdaq ≥ 30, emerging ≥ 12, cash ≤ 12 | RISK_ON | 위험자산 적극 + DXY약세 수혜 (video1 §전략A, video2/4) |
-| nasdaq ≥ 28 | NEUTRAL | 위험자산 핵심 유지 |
-| cash ≥ 20, nasdaq ≤ 35 | CAUTION | 방어 핵심 (video3 §3.5) |
-| cash ≥ 10, emerging ≤ 9, silver ≤ 8 | CORRECTION | 분할탄약 + stt_kospi FX 이탈 + 경기둔화(video5) |
-| cash ≥ 10, nasdaq ≥ 30, gold ≥ 15 | PANIC_BUT_OK | 반등탄약 + 적극매수(video1 §전략C) + 헷지 |
-| cash ≥ 30, nasdaq ≤ 25, gold ≥ 20 | RECESSION_RISK | 방어절대 + 위험축소 + 구조헷지 |
+| emerging ≤ 10 | CORRECTION/PANIC/RECESSION | FX 악화 시 외인 이탈 (stt_kospi 환율 1,500 돌파) |
+| **silver ≤ 5** | **CAUTION/CORRECTION/PANIC/RECESSION** | video2 "은 아웃퍼폼 = 경기 회복 신호"; 2008 금융위기 금 -30% vs 은 -50%. **경기확장 아닌 국면 모두 상한 (11차 확장)** |
+| **cash ≥ 30** | **CAUTION/CORRECTION/RECESSION** | video5_analysis §3.3 "숨고르기/조정 국면 현금 30~40% 유지"; video3 "실업수당 30만+200DMA 아래 → 현금 비중 높여야" |
+
+**11차 재조정 배경 (원문 전문 재검증):**
+이전에 시도한 레짐별 nasdaq/emerging/gold 수치 하한·상한 규칙(RISK_ON nasdaq≥30/emerging≥12/cash≤12, NEUTRAL nasdaq≥28, CAUTION nasdaq≤35, CORRECTION emerging≤9/silver≤8, PANIC nasdaq≥30/gold≥15, RECESSION nasdaq≤25/gold≥20)은 stt_video1~4, stt_kospi, video1~5_analysis, 이동평균선 상세분석, notion_content.json **어디에도 구체 수치 근거가 없다**. 이동평균선 문서 §14 는 *"수치 룰은 일부 비워둔 상태"* 로 명시. 영상 원문에서 발견된 구체 %p 수치는 딱 2개 — video1 "레버리지 최대 15%", video5_analysis "현금 30~40% 유지". 이 둘만 envelope 에 반영하고 나머지 사용자 해석 규칙은 제거한다.
+
+**PANIC_BUT_OK 은 gold 하한 및 cash 하한 미적용:**
+- gold 하한: 영상 원문에 PANIC/RECESSION gold 수치 근거 없음. video2 명시: *"공황 초기엔 금도 같이 빠질 수 있다 (사람들이 뭐든 팔아서 현금 만들려고)"*. 기존 주석 *"타 방어 자산 우선 구조"* 가 원문 정합.
+- cash 하한: video1 *"아껴둔 현금을 쓰는 구간"* — PANIC 은 현금 소진(매수 탄약) 국면.
 
 제약 위반 샘플은 자동 drop + 재샘플링. reject 통계는 레짐별 로그.
-CONSTRAINTS lo/hi 는 위 envelope 과 호환되도록 축소 (첫-패스 reject율 최소화).
+CONSTRAINTS lo/hi 는 위 envelope 과 호환되도록 조정 — RISK_ON/NEUTRAL 은 원래 넓은 탐색 범위 복원, CAUTION/CORRECTION/RECESSION cash lo=30, 전 4개 방어 레짐 silver hi=5.
 
 **BASE 교체 recommendation (Fix C):**
 - `CANDIDATE`: 활성일 ≥ 100 **AND** envelopeViolations = 0 → BASE 교체 후보
