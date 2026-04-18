@@ -49,6 +49,36 @@ export const NASDAQ_MEGACAP_CUSIPS: Record<string, string> = {
   TSLA: '88160R101',
 };
 
+/**
+ * 12차 Phase 3 (2026-04): 섹터별 대표 종목 CUSIP — 집단 이동 감지용.
+ *   기술(Tech): XLK 구성 주요
+ *   금융(Fin): XLF 구성 주요 (JPM, BAC, WFC, GS, MS)
+ *   에너지(Energy): XLE 구성 주요 (XOM, CVX, COP, SLB, EOG)
+ */
+export const SECTOR_CUSIPS: Record<'tech' | 'fin' | 'energy', string[]> = {
+  tech: [
+    '037833100', // AAPL
+    '594918104', // MSFT
+    '02079K305', // GOOGL
+    '67066G104', // NVDA
+    '30303M102', // META
+  ],
+  fin: [
+    '46625H100', // JPM
+    '060505104', // BAC
+    '949746101', // WFC
+    '38141G104', // GS
+    '617446448', // MS
+  ],
+  energy: [
+    '30231G102', // XOM
+    '166764100', // CVX
+    '20825C104', // COP
+    '806857108', // SLB
+    '26875P101', // EOG
+  ],
+};
+
 export interface Position {
   cusip: string;
   value: number; // USD thousand
@@ -349,6 +379,44 @@ export function computePositionChanges(
  *
  * 이전 분기 데이터 있는 펀드 ≥ 3 곳 필요 (없으면 null).
  */
+/**
+ * 12차 Phase 3: 섹터별 집단 비중 분기 변화 (tech/fin/energy 동시).
+ *   영상4 §기관 "집단이 어디로 움직이나" 의 섹터 버전.
+ *   각 섹터 CUSIP 합 비중의 펀드 평균 → 분기 Δ → -2~+2 레벨.
+ *   이전 분기 데이터 있는 펀드 ≥ 3 곳 필요.
+ */
+export function computeSectorInstitutionalFlow(
+  quarterly: FundQuarterlyPositions[],
+  sector: 'tech' | 'fin' | 'energy',
+): { currentPct: number; previousPct: number; deltaPct: number; level: -2 | -1 | 0 | 1 | 2; fundCount: number } | null {
+  const cusips = new Set(SECTOR_CUSIPS[sector]);
+  const shares: Array<{ curShare: number; prevShare: number }> = [];
+  for (const q of quarterly) {
+    if (!q.previous) continue;
+    if (q.current.totalValue <= 0 || q.previous.totalValue <= 0) continue;
+    const curSum = q.current.positions.filter((p) => cusips.has(p.cusip)).reduce((s, p) => s + p.value, 0);
+    const prevSum = q.previous.positions.filter((p) => cusips.has(p.cusip)).reduce((s, p) => s + p.value, 0);
+    shares.push({ curShare: curSum / q.current.totalValue, prevShare: prevSum / q.previous.totalValue });
+  }
+  if (shares.length < 3) return null;
+  const currentPct = (shares.reduce((s, x) => s + x.curShare, 0) / shares.length) * 100;
+  const previousPct = (shares.reduce((s, x) => s + x.prevShare, 0) / shares.length) * 100;
+  const deltaPct = currentPct - previousPct;
+  let level: -2 | -1 | 0 | 1 | 2;
+  if (deltaPct > 2.0) level = 2;
+  else if (deltaPct > 0.5) level = 1;
+  else if (deltaPct < -2.0) level = -2;
+  else if (deltaPct < -0.5) level = -1;
+  else level = 0;
+  return {
+    currentPct: parseFloat(currentPct.toFixed(2)),
+    previousPct: parseFloat(previousPct.toFixed(2)),
+    deltaPct: parseFloat(deltaPct.toFixed(2)),
+    level,
+    fundCount: shares.length,
+  };
+}
+
 export function computeNasdaqMegacapFlow(
   quarterly: FundQuarterlyPositions[],
 ): { currentPct: number; previousPct: number; deltaPct: number; level: -2 | -1 | 0 | 1 | 2; fundCount: number } | null {

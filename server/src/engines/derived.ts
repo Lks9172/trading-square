@@ -2470,6 +2470,7 @@ export async function computeDerived(
       fetchInstitutional13FQuarterly,
       computeNasdaqMegacapExposure,
       computeNasdaqMegacapFlow,
+      computeSectorInstitutionalFlow,
     } = await import('../collectors/institutional-13f');
     const quarterly = await fetchInstitutional13FQuarterly();
     const currentFunds = quarterly.map((q) => q.current);
@@ -2497,6 +2498,25 @@ export async function computeDerived(
           `레벨: +2(>+2%p), +1(>+0.5%p), 0, -1(<-0.5%p), -2(<-2%p). ` +
           `영상4 §기관 "집단이 어디로 움직이나" 정합.`,
       };
+    }
+    // Phase 3 섹터 확장 (12차 2026-04): tech/fin/energy 집단 이동
+    for (const [sector, key] of [
+      ['tech', 'INSTITUTIONAL_SECTOR_TECH_FLOW'],
+      ['fin', 'INSTITUTIONAL_SECTOR_FIN_FLOW'],
+      ['energy', 'INSTITUTIONAL_SECTOR_ENERGY_FLOW'],
+    ] as const) {
+      const sf = computeSectorInstitutionalFlow(quarterly, sector as 'tech' | 'fin' | 'energy');
+      if (sf) {
+        d[key] = {
+          name: key.toLowerCase(),
+          value: sf.level,
+          date: today(),
+          formula:
+            `${sector.toUpperCase()} 섹터 비중 분기 변화: ${sf.previousPct}% → ${sf.currentPct}% ` +
+            `(Δ ${sf.deltaPct > 0 ? '+' : ''}${sf.deltaPct}%p, ${sf.fundCount}곳). ` +
+            `레벨 ±2/±1/0. 13F 주요 5종목 합 비중 펀드 평균. 영상4 §기관 섹터 확장.`,
+        };
+      }
     }
   } catch {
     /* INSTITUTIONAL_* 실패는 파이프라인 막지 않음 */
