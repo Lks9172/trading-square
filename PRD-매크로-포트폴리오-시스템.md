@@ -876,7 +876,7 @@ IF 국면 == RISK_ON:
 이를 보완하기 위해 `server/src/scripts/portfolio-sweep.ts` 에 `--mode=decile` 옵션 추가:
 상위 10% 조합의 **평균 비중** 을 regime 별로 출력한다 (robust 재선정 후보).
 
-**영상 원칙 envelope 제약 (10차 개선)** — Monte Carlo 후보 필터:
+**영상 원칙 envelope 제약 (10차 개선 + 11차 Fix B)** — Monte Carlo 후보 필터:
 
 | 제약 | 적용 레짐 | 근거 |
 |---|---|---|
@@ -885,8 +885,20 @@ IF 국면 == RISK_ON:
 | emerging ≤ 15 | 전 레짐 | 신흥국 노출 상한 |
 | emerging ≤ 10 | CORRECTION/PANIC/RECESSION | FX 악화 시 외인 이탈 |
 | silver ≤ 5 | CAUTION/CORRECTION | 경기확장 전용 (영상5 정합) |
+| nasdaq ≥ 30, emerging ≥ 12, cash ≤ 12 | RISK_ON | 위험자산 적극 + DXY약세 수혜 (video1 §전략A, video2/4) |
+| nasdaq ≥ 28 | NEUTRAL | 위험자산 핵심 유지 |
+| cash ≥ 20, nasdaq ≤ 35 | CAUTION | 방어 핵심 (video3 §3.5) |
+| cash ≥ 10, emerging ≤ 9, silver ≤ 8 | CORRECTION | 분할탄약 + stt_kospi FX 이탈 + 경기둔화(video5) |
+| cash ≥ 10, nasdaq ≥ 30, gold ≥ 15 | PANIC_BUT_OK | 반등탄약 + 적극매수(video1 §전략C) + 헷지 |
+| cash ≥ 30, nasdaq ≤ 25, gold ≥ 20 | RECESSION_RISK | 방어절대 + 위험축소 + 구조헷지 |
 
 제약 위반 샘플은 자동 drop + 재샘플링. reject 통계는 레짐별 로그.
+CONSTRAINTS lo/hi 는 위 envelope 과 호환되도록 축소 (첫-패스 reject율 최소화).
+
+**BASE 교체 recommendation (Fix C):**
+- `CANDIDATE`: 활성일 ≥ 100 **AND** envelopeViolations = 0 → BASE 교체 후보
+- `BLOCKED`: 저표본 (활성일 < 100) 또는 envelope 위반 존재 → 교체 금지
+- 종합 요약에 후보/보류 카운트 출력, JSON 출력에 `recommendation`/`blockReason` 필드 포함
 
 **Walk-forward OOS (과적합 진단):**
 - train: 2016-01-01 ~ 2023-12-31 / test: 2024-01-01 ~ 현재
