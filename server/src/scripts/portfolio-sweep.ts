@@ -55,7 +55,7 @@ const CONSTRAINTS: Record<Regime, Record<string, [number, number]>> = {
   //   - RISK_ON/NEUTRAL: 원문 수치 하한 없음 → 넓은 탐색 범위 복원
   //   - CAUTION/CORRECTION/RECESSION: cash ≥ 30 (video5_analysis), silver ≤ 5 (video2)
   //   - PANIC_BUT_OK: silver ≤ 5 (video2) 만 추가, gold 하한 없음 (영상 근거 없음)
-  RISK_ON:        { cash: [5, 20],  nasdaq: [25, 55], leverage: [0, 0],   gold: [5, 30],  silver: [0, 10], copper: [5, 15],  korea: [5, 20], emerging: [5, 20] },
+  RISK_ON:        { cash: [5, 20],  nasdaq: [25, 55], leverage: [0, 0],   gold: [5, 30],  silver: [0, 10], copper: [5, 15],  korea: [5, 20], emerging: [5, 15] },
   NEUTRAL:        { cash: [10, 30], nasdaq: [20, 50], leverage: [0, 0],   gold: [10, 30], silver: [0, 10], copper: [0, 10],  korea: [5, 20], emerging: [0, 15] },
   CAUTION:        { cash: [30, 45], nasdaq: [15, 35], leverage: [0, 0],   gold: [15, 35], silver: [0, 5],  copper: [0, 10],  korea: [5, 20], emerging: [0, 15] },
   CORRECTION:     { cash: [30, 45], nasdaq: [15, 45], leverage: [0, 0],   gold: [15, 35], silver: [0, 5],  copper: [0, 10],  korea: [5, 20], emerging: [0, 10] },
