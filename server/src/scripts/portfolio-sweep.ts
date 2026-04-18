@@ -51,12 +51,15 @@ const CURRENT_PRD: Template = {
 
 /** 각 국면의 자산별 [lo, hi] 제약. 영상/PRD 철학 최소 준수. */
 const CONSTRAINTS: Record<Regime, Record<string, [number, number]>> = {
-  RISK_ON:        { cash: [5, 20],  nasdaq: [25, 55], leverage: [0, 0],   gold: [5, 30],  silver: [0, 10], copper: [5, 15],  korea: [5, 20], emerging: [5, 20] },
-  NEUTRAL:        { cash: [10, 30], nasdaq: [20, 50], leverage: [0, 0],   gold: [10, 30], silver: [0, 10], copper: [0, 10],  korea: [5, 20], emerging: [0, 15] },
-  CAUTION:        { cash: [20, 45], nasdaq: [15, 40], leverage: [0, 0],   gold: [15, 35], silver: [0, 10], copper: [0, 10],  korea: [5, 20], emerging: [0, 15] },
-  CORRECTION:     { cash: [15, 40], nasdaq: [20, 45], leverage: [0, 0],   gold: [15, 35], silver: [0, 10], copper: [0, 10],  korea: [5, 20], emerging: [0, 15] },
-  PANIC_BUT_OK:   { cash: [10, 25], nasdaq: [25, 55], leverage: [5, 15],  gold: [10, 30], silver: [0, 10], copper: [0, 10],  korea: [0, 15], emerging: [0, 15] },
-  RECESSION_RISK: { cash: [40, 65], nasdaq: [5, 25],  leverage: [0, 0],   gold: [15, 40], silver: [0, 5],  copper: [0, 5],   korea: [0, 15], emerging: [0, 15] },
+  // Fix B 호환 조정 (2026-04): 새 envelope (RISK_ON nasdaq≥30/emerging≥12/cash≤12, NEUTRAL nasdaq≥28,
+  //   CAUTION nasdaq≤35, CORRECTION emerging≤9, PANIC nasdaq≥30/gold≥15, RECESSION gold≥20) 와
+  //   호환되도록 lo/hi 축소. 첫-패스 reject율 축소 (fallback 경로 최소화).
+  RISK_ON:        { cash: [5, 12],  nasdaq: [30, 55], leverage: [0, 0],   gold: [5, 30],  silver: [0, 10], copper: [5, 15],  korea: [5, 20], emerging: [12, 20] },
+  NEUTRAL:        { cash: [10, 30], nasdaq: [28, 50], leverage: [0, 0],   gold: [10, 30], silver: [0, 10], copper: [0, 10],  korea: [5, 20], emerging: [0, 15] },
+  CAUTION:        { cash: [20, 45], nasdaq: [15, 35], leverage: [0, 0],   gold: [15, 35], silver: [0, 5],  copper: [0, 10],  korea: [5, 20], emerging: [0, 15] },
+  CORRECTION:     { cash: [15, 40], nasdaq: [20, 45], leverage: [0, 0],   gold: [15, 35], silver: [0, 8],  copper: [0, 10],  korea: [5, 20], emerging: [0, 9]  },
+  PANIC_BUT_OK:   { cash: [10, 25], nasdaq: [30, 55], leverage: [5, 15],  gold: [15, 30], silver: [0, 10], copper: [0, 10],  korea: [0, 15], emerging: [0, 10] },
+  RECESSION_RISK: { cash: [30, 65], nasdaq: [5, 25],  leverage: [0, 0],   gold: [20, 40], silver: [0, 5],  copper: [0, 5],   korea: [0, 15], emerging: [0, 10] },
   // Fix #5: STAGFLATION/BOND_VIGILANTE 는 탐색 대상 아님 — 고정 방어(스윕 비대상) 제약으로 통과.
   STAGFLATION:    { cash: [25, 25], nasdaq: [15, 15], leverage: [0, 0],   gold: [30, 30], silver: [10, 10], copper: [5, 5],  korea: [8, 8],  emerging: [7, 7]  },
   BOND_VIGILANTE: { cash: [30, 30], nasdaq: [10, 10], leverage: [0, 0],   gold: [35, 35], silver: [8, 8],   copper: [3, 3],  korea: [7, 7],  emerging: [7, 7]  },
@@ -92,6 +95,36 @@ function validateEnvelopeConstraints(
   if ((regime === 'CAUTION' || regime === 'CORRECTION') && (alloc.silver ?? 0) > 5) {
     return { ok: false, reason: `${regime} silver>5 (non-expansion)` };
   }
+
+  // === Fix B (2026-04): 레짐별 영상 정의 강제 ===
+  if (regime === 'RISK_ON') {
+    if ((alloc.nasdaq ?? 0) < 30) return { ok: false, reason: 'RISK_ON nasdaq<30 (위험자산 적극, video1 §전략A)' };
+    if ((alloc.emerging ?? 0) < 12) return { ok: false, reason: 'RISK_ON emerging<12 (DXY약세 수혜, video2/4)' };
+    if ((alloc.cash ?? 0) > 12) return { ok: false, reason: 'RISK_ON cash>12 (현금과다)' };
+  }
+  if (regime === 'NEUTRAL' && (alloc.nasdaq ?? 0) < 28) {
+    return { ok: false, reason: 'NEUTRAL nasdaq<28 (위험자산 핵심)' };
+  }
+  if (regime === 'CAUTION') {
+    if ((alloc.cash ?? 0) < 20) return { ok: false, reason: 'CAUTION cash<20 (방어 핵심, video3 §3.5)' };
+    if ((alloc.nasdaq ?? 0) > 35) return { ok: false, reason: 'CAUTION nasdaq>35 (위험과다)' };
+  }
+  if (regime === 'CORRECTION') {
+    if ((alloc.cash ?? 0) < 10) return { ok: false, reason: 'CORRECTION cash<10 (분할탄약)' };
+    if ((alloc.emerging ?? 0) > 9) return { ok: false, reason: 'CORRECTION emerging>9 (stt_kospi FX 이탈)' };
+    if ((alloc.silver ?? 0) > 8) return { ok: false, reason: 'CORRECTION silver>8 (경기둔화 video5)' };
+  }
+  if (regime === 'PANIC_BUT_OK') {
+    if ((alloc.cash ?? 0) < 10) return { ok: false, reason: 'PANIC cash<10 (반등탄약)' };
+    if ((alloc.nasdaq ?? 0) < 30) return { ok: false, reason: 'PANIC nasdaq<30 (적극매수 video1 §전략C)' };
+    if ((alloc.gold ?? 0) < 15) return { ok: false, reason: 'PANIC gold<15 (헷지)' };
+  }
+  if (regime === 'RECESSION_RISK') {
+    if ((alloc.cash ?? 0) < 30) return { ok: false, reason: 'RECESSION cash<30 (방어절대)' };
+    if ((alloc.nasdaq ?? 0) > 25) return { ok: false, reason: 'RECESSION nasdaq>25 (위험축소)' };
+    if ((alloc.gold ?? 0) < 20) return { ok: false, reason: 'RECESSION gold<20 (구조헷지)' };
+  }
+
   return { ok: true };
 }
 
@@ -278,6 +311,8 @@ async function main() {
     sampleWarning: string | null;
     activeDays: number;
     envelopeViolations: string[]; // Fix #6: decileMean 이 envelope 어긴 항목들
+    recommendation: 'BLOCKED' | 'CANDIDATE'; // Fix C: 저표본/위반 시 BLOCKED
+    blockReason?: string;
   }> = {};
 
   const assets: Record<string, { key: string; source: string }> = {
@@ -449,7 +484,23 @@ async function main() {
           violations.push(`silver=${meanRow.silver} (경기확장 아님 기준 ≤5)`);
         return violations;
       })(),
+      recommendation: 'CANDIDATE', // 아래 블록에서 덮어씀
     };
+    // Fix C (2026-04): 저표본/envelope 위반 시 BASE 교체 BLOCKED 라벨.
+    //   활성일 100 미만: 레짐 표본 부족 → 교체 금지
+    //   envelope 위반 존재: 영상 원칙 위반 → 교체 금지
+    {
+      const activeD = regimeActiveDays[regime] || 0;
+      const violations = perRegimeOut[regime].envelopeViolations;
+      if (activeD < 100 || violations.length > 0) {
+        perRegimeOut[regime].recommendation = 'BLOCKED';
+        perRegimeOut[regime].blockReason =
+          activeD < 100 ? `저표본 (활성일 ${activeD} < 100)` :
+          `envelope 위반 ${violations.length}건`;
+      } else {
+        perRegimeOut[regime].recommendation = 'CANDIDATE';
+      }
+    }
     const activeDaysStr = regimeActiveDays[regime] || 0;
     const warnTag = perRegimeOut[regime].sampleWarning ? `  ⚠️ ${perRegimeOut[regime].sampleWarning}` : '';
     console.log(`[sample-stats] ${regime} valid=${samples.length}/${N} (envelope-rejected ${regimeRejected}) activeDays=${activeDaysStr}${warnTag}`);
@@ -495,6 +546,18 @@ async function main() {
       console.log(`→ 검증 필요 — envelope 제약 재조정 또는 BASE_ALLOCATIONS 수동 반영 시 주의`);
     } else {
       console.log(`\n✓ 영상 원칙 준수 검토: 모든 decile-mean 후보가 envelope 제약 내.`);
+    }
+
+    // Fix C (2026-04): BASE_ALLOCATIONS 교체 후보/보류 카운트.
+    const candidates = Object.entries(perRegimeOut)
+      .filter(([, v]) => v.recommendation === 'CANDIDATE').map(([r]) => r);
+    const blocked = Object.entries(perRegimeOut)
+      .filter(([, v]) => v.recommendation === 'BLOCKED');
+    console.log('');
+    console.log(`✅ BASE 교체 후보 ${candidates.length}개: ${candidates.join(', ') || '없음'}`);
+    console.log(`⛔ 보류 ${blocked.length}개:`);
+    for (const [r, v] of blocked) {
+      console.log(`   - ${r}: ${v.blockReason}`);
     }
   }
 
