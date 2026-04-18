@@ -2289,5 +2289,29 @@ export async function computeDerived(
     /* LEVERAGE_TIER_RAW 실패는 파이프라인 막지 않음 */
   }
 
+  // === INSTITUTIONAL_NASDAQ_EXPOSURE_PCT (11차 #8 MVP, 2026-04) ===
+  // 영상4 §기관리포트: "말은 거짓말 할 수 있지만 돈은 거짓말을 하지 않거든요".
+  // 주요 헤지펀드 10곳의 최근 13F-HR 공시에서 NASDAQ 메가캡 7종목 비중 평균.
+  //   MVP: 현재 시점 단일 스냅샷. 분기 비교 / 포지션 변화 추적은 Phase 2.
+  //   TTL 7일, stale 30일 (분기 배치라 갱신 여유).
+  try {
+    const { fetchInstitutional13F, computeNasdaqMegacapExposure } = await import('../collectors/institutional-13f');
+    const funds = await fetchInstitutional13F();
+    const exposure = computeNasdaqMegacapExposure(funds);
+    if (exposure) {
+      d.INSTITUTIONAL_NASDAQ_EXPOSURE_PCT = {
+        name: 'institutional_nasdaq_exposure_pct',
+        value: exposure.avgSharePct,
+        date: today(),
+        formula:
+          `주요 헤지펀드 ${exposure.fundCount}곳 최근 13F-HR 기준 NASDAQ 메가캡 ` +
+          `(AAPL/MSFT/GOOGL/AMZN/NVDA/META/TSLA) 비중 단순 평균(%). ` +
+          `영상4 §기관리포트 정합. SEC EDGAR, 7일 캐시.`,
+      };
+    }
+  } catch {
+    /* INSTITUTIONAL_NASDAQ_EXPOSURE 실패는 파이프라인 막지 않음 */
+  }
+
   return d;
 }
