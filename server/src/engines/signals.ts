@@ -325,6 +325,12 @@ function nasdaqSignal(
   if (tailRisk !== null && tailRisk >= 2) {
     overheatFlags.push('TAIL_RISK_LEVEL 고위험 (SKEW/VVIX/OVX 중 2개 이상 과열, video4)');
   }
+  // 12차 노션 HY 정합: regime score 외 signal 레벨 경고 (regime 롤백 보완).
+  // 노션 "5-7% 주의" 구간부터 NASDAQ 과열 플래그. 8% 이상은 이미 regime -2 반영.
+  const hyRaw = v(raw, 'BAMLH0A0HYM2');
+  if (hyRaw !== null && hyRaw >= 5 && hyRaw < 8) {
+    overheatFlags.push(`HY OAS ${hyRaw.toFixed(1)}% — 노션 "5-7% 주의" 구간 신용 스트레스`);
+  }
   if (overheatFlags.length >= 2 && signal !== 'SELL') {
     signal = 'REDUCE';
     const overrideReason = `과열 REDUCE override: ${overheatFlags.join(' · ')}`;

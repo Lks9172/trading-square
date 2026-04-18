@@ -45,6 +45,10 @@ function scoreYieldCurve(spread: number | null): number {
 }
 
 function scoreHYSpread(hy: number | null): number {
+  // 12차 노션 정합 시도 후 롤백 (2026-04): 노션 "3.5/5-7/8" 임계로 조정했으나
+  //   regime score 에서 HY weight 1.2 × 2→1 점수 하락이 RISK_ON(≥75) 경계에
+  //   크게 영향 → sweep 과거 10년 RISK_ON 활성일 17→0 (과도한 보수화).
+  //   기존 5단계 세분화가 실용적. 노션 경고는 NASDAQ signal 레벨로 별도 처리.
   if (hy === null) return 0;
   if (hy > 8) return -2;
   if (hy > 6) return -1;
