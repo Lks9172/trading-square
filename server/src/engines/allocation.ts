@@ -12,14 +12,18 @@ import { ASSET_TO_ALLOC_KEY } from './asset-keys';
 //   * cash 전반적으로 소폭 축소 (강세장 기간 수익 기여 극대화)
 // 효과: COMPOSED 10Y 225%→296% (+70%p), 5Y +17%p, 1Y +14%p (sweep 기준)
 //
-// TODO(Fix #FE3): **top1 → top-decile 평균 이관 필요**.
-//   현재 top1 은 N=40 샘플 내 최상값이라 전형적 sample-내 과적합 리스크. 상위 10% 평균을
-//   BASE 로 사용하면 데이터 기반 방향성은 유지하되 noise 민감도를 낮출 수 있음.
-//   작업 순서:
-//     1) portfolio-sweep.ts 에 `--top-decile` 모드 추가 (N 재조정, 아마 N≥100).
-//     2) 각 국면별 top 10% row 를 key-wise 평균 → 100 으로 재정규화.
-//     3) 현 top1 과 diff 를 본 커밋과 별개로 검토 → 백테스트 회귀 후 교체.
-//   본 커밋 스코프에서는 BASE 숫자 변경 없음 — TODO 주석만 명시.
+// Fix #FE3 (13차 부분 해소, 2026-04):
+//   **top1 → top-decile 이관 상태**:
+//     ✅ NEUTRAL (11차, sweep N=30 decileMean 반영)
+//     ✅ CAUTION (12차, sweep 신규 derived 반영 후 decileMean 채택)
+//     ⚠️ RISK_ON/CORRECTION/PANIC_BUT_OK/RECESSION_RISK/STAGFLATION/BOND_VIGILANTE:
+//        **여전히 top-1 계승 (그나마 영상 수동 시정 포함)**. 단, sweep 활성일이
+//        100일 미만(저표본)이라 BLOCKED 처리되어 자동 교체 대상 아님:
+//          - RISK_ON 17일, CORRECTION 29일, PANIC/RECESSION 0일 (10년 스캔)
+//          - STAGFLATION/BOND_VIGILANTE 는 sweep 비대상 (override 전용 고정)
+//        즉, 이들은 **수동 영상 정합 시정**으로만 갱신 가능 (11차에서 진행됨).
+//        미래 해소 경로: FOMC/BOND_VIGILANTE 이벤트 시뮬레이션, synthetic history
+//        확장, 혹은 sweep 기간을 30년+로 확장해 극단 레짐 활성일 확보.
 const BASE_ALLOCATIONS: Record<Regime, Record<string, number>> = {
   // 11차 envelope 수동 시정 (2026-04): 기존 emerging=19 가 envelope 규칙 `emerging ≤ 15` 를
   //   위반했고, gold=7 은 video2 "중앙은행 구조 매수 대세 상승" 맥락에서 RISK_ON 이라도

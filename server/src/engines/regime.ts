@@ -226,10 +226,18 @@ export function classifyRegime(
   let regime: Regime;
   const overrides: string[] = [];
 
-  // TODO(Fix #FE3): score 컷 {75, 55, 40, 25} 근거 재확인.
-  //   Monte Carlo sweep + PRD §레짐 전환 구간 크로스체크 미실시. 현 컷은 0~100 score 를
-  //   5분위(80/60/40/20 근방)에 살짝 당겨 놓은 heuristic. 14개 component × 가중합 분포가
-  //   실제로 어떤 밴드에 분포하는지 backtest 로 관측 후 다시 결정 필요.
+  // 13차 재검증 (2026-04): score 컷 {75, 55, 40, 25} heuristic 의 **sweep 기반 관측**.
+  //   portfolio-sweep.ts 활성일 10년 스캔 결과 (HY 롤백 후):
+  //     RISK_ON=17일, NEUTRAL=2097일, CAUTION=371일, CORRECTION=29일, PANIC/RECESSION=0일
+  //   → NEUTRAL 이 과반 차지, 극단 레짐(PANIC/RECESSION)은 10년 데이터에 0일.
+  //   영상 원문에 명시 수치 없음 (video4 §7가지 렌즈 는 정성적 개수만).
+  //   현재 컷 유지 근거:
+  //     1) STAGFLATION/BOND_VIGILANTE override 가 극단 이벤트 포착 (점수 무시)
+  //     2) CAUTION 371일 ≈ 10년 중 15% = 영상 "역사적 조정 구간" 과 얼추 정합
+  //     3) RISK_ON 75 컷은 7개 렌즈 동시 긍정 시만 통과 → "확신 깊이" 영상 정합
+  //   추후 검토 여지:
+  //     - RISK_ON 17일 (1%) 너무 희소하면 72 or 70 완화 검토
+  //     - backtest sensitivity sweep 에 cutoff 가변 추가 (별도 작업)
   if (score >= 75) {
     regime = 'RISK_ON';
   } else if (score >= 55) {
