@@ -89,10 +89,53 @@
 
 ## 우선순위 권고
 
-1. **#8 (13F)**: ROI 높음. 영상 명시도 강하고 SEC 공개 데이터 무료. 분기 배치로 운영 부담 낮음. → **다음 세션 1순위 후보**.
+1. **#8 (13F)**: ROI 높음. 영상 명시도 강하고 SEC 공개 데이터 무료. 분기 배치로 운영 부담 낮음. → ✅ **12차 Phase 1-4 구현 완료** (Phase 4 는 CONSENSUS_DIVERGENCE 남음).
 2. **#9 (정책 자동화)**: ROI 중간. 자동화 어려움 대비 manual input 이 이미 대체 수단. NLP 정확도 도달 전까지는 수동이 더 정확할 수 있음. → **장기 로드맵**.
 
 ## 작업 진입 전 확인
 - **데이터 라이선스**: SEC EDGAR 는 public domain, 대부분 뉴스는 RSS 무료 가능.
 - **백테스트 데이터**: 13F 과거 분기별 히스토리 SEC 에 존재 (2000년대 이후).
 - **영상 정합 검증**: 구현 후 stt_kospi 2025년 2-3월 외국인 대량 매도 시기의 13F 변화가 감지되는지 확인.
+
+---
+
+## 🔵 #8 Phase 4 설계 스켈레톤 (2026-04 추가)
+
+### 목표
+RESEARCH_CONSENSUS_DIVERGENCE — 애널리스트 리포트의 추천(BUY/HOLD/SELL)과 13F 실제 베팅 사이 괴리 감지. video4 §기관 "말은 거짓말 할 수 있지만 돈은 거짓말을 하지 않거든요" 정합.
+
+### 데이터 소스
+**Option A (권장)**: Yahoo Finance analyst recommendations
+- API: `quoteSummary?modules=recommendationTrend,upgradeDowngradeHistory`
+- 종목별 strong_buy/buy/hold/sell 카운트 월별 제공
+- 무료, rate limit 관대
+
+**Option B**: Finviz scraper
+- 종목별 analyst targets 테이블
+- HTML 파싱 필요, 구조 변경 위험
+
+**Option C**: TipRanks API
+- 유료, 정밀도 높지만 비용 부담
+
+### 파생 지표 설계
+```
+RESEARCH_CONSENSUS_DIVERGENCE (value: -2 ~ +2)
+  계산:
+    1. NASDAQ 메가캡 7종목 각각의 analyst consensus 점수화
+       (strong_buy=+2, buy=+1, hold=0, underperform=-1, sell=-2)
+       펀드 가중치 평균 → 추천 점수 [-2, +2]
+    2. 13F INSTITUTIONAL_NASDAQ_FLOW level [-2, +2]
+    3. divergence = 추천 점수 - 13F flow
+       >+2: 추천 긍정 but 기관 매도 (≈ "말과 돈 괴리 BUY")
+       <-2: 추천 부정 but 기관 매수 (≈ "말과 돈 괴리 SELL")
+       나머지: 0
+```
+
+### 구현 범위 (예상 3-5일)
+- `collectors/analyst-consensus.ts` 신규 (Yahoo quoteSummary 래퍼)
+- `derived.ts` 에 RESEARCH_CONSENSUS_DIVERGENCE 추가
+- signals.ts NASDAQ 에서 발동 시 경고 / 가점
+
+### 테스트 전략
+- 2022-12 (추천 다수 BUY 인데 헤지펀드 12월 tech 대거 처분) 역사 데이터로 divergence=+2 재현되는지
+- 2023-06 (ChatGPT 붐 후 추천 갑자기 상향 + 기관 추종) divergence=0 재현
