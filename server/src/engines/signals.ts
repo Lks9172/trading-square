@@ -231,6 +231,35 @@ function nasdaqSignal(
   if (xlk !== null && xlk > 0) { reasons.push(`XLK 기술섹터 +${xlk.toFixed(1)}% → 성장주 랠리 질 양호 (보조조건)`); }
   else if (xlk !== null && xlk < 0) { unmetReasons.push(`XLK 기술섹터 ${xlk.toFixed(1)}% → 성장주 주도력 약함 (보조조건)`); }
 
+  // 12차 N3: 전략B 5가지 겹침 가점 — video1 "확신 깊이 최대"
+  // 차트(200DMA↓ or 이격도<-10%) + 유동성(확장) + 정책(완화) + 지정학(낮음) + 모멘텀(XLK>0)
+  {
+    const stratChart = (above200 === 0) || (disparity !== null && disparity < -10);
+    const stratLiq = liquidityExpanding || rrpLoosening || m2Expanding;
+    const stratPolicy = (profile.manualInputs?.policyDirection ?? 0) > 0;
+    const stratGeo = (profile.manualInputs?.geoRisk ?? 3) < 3;
+    const stratMomentum = xlk !== null && xlk > 0;
+    const stratCount =
+      (stratChart ? 1 : 0) + (stratLiq ? 1 : 0) + (stratPolicy ? 1 : 0) +
+      (stratGeo ? 1 : 0) + (stratMomentum ? 1 : 0);
+    if (stratCount === 5) {
+      reasons.push('🟢🟢 video1 §전략B 5가지 동시 충족 (차트+유동성+정책+지정학+모멘텀) — 확신 깊이 최대, 보너스 +1');
+      met += 1;
+    } else if (stratCount >= 4) {
+      reasons.push(`video1 §전략B 4/5 충족 — 관찰 수준 (보조조건)`);
+    }
+  }
+
+  // 12차 N5: F&G 5단계 tier 매핑 — 노션 대시보드 정합 (극공포/공포/중립/탐욕/극탐욕)
+  // 기존 <25 met++ 와 중복 피하기 위해 tier -1 (공포) 구간만 추가 가점.
+  const fngTier = dv(derived, 'FNG_TIER');
+  if (fngTier === -1) {
+    reasons.push('F&G 공포 구간 (tier -1, 25-44) — 매수 기회 보조조건 +1');
+    met += 1;
+  } else if (fngTier === 1) {
+    unmetReasons.push('⚠️ F&G 탐욕 구간 (tier +1, 56-74) — 신규 매수 주의 (보조조건)');
+  }
+
   // 멀티 타임프레임 경고 (영상5 패턴 — 매수 신호 감쇠 요소)
   const mtfExhaustion = dv(derived, 'NASDAQ_MONTHLY_EXHAUSTION');
   const mtfReversal = dv(derived, 'NASDAQ_WEEKLY_REVERSAL');
@@ -291,6 +320,11 @@ function nasdaqSignal(
     const magnitude = instFlow === -2 ? '강한 ' : '';
     overheatFlags.push(`INSTITUTIONAL_NASDAQ_FLOW ${magnitude}매도 (레벨 ${instFlow}, 13F 분기 비교, video4 §기관)`);
   }
+  // 12차 N4: 꼬리 위험 (SKEW/VVIX/OVX) 고레벨 — video4 §꼬리
+  const tailRisk = dv(derived, 'TAIL_RISK_LEVEL');
+  if (tailRisk !== null && tailRisk >= 2) {
+    overheatFlags.push('TAIL_RISK_LEVEL 고위험 (SKEW/VVIX/OVX 중 2개 이상 과열, video4)');
+  }
   if (overheatFlags.length >= 2 && signal !== 'SELL') {
     signal = 'REDUCE';
     const overrideReason = `과열 REDUCE override: ${overheatFlags.join(' · ')}`;
@@ -345,7 +379,7 @@ function goldSignal(
   const unmetReasons: string[] = [];
   let score = 0;
   let metCount = 0;
-  const maxScore = 8;
+  let maxScore = 8; // 12차 N1: seasonal 발동 시 8.5 로 확장
 
   const realYield = dv(derived, 'REAL_YIELD');
   const ryTrend = dv(derived, 'REAL_YIELD_TREND');
@@ -362,8 +396,23 @@ function goldSignal(
   else { unmetReasons.push(`DXY 약세 추세 미충족 (단기: ${dxyTrend?.toFixed(2) ?? '?'}, 장기: ${dxyTrendLong?.toFixed(2) ?? '?'}, 가중치 2.0 미충족)`); }
   if (dxyTrendLong !== null && dxyTrendLong < -2) { reasons.push('DXY 구조적 약세 확인 → 금 장기 우호 (보조조건)'); }
 
-  if (profile.manualInputs.cbBuying) { score += 1.5; metCount += 1; reasons.push('중앙은행 매수 지속 (가중치 1.5)'); }
-  else { unmetReasons.push('중앙은행 매수 지속 아님 (가중치 1.5 미충족)'); }
+  // 12차 N2: CB_GOLD_STRUCTURAL_DEMAND 자동 proxy 도입 — manual cbBuying 보완.
+  //   manual=true OR proxy=1 → 가점. proxy 자체 근거 reason 에 표기.
+  const cbProxy = dv(derived, 'CB_GOLD_STRUCTURAL_DEMAND');
+  const cbActive = profile.manualInputs.cbBuying || cbProxy === 1;
+  if (cbActive) {
+    score += 1.5; metCount += 1;
+    const source = profile.manualInputs.cbBuying ? 'manual' : 'proxy(12M 금↑+DXY↓+실질금리↓)';
+    reasons.push(`중앙은행 매수 지속 (${source}, 가중치 1.5)`);
+  } else {
+    unmetReasons.push('중앙은행 매수 지속 아님 (manual + proxy 모두 미발동, 가중치 1.5 미충족)');
+  }
+
+  // 12차 N1: 금의 계절성 — video2 §4부 보조조건
+  const seasonal = dv(derived, 'GOLD_SEASONAL');
+  if (seasonal === 1) reasons.push('✓ 금 강시즌 (20년 기준 상위 4개월, video2 §4부 보조조건 +0.5)');
+  else if (seasonal === -1) unmetReasons.push('⚠️ 금 약시즌 (20년 기준 하위 4개월, video2 §4부 보조조건)');
+  if (seasonal === 1) { score += 0.5; maxScore += 0.5; }
 
   if (profile.manualInputs.geoRisk >= 3) { score += 0.5; metCount += 1; reasons.push('지정학 리스크 확대 (가중치 0.5)'); }
   else { unmetReasons.push('지정학 리스크 확대 조건 미충족 (가중치 0.5 미충족)'); }
