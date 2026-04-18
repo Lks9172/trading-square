@@ -115,9 +115,10 @@ export interface PositionChange {
   shareChangePct: number; // +/- %
 }
 
-// 11차 Phase 2: 캐시 구조 변경 (FundPositions[] → FundQuarterlyPositions[]) 로
-// 구버전 캐시와 역직렬화 충돌 방지를 위해 키 신설.
-const CACHE_KEY = 'institutional-13f-quarterly-v2';
+// 11차 Phase 2: FundPositions[] → FundQuarterlyPositions[] 구조 변경 v2.
+// 12차 Phase 4: 파서 경로 개선 (내용 기반 infoTable 탐색) 적용 → v3.
+//   실패 4곳 (Berkshire/Renaissance/Millennium/Two Sigma) 복구 유도.
+const CACHE_KEY = 'institutional-13f-quarterly-v3';
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d
 const STALE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d
 
@@ -163,12 +164,33 @@ async function fetchInfotable(cik: string, accession: string): Promise<string> {
   const indexUrl = `https://www.sec.gov/Archives/edgar/data/${rawCik}/${rawAcc}/index.json`;
   const idx = (await httpJson(indexUrl)) as { directory?: { item?: Array<{ name: string }> } };
   const files = idx?.directory?.item || [];
-  const xmlFile = files.find(
-    (f) => typeof f.name === 'string' && f.name.toLowerCase().includes('infotable') && f.name.endsWith('.xml'),
-  );
-  if (!xmlFile) throw new Error('infotable.xml not found in filing index');
-  const xmlUrl = `https://www.sec.gov/Archives/edgar/data/${rawCik}/${rawAcc}/${xmlFile.name}`;
-  return httpText(xmlUrl);
+  // 12차 Phase 4 fix (2026-04): SEC 13F 파일명은 자유 형식 (infotable/information/
+  //   holding/펀드별 prefix/숫자만 등 다양). 이름 매칭 대신 내용 기반 탐색.
+  //   primary_doc.xml 제외한 .xml 파일 중 <infoTable> 또는 <informationTable>
+  //   루트 태그 포함된 것을 채택. 이름에 info 포함된 파일 우선 시도.
+  const candidates = files
+    .filter(
+      (f): f is { name: string } =>
+        typeof f?.name === 'string' && f.name.endsWith('.xml') && f.name !== 'primary_doc.xml',
+    )
+    .sort((a, b) => {
+      const ai = /info|holding/i.test(a.name) ? 0 : 1;
+      const bi = /info|holding/i.test(b.name) ? 0 : 1;
+      return ai - bi;
+    });
+  if (candidates.length === 0) throw new Error('no candidate XML files in filing index');
+  for (const file of candidates) {
+    const xmlUrl = `https://www.sec.gov/Archives/edgar/data/${rawCik}/${rawAcc}/${file.name}`;
+    try {
+      const xml = await httpText(xmlUrl);
+      if (/<(?:\w+:)?(?:info|information)Table>/i.test(xml)) {
+        return xml;
+      }
+    } catch {
+      /* try next candidate */
+    }
+  }
+  throw new Error('no XML file with <infoTable>/<informationTable> root found');
 }
 
 /**
