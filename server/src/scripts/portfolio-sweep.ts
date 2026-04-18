@@ -51,15 +51,16 @@ const CURRENT_PRD: Template = {
 
 /** 각 국면의 자산별 [lo, hi] 제약. 영상/PRD 철학 최소 준수. */
 const CONSTRAINTS: Record<Regime, Record<string, [number, number]>> = {
-  // Fix B 호환 조정 (2026-04): 새 envelope (RISK_ON nasdaq≥30/emerging≥12/cash≤12, NEUTRAL nasdaq≥28,
-  //   CAUTION nasdaq≤35, CORRECTION emerging≤9, PANIC nasdaq≥30/gold≥15, RECESSION gold≥20) 와
-  //   호환되도록 lo/hi 축소. 첫-패스 reject율 축소 (fallback 경로 최소화).
-  RISK_ON:        { cash: [5, 12],  nasdaq: [30, 55], leverage: [0, 0],   gold: [5, 30],  silver: [0, 10], copper: [5, 15],  korea: [5, 20], emerging: [12, 20] },
-  NEUTRAL:        { cash: [10, 30], nasdaq: [28, 50], leverage: [0, 0],   gold: [10, 30], silver: [0, 10], copper: [0, 10],  korea: [5, 20], emerging: [0, 15] },
-  CAUTION:        { cash: [20, 45], nasdaq: [15, 35], leverage: [0, 0],   gold: [15, 35], silver: [0, 5],  copper: [0, 10],  korea: [5, 20], emerging: [0, 15] },
-  CORRECTION:     { cash: [15, 40], nasdaq: [20, 45], leverage: [0, 0],   gold: [15, 35], silver: [0, 8],  copper: [0, 10],  korea: [5, 20], emerging: [0, 9]  },
-  PANIC_BUT_OK:   { cash: [10, 25], nasdaq: [30, 55], leverage: [5, 15],  gold: [15, 30], silver: [0, 10], copper: [0, 10],  korea: [0, 15], emerging: [0, 10] },
-  RECESSION_RISK: { cash: [30, 65], nasdaq: [5, 25],  leverage: [0, 0],   gold: [20, 40], silver: [0, 5],  copper: [0, 5],   korea: [0, 15], emerging: [0, 10] },
+  // 2026-04 재조정: validateEnvelopeConstraints 와 정합 (원문 근거 없는 수치는 제거).
+  //   - RISK_ON/NEUTRAL: 원문 수치 하한 없음 → 넓은 탐색 범위 복원
+  //   - CAUTION/CORRECTION/RECESSION: cash ≥ 30 (video5_analysis), silver ≤ 5 (video2)
+  //   - PANIC_BUT_OK: silver ≤ 5 (video2) 만 추가, gold 하한 없음 (영상 근거 없음)
+  RISK_ON:        { cash: [5, 20],  nasdaq: [25, 55], leverage: [0, 0],   gold: [5, 30],  silver: [0, 10], copper: [5, 15],  korea: [5, 20], emerging: [5, 20] },
+  NEUTRAL:        { cash: [10, 30], nasdaq: [20, 50], leverage: [0, 0],   gold: [10, 30], silver: [0, 10], copper: [0, 10],  korea: [5, 20], emerging: [0, 15] },
+  CAUTION:        { cash: [30, 45], nasdaq: [15, 35], leverage: [0, 0],   gold: [15, 35], silver: [0, 5],  copper: [0, 10],  korea: [5, 20], emerging: [0, 15] },
+  CORRECTION:     { cash: [30, 45], nasdaq: [15, 45], leverage: [0, 0],   gold: [15, 35], silver: [0, 5],  copper: [0, 10],  korea: [5, 20], emerging: [0, 10] },
+  PANIC_BUT_OK:   { cash: [10, 25], nasdaq: [25, 55], leverage: [5, 15],  gold: [10, 30], silver: [0, 5],  copper: [0, 10],  korea: [0, 15], emerging: [0, 10] },
+  RECESSION_RISK: { cash: [30, 65], nasdaq: [5, 25],  leverage: [0, 0],   gold: [15, 40], silver: [0, 5],  copper: [0, 5],   korea: [0, 15], emerging: [0, 10] },
   // Fix #5: STAGFLATION/BOND_VIGILANTE 는 탐색 대상 아님 — 고정 방어(스윕 비대상) 제약으로 통과.
   STAGFLATION:    { cash: [25, 25], nasdaq: [15, 15], leverage: [0, 0],   gold: [30, 30], silver: [10, 10], copper: [5, 5],  korea: [8, 8],  emerging: [7, 7]  },
   BOND_VIGILANTE: { cash: [30, 30], nasdaq: [10, 10], leverage: [0, 0],   gold: [35, 35], silver: [8, 8],   copper: [3, 3],  korea: [7, 7],  emerging: [7, 7]  },
@@ -71,12 +72,21 @@ const ASSETS = ['cash', 'nasdaq', 'leverage', 'gold', 'silver', 'copper', 'korea
 
 /**
  * 영상 원칙 envelope 제약 — Monte Carlo 후보 필터.
+ * 모든 규칙은 영상 원문(stt_video1~4, stt_kospi, video2/3/5_analysis)에 근거한 정성적 원칙만 수치화.
+ * 원문에 수치 근거 없는 규칙(RISK_ON emerging≥12, NEUTRAL nasdaq≥28, PANIC gold≥15 등)은 도입하지 않는다.
+ *
  *   - 모든 레짐 cash ≥ 5 (최소 현금 쿠션)
- *   - RISK_ON/NEUTRAL/CAUTION/CORRECTION gold ≥ 5 (구조적 헷지)
+ *   - RISK_ON/NEUTRAL/CAUTION/CORRECTION gold ≥ 5 (구조적 헷지, video2 실질금리·달러·중앙은행 매수)
  *   - 모든 레짐 emerging ≤ 15, FX 악화 구간(CORRECTION/PANIC/RECESSION) emerging ≤ 10
- *   - CAUTION/CORRECTION silver ≤ 5 (경기확장 아닌 국면에서 과대 금지 — video5 정합)
- * sweep 후보 생성 시 위반 조합은 reject → 재샘플링. reject 통계는 호출부에서 집계.
- * PANIC/RECESSION 은 gold 하한 미적용 (타 방어 자산 우선 구조).
+ *     (stt_kospi 환율 1,500 돌파 시 외국인 이탈)
+ *   - CAUTION/CORRECTION/PANIC_BUT_OK/RECESSION_RISK silver ≤ 5
+ *     (video2: "은 아웃퍼폼 = 경기 회복 신호"; 2008 금융위기 금 -30% vs 은 -50%. 경기확장 아닌 국면 모두 상한)
+ *   - CAUTION/CORRECTION/RECESSION_RISK cash ≥ 30
+ *     (video5_analysis §3.3: "숨고르기/조정 국면 현금 30~40% 유지"; video3: "실업수당 30만+200DMA 아래 → 현금 비중 높여야")
+ *
+ * PANIC/RECESSION 은 gold 하한 미적용 — 영상 원문에 수치 근거 없으며 video2 "공황 초기엔 금도 같이 빠짐" 명시.
+ * PANIC_BUT_OK 은 cash 하한 미적용 — video1 "아껴둔 현금을 쓰는 구간" (탄약 관점).
+ * RISK_ON/NEUTRAL 은 cash 하한 5 만 적용 — 영상에 방어 현금 하한 근거 없음.
  */
 function validateEnvelopeConstraints(
   alloc: Record<string, number>,
@@ -92,37 +102,15 @@ function validateEnvelopeConstraints(
       && (alloc.emerging ?? 0) > 10) {
     return { ok: false, reason: `${regime} emerging>10 (FX)` };
   }
-  if ((regime === 'CAUTION' || regime === 'CORRECTION') && (alloc.silver ?? 0) > 5) {
-    return { ok: false, reason: `${regime} silver>5 (non-expansion)` };
+  // 은 상한: 경기확장 아닌 4개 레짐 (video2 정합)
+  if ((regime === 'CAUTION' || regime === 'CORRECTION' || regime === 'PANIC_BUT_OK' || regime === 'RECESSION_RISK')
+      && (alloc.silver ?? 0) > 5) {
+    return { ok: false, reason: `${regime} silver>5 (non-expansion, video2)` };
   }
-
-  // === Fix B (2026-04): 레짐별 영상 정의 강제 ===
-  if (regime === 'RISK_ON') {
-    if ((alloc.nasdaq ?? 0) < 30) return { ok: false, reason: 'RISK_ON nasdaq<30 (위험자산 적극, video1 §전략A)' };
-    if ((alloc.emerging ?? 0) < 12) return { ok: false, reason: 'RISK_ON emerging<12 (DXY약세 수혜, video2/4)' };
-    if ((alloc.cash ?? 0) > 12) return { ok: false, reason: 'RISK_ON cash>12 (현금과다)' };
-  }
-  if (regime === 'NEUTRAL' && (alloc.nasdaq ?? 0) < 28) {
-    return { ok: false, reason: 'NEUTRAL nasdaq<28 (위험자산 핵심)' };
-  }
-  if (regime === 'CAUTION') {
-    if ((alloc.cash ?? 0) < 20) return { ok: false, reason: 'CAUTION cash<20 (방어 핵심, video3 §3.5)' };
-    if ((alloc.nasdaq ?? 0) > 35) return { ok: false, reason: 'CAUTION nasdaq>35 (위험과다)' };
-  }
-  if (regime === 'CORRECTION') {
-    if ((alloc.cash ?? 0) < 10) return { ok: false, reason: 'CORRECTION cash<10 (분할탄약)' };
-    if ((alloc.emerging ?? 0) > 9) return { ok: false, reason: 'CORRECTION emerging>9 (stt_kospi FX 이탈)' };
-    if ((alloc.silver ?? 0) > 8) return { ok: false, reason: 'CORRECTION silver>8 (경기둔화 video5)' };
-  }
-  if (regime === 'PANIC_BUT_OK') {
-    if ((alloc.cash ?? 0) < 10) return { ok: false, reason: 'PANIC cash<10 (반등탄약)' };
-    if ((alloc.nasdaq ?? 0) < 30) return { ok: false, reason: 'PANIC nasdaq<30 (적극매수 video1 §전략C)' };
-    if ((alloc.gold ?? 0) < 15) return { ok: false, reason: 'PANIC gold<15 (헷지)' };
-  }
-  if (regime === 'RECESSION_RISK') {
-    if ((alloc.cash ?? 0) < 30) return { ok: false, reason: 'RECESSION cash<30 (방어절대)' };
-    if ((alloc.nasdaq ?? 0) > 25) return { ok: false, reason: 'RECESSION nasdaq>25 (위험축소)' };
-    if ((alloc.gold ?? 0) < 20) return { ok: false, reason: 'RECESSION gold<20 (구조헷지)' };
+  // 방어 현금 하한: CAUTION/CORRECTION/RECESSION (video5_analysis "30~40%")
+  if ((regime === 'CAUTION' || regime === 'CORRECTION' || regime === 'RECESSION_RISK')
+      && (alloc.cash ?? 0) < 30) {
+    return { ok: false, reason: `${regime} cash<30 (방어 현금, video5_analysis §3.3)` };
   }
 
   return { ok: true };
@@ -480,8 +468,12 @@ async function main() {
         if ((meanRow.emerging ?? 0) > 15) violations.push(`emerging=${meanRow.emerging} (기준 ≤15)`);
         if ((regime === 'CORRECTION' || regime === 'PANIC_BUT_OK' || regime === 'RECESSION_RISK')
             && (meanRow.emerging ?? 0) > 10) violations.push(`emerging=${meanRow.emerging} (FX 악화 기준 ≤10)`);
-        if ((regime === 'CAUTION' || regime === 'CORRECTION') && (meanRow.silver ?? 0) > 5)
-          violations.push(`silver=${meanRow.silver} (경기확장 아님 기준 ≤5)`);
+        if ((regime === 'CAUTION' || regime === 'CORRECTION' || regime === 'PANIC_BUT_OK' || regime === 'RECESSION_RISK')
+            && (meanRow.silver ?? 0) > 5)
+          violations.push(`silver=${meanRow.silver} (경기확장 아님 기준 ≤5, video2)`);
+        if ((regime === 'CAUTION' || regime === 'CORRECTION' || regime === 'RECESSION_RISK')
+            && (meanRow.cash ?? 0) < 30)
+          violations.push(`cash=${meanRow.cash} (방어 현금 기준 ≥30, video5_analysis)`);
         return violations;
       })(),
       recommendation: 'CANDIDATE', // 아래 블록에서 덮어씀
