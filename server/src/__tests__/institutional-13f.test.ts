@@ -1,4 +1,12 @@
-import { parseInfotable, computeNasdaqMegacapExposure, NASDAQ_MEGACAP_CUSIPS, FundPositions } from '../collectors/institutional-13f';
+import {
+  parseInfotable,
+  computeNasdaqMegacapExposure,
+  computePositionChanges,
+  computeNasdaqMegacapFlow,
+  NASDAQ_MEGACAP_CUSIPS,
+  FundPositions,
+  FundQuarterlyPositions,
+} from '../collectors/institutional-13f';
 
 describe('institutional-13f parser', () => {
   const sampleXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -105,5 +113,116 @@ describe('computeNasdaqMegacapExposure', () => {
     expect(result).not.toBeNull();
     expect(result!.fundCount).toBe(3); // F2 제외
     expect(result!.avgSharePct).toBeCloseTo(100, 1);
+  });
+});
+
+describe('computePositionChanges (Phase 2)', () => {
+  const buildFund = (positions: { cusip: string; shares: number; value: number }[]): FundPositions => ({
+    cik: '0',
+    fundName: 'Test',
+    filingDate: '2026-01-01',
+    quarter: '2025Q4',
+    positions,
+    totalValue: positions.reduce((s, p) => s + p.value, 0),
+  });
+
+  it('classifies NEW / CLOSED / ADDED / REDUCED / UNCHANGED correctly', () => {
+    const prev = buildFund([
+      { cusip: 'A', shares: 1000, value: 100 },     // → REDUCED (shares 1000→500, -50%)
+      { cusip: 'B', shares: 500, value: 50 },       // → CLOSED
+      { cusip: 'C', shares: 1000, value: 100 },     // → UNCHANGED (shares 1000→1050, +5%)
+      { cusip: 'D', shares: 500, value: 50 },       // → ADDED (shares 500→800, +60%)
+    ]);
+    const cur = buildFund([
+      { cusip: 'A', shares: 500, value: 50 },
+      { cusip: 'C', shares: 1050, value: 105 },
+      { cusip: 'D', shares: 800, value: 80 },
+      { cusip: 'E', shares: 200, value: 20 },       // → NEW
+    ]);
+    const changes = computePositionChanges(cur, prev);
+    const byKind = changes.reduce<Record<string, string[]>>((acc, c) => {
+      acc[c.kind] ||= [];
+      acc[c.kind].push(c.cusip);
+      return acc;
+    }, {});
+    expect(byKind.NEW).toEqual(['E']);
+    expect(byKind.CLOSED).toEqual(['B']);
+    expect(byKind.ADDED).toEqual(['D']);
+    expect(byKind.REDUCED).toEqual(['A']);
+    expect(byKind.UNCHANGED).toEqual(['C']);
+  });
+
+  it('respects cusipFilter', () => {
+    const prev = buildFund([{ cusip: 'A', shares: 100, value: 10 }]);
+    const cur = buildFund([{ cusip: 'A', shares: 200, value: 20 }, { cusip: 'B', shares: 50, value: 5 }]);
+    const filter = new Set(['A']);
+    const changes = computePositionChanges(cur, prev, filter);
+    expect(changes).toHaveLength(1);
+    expect(changes[0].cusip).toBe('A');
+  });
+});
+
+describe('computeNasdaqMegacapFlow (Phase 2)', () => {
+  const AAPL = NASDAQ_MEGACAP_CUSIPS.AAPL;
+  const MSFT = NASDAQ_MEGACAP_CUSIPS.MSFT;
+  const OTHER = '345370860';
+
+  const build = (name: string, cur: any[], prev: any[] | null): FundQuarterlyPositions => ({
+    cik: '0',
+    fundName: name,
+    current: {
+      cik: '0', fundName: name, filingDate: '2026-02-14', quarter: '2025Q4',
+      positions: cur.map((p) => ({ ...p, shares: 0 })),
+      totalValue: cur.reduce((s, p) => s + p.value, 0),
+    },
+    previous: prev ? {
+      cik: '0', fundName: name, filingDate: '2025-11-14', quarter: '2025Q3',
+      positions: prev.map((p) => ({ ...p, shares: 0 })),
+      totalValue: prev.reduce((s, p) => s + p.value, 0),
+    } : null,
+  });
+
+  it('returns null when fewer than 3 funds have previous data', () => {
+    const quarterly = [
+      build('F1', [{ cusip: AAPL, value: 100 }], [{ cusip: AAPL, value: 100 }]),
+      build('F2', [{ cusip: AAPL, value: 100 }], null), // no previous
+    ];
+    expect(computeNasdaqMegacapFlow(quarterly)).toBeNull();
+  });
+
+  it('level=+2 when delta > +2%p', () => {
+    const quarterly = [1, 2, 3].map((i) =>
+      build(`F${i}`,
+        [{ cusip: AAPL, value: 30 }, { cusip: OTHER, value: 70 }], // current 30%
+        [{ cusip: AAPL, value: 20 }, { cusip: OTHER, value: 80 }], // previous 20%
+      )
+    );
+    const result = computeNasdaqMegacapFlow(quarterly);
+    expect(result).not.toBeNull();
+    expect(result!.deltaPct).toBeCloseTo(10, 1);
+    expect(result!.level).toBe(2);
+  });
+
+  it('level=-1 when delta slightly negative (-0.5%p to -2%p)', () => {
+    const quarterly = [1, 2, 3].map((i) =>
+      build(`F${i}`,
+        [{ cusip: AAPL, value: 19 }, { cusip: OTHER, value: 81 }], // 19%
+        [{ cusip: AAPL, value: 20 }, { cusip: OTHER, value: 80 }], // 20%
+      )
+    );
+    const result = computeNasdaqMegacapFlow(quarterly);
+    expect(result!.deltaPct).toBeCloseTo(-1, 1);
+    expect(result!.level).toBe(-1);
+  });
+
+  it('level=0 when |delta| <= 0.5%p', () => {
+    const quarterly = [1, 2, 3].map((i) =>
+      build(`F${i}`,
+        [{ cusip: AAPL, value: 20 }, { cusip: OTHER, value: 80 }],
+        [{ cusip: AAPL, value: 20 }, { cusip: OTHER, value: 80 }],
+      )
+    );
+    const result = computeNasdaqMegacapFlow(quarterly);
+    expect(result!.level).toBe(0);
   });
 });

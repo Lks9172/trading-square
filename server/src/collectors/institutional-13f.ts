@@ -64,6 +64,27 @@ export interface FundPositions {
   totalValue: number;
 }
 
+/** 11차 Phase 2: 최근 2분기 연속 공시 묶음 (이전 분기 비교용). */
+export interface FundQuarterlyPositions {
+  cik: string;
+  fundName: string;
+  current: FundPositions;
+  previous: FundPositions | null;
+}
+
+/** 포지션 변화 분류 — video4 §기관 "어디에 베팅" 추적. */
+export type PositionChangeKind = 'NEW' | 'ADDED' | 'REDUCED' | 'CLOSED' | 'UNCHANGED';
+
+export interface PositionChange {
+  cusip: string;
+  kind: PositionChangeKind;
+  prevShares: number;
+  curShares: number;
+  prevValue: number;
+  curValue: number;
+  shareChangePct: number; // +/- %
+}
+
 const CACHE_KEY = 'institutional-13f-latest';
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d
 const STALE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d
@@ -82,22 +103,26 @@ async function httpText(url: string): Promise<string> {
   return res.text();
 }
 
-async function findLatest13FHR(cik: string): Promise<{ accession: string; filingDate: string } | null> {
+async function findRecent13FHR(
+  cik: string,
+  limit: number = 2,
+): Promise<Array<{ accession: string; filingDate: string }>> {
   const url = `https://data.sec.gov/submissions/CIK${cik}.json`;
   const sub = (await httpJson(url)) as {
     filings?: { recent?: { form?: string[]; accessionNumber?: string[]; filingDate?: string[] } };
   };
   const recent = sub?.filings?.recent;
-  if (!recent) return null;
+  if (!recent) return [];
   const forms = recent.form || [];
   const accs = recent.accessionNumber || [];
   const dates = recent.filingDate || [];
-  for (let i = 0; i < forms.length; i++) {
+  const hits: Array<{ accession: string; filingDate: string }> = [];
+  for (let i = 0; i < forms.length && hits.length < limit; i++) {
     if (forms[i] === '13F-HR') {
-      return { accession: accs[i], filingDate: dates[i] };
+      hits.push({ accession: accs[i], filingDate: dates[i] });
     }
   }
-  return null;
+  return hits;
 }
 
 async function fetchInfotable(cik: string, accession: string): Promise<string> {
@@ -151,58 +176,86 @@ function inferQuarter(filingDate: string): string {
   return `${y}Q4`;
 }
 
+async function fetchOneQuarterPositions(
+  cik: string,
+  fundName: string,
+  filing: { accession: string; filingDate: string },
+): Promise<FundPositions> {
+  const xml = await fetchInfotable(cik, filing.accession);
+  const positions = parseInfotable(xml);
+  const totalValue = positions.reduce((s, p) => s + p.value, 0);
+  return {
+    cik,
+    fundName,
+    filingDate: filing.filingDate,
+    quarter: inferQuarter(filing.filingDate),
+    positions,
+    totalValue,
+  };
+}
+
 /**
- * 추적 대상 헤지펀드 전체의 최근 13F-HR 공시를 fetch + 파싱.
- * SEC rate limit 준수 위해 펀드 간 150ms 간격.
+ * 추적 대상 헤지펀드의 최근 2개 분기 13F-HR 공시 fetch (Phase 2).
+ * SEC rate limit 준수 위해 요청 간 150ms 간격.
  * 7일 캐시 + 30일 stale fallback.
  */
-export async function fetchInstitutional13F(): Promise<FundPositions[]> {
-  const cached = await readSourceCacheWithin<FundPositions[]>(CACHE_KEY, CACHE_TTL_MS);
+export async function fetchInstitutional13FQuarterly(): Promise<FundQuarterlyPositions[]> {
+  const cached = await readSourceCacheWithin<FundQuarterlyPositions[]>(CACHE_KEY, CACHE_TTL_MS);
   if (cached) {
     log.info({ ageHours: Math.round(cached.ageMs / 3600000), count: cached.value.length }, '13F cache hit');
     return cached.value;
   }
-  log.info({ funds: TRACKED_FUNDS.length }, '13F fetch starting');
-  const results: FundPositions[] = [];
+  log.info({ funds: TRACKED_FUNDS.length }, '13F quarterly fetch starting');
+  const results: FundQuarterlyPositions[] = [];
   for (const fund of TRACKED_FUNDS) {
     try {
-      const latest = await findLatest13FHR(fund.cik);
-      if (!latest) {
+      const recent = await findRecent13FHR(fund.cik, 2);
+      if (recent.length === 0) {
         log.warn({ fund: fund.name }, '13F: no HR filing found');
         continue;
       }
-      const xml = await fetchInfotable(fund.cik, latest.accession);
-      const positions = parseInfotable(xml);
-      const totalValue = positions.reduce((s, p) => s + p.value, 0);
-      const quarter = inferQuarter(latest.filingDate);
-      results.push({
-        cik: fund.cik,
-        fundName: fund.name,
-        filingDate: latest.filingDate,
-        quarter,
-        positions,
-        totalValue,
-      });
+      const current = await fetchOneQuarterPositions(fund.cik, fund.name, recent[0]);
+      await new Promise((r) => setTimeout(r, 150));
+      let previous: FundPositions | null = null;
+      if (recent.length >= 2) {
+        try {
+          previous = await fetchOneQuarterPositions(fund.cik, fund.name, recent[1]);
+          await new Promise((r) => setTimeout(r, 150));
+        } catch (error) {
+          log.warn({ fund: fund.name, error: serializeError(error) }, '13F previous quarter fetch failed');
+        }
+      }
+      results.push({ cik: fund.cik, fundName: fund.name, current, previous });
       log.info(
-        { fund: fund.name, quarter, positions: positions.length, totalValue: Math.round(totalValue) },
-        '13F parsed',
+        {
+          fund: fund.name,
+          curQ: current.quarter,
+          prevQ: previous?.quarter,
+          curPositions: current.positions.length,
+          prevPositions: previous?.positions.length,
+        },
+        '13F quarterly parsed',
       );
-      await new Promise((r) => setTimeout(r, 150)); // SEC rate limit 여유분
     } catch (error) {
-      log.warn({ fund: fund.name, error: serializeError(error) }, '13F fetch failed');
+      log.warn({ fund: fund.name, error: serializeError(error) }, '13F quarterly fetch failed');
     }
   }
   if (results.length >= 3) {
     await writeSourceCache(CACHE_KEY, results);
   } else {
-    // 절반도 못 가져오면 stale cache 재시도
-    const stale = await readSourceCacheWithin<FundPositions[]>(CACHE_KEY, STALE_TTL_MS);
+    const stale = await readSourceCacheWithin<FundQuarterlyPositions[]>(CACHE_KEY, STALE_TTL_MS);
     if (stale) {
       log.warn({ fresh: results.length, stale: stale.value.length }, '13F fresh<3 → using stale');
       return stale.value;
     }
   }
   return results;
+}
+
+/** Phase 1 호환성 — current 분기만 추출. */
+export async function fetchInstitutional13F(): Promise<FundPositions[]> {
+  const quarterly = await fetchInstitutional13FQuarterly();
+  return quarterly.map((q) => q.current);
 }
 
 /**
@@ -231,5 +284,103 @@ export function computeNasdaqMegacapExposure(
   return {
     avgSharePct: parseFloat(((sumShare / fundCount) * 100).toFixed(2)),
     fundCount,
+  };
+}
+
+/**
+ * 한 펀드의 포지션 분기 대비 변화 분류 — video4 §기관 "어디에 베팅" 추적.
+ *
+ *   NEW:       이전 분기 미보유, 현재 보유
+ *   ADDED:     보유 유지 + 주식수 +10% 초과 증가
+ *   REDUCED:   보유 유지 + 주식수 -10% 초과 감소
+ *   CLOSED:    이전 보유, 현재 미보유
+ *   UNCHANGED: |Δ주식수| ≤ 10%
+ */
+export function computePositionChanges(
+  current: FundPositions,
+  previous: FundPositions,
+  cusipFilter?: Set<string>,
+): PositionChange[] {
+  const curMap = new Map(current.positions.map((p) => [p.cusip, p]));
+  const prevMap = new Map(previous.positions.map((p) => [p.cusip, p]));
+  const allCusips = new Set<string>([...curMap.keys(), ...prevMap.keys()]);
+  const out: PositionChange[] = [];
+  for (const cusip of allCusips) {
+    if (cusipFilter && !cusipFilter.has(cusip)) continue;
+    const cur = curMap.get(cusip);
+    const prev = prevMap.get(cusip);
+    const prevShares = prev?.shares ?? 0;
+    const curShares = cur?.shares ?? 0;
+    const prevValue = prev?.value ?? 0;
+    const curValue = cur?.value ?? 0;
+    let kind: PositionChangeKind;
+    let shareChangePct = 0;
+    if (!prev && cur) {
+      kind = 'NEW';
+      shareChangePct = 100;
+    } else if (prev && !cur) {
+      kind = 'CLOSED';
+      shareChangePct = -100;
+    } else if (prev && cur) {
+      shareChangePct = prevShares > 0 ? ((curShares - prevShares) / prevShares) * 100 : 0;
+      if (shareChangePct > 10) kind = 'ADDED';
+      else if (shareChangePct < -10) kind = 'REDUCED';
+      else kind = 'UNCHANGED';
+    } else {
+      continue;
+    }
+    out.push({ cusip, kind, prevShares, curShares, prevValue, curValue, shareChangePct });
+  }
+  return out;
+}
+
+/**
+ * 메가캡 집단 비중 분기 변화 → +2 ~ -2 레벨 반환.
+ * 영상4 §기관 "집단이 어디로 움직이나" 정합.
+ *
+ *   avgCurrentPct - avgPrevPct (%p):
+ *     > +2.0  → +2 (집단 강한 매수)
+ *     > +0.5  → +1 (매수)
+ *     |Δ| ≤ 0.5 → 0 (중립)
+ *     < -0.5  → -1 (매도)
+ *     < -2.0  → -2 (집단 강한 매도)
+ *
+ * 이전 분기 데이터 있는 펀드 ≥ 3 곳 필요 (없으면 null).
+ */
+export function computeNasdaqMegacapFlow(
+  quarterly: FundQuarterlyPositions[],
+): { currentPct: number; previousPct: number; deltaPct: number; level: -2 | -1 | 0 | 1 | 2; fundCount: number } | null {
+  const megacapCusips = new Set(Object.values(NASDAQ_MEGACAP_CUSIPS));
+  const shares: Array<{ curShare: number; prevShare: number }> = [];
+  for (const q of quarterly) {
+    if (!q.previous) continue;
+    if (q.current.totalValue <= 0 || q.previous.totalValue <= 0) continue;
+    const curMegacap = q.current.positions
+      .filter((p) => megacapCusips.has(p.cusip))
+      .reduce((s, p) => s + p.value, 0);
+    const prevMegacap = q.previous.positions
+      .filter((p) => megacapCusips.has(p.cusip))
+      .reduce((s, p) => s + p.value, 0);
+    shares.push({
+      curShare: curMegacap / q.current.totalValue,
+      prevShare: prevMegacap / q.previous.totalValue,
+    });
+  }
+  if (shares.length < 3) return null;
+  const currentPct = (shares.reduce((s, x) => s + x.curShare, 0) / shares.length) * 100;
+  const previousPct = (shares.reduce((s, x) => s + x.prevShare, 0) / shares.length) * 100;
+  const deltaPct = currentPct - previousPct;
+  let level: -2 | -1 | 0 | 1 | 2;
+  if (deltaPct > 2.0) level = 2;
+  else if (deltaPct > 0.5) level = 1;
+  else if (deltaPct < -2.0) level = -2;
+  else if (deltaPct < -0.5) level = -1;
+  else level = 0;
+  return {
+    currentPct: parseFloat(currentPct.toFixed(2)),
+    previousPct: parseFloat(previousPct.toFixed(2)),
+    deltaPct: parseFloat(deltaPct.toFixed(2)),
+    level,
+    fundCount: shares.length,
   };
 }
