@@ -62,8 +62,10 @@ const CONSTRAINTS: Record<Regime, Record<string, [number, number]>> = {
   PANIC_BUT_OK:   { cash: [10, 25], nasdaq: [25, 55], leverage: [5, 15],  gold: [10, 30], silver: [0, 5],  copper: [0, 10],  korea: [0, 15], emerging: [0, 10] },
   RECESSION_RISK: { cash: [30, 65], nasdaq: [5, 25],  leverage: [0, 0],   gold: [15, 40], silver: [0, 5],  copper: [0, 5],   korea: [0, 15], emerging: [0, 10] },
   // Fix #5: STAGFLATION/BOND_VIGILANTE 는 탐색 대상 아님 — 고정 방어(스윕 비대상) 제약으로 통과.
-  STAGFLATION:    { cash: [25, 25], nasdaq: [15, 15], leverage: [0, 0],   gold: [30, 30], silver: [10, 10], copper: [5, 5],  korea: [8, 8],  emerging: [7, 7]  },
-  BOND_VIGILANTE: { cash: [30, 30], nasdaq: [10, 10], leverage: [0, 0],   gold: [35, 35], silver: [8, 8],   copper: [3, 3],  korea: [7, 7],  emerging: [7, 7]  },
+  //   11차 시정 (2026-04): silver hi=5 로 축소 (envelope silver≤5 확장 정합, video2).
+  //   BASE 값도 동기 (STAGFLATION silver 10→5, BOND_VIGILANTE silver 8→5). 감축분은 gold/cash 이관.
+  STAGFLATION:    { cash: [27, 27], nasdaq: [15, 15], leverage: [0, 0],   gold: [33, 33], silver: [5, 5],   copper: [5, 5],  korea: [8, 8],  emerging: [7, 7]  },
+  BOND_VIGILANTE: { cash: [31, 31], nasdaq: [10, 10], leverage: [0, 0],   gold: [37, 37], silver: [5, 5],   copper: [3, 3],  korea: [7, 7],  emerging: [7, 7]  },
 };
 
 // 스윕 대상은 원 6종 유지 (두 신규 국면은 데이터 부재로 탐색 의미 없음).
@@ -79,8 +81,9 @@ const ASSETS = ['cash', 'nasdaq', 'leverage', 'gold', 'silver', 'copper', 'korea
  *   - RISK_ON/NEUTRAL/CAUTION/CORRECTION gold ≥ 5 (구조적 헷지, video2 실질금리·달러·중앙은행 매수)
  *   - 모든 레짐 emerging ≤ 15, FX 악화 구간(CORRECTION/PANIC/RECESSION) emerging ≤ 10
  *     (stt_kospi 환율 1,500 돌파 시 외국인 이탈)
- *   - CAUTION/CORRECTION/PANIC_BUT_OK/RECESSION_RISK silver ≤ 5
- *     (video2: "은 아웃퍼폼 = 경기 회복 신호"; 2008 금융위기 금 -30% vs 은 -50%. 경기확장 아닌 국면 모두 상한)
+ *   - CAUTION/CORRECTION/PANIC_BUT_OK/RECESSION_RISK/STAGFLATION/BOND_VIGILANTE silver ≤ 5
+ *     (video2: "은 아웃퍼폼 = 경기 회복 신호"; 2008 금융위기 금 -30% vs 은 -50%.
+ *      경기확장 아닌 모든 국면에 상한 — STAGFLATION(성장↓) / BOND_VIGILANTE(재정·금리 급등 경제 불안) 포함)
  *   - CAUTION/CORRECTION/RECESSION_RISK cash ≥ 30
  *     (video5_analysis §3.3: "숨고르기/조정 국면 현금 30~40% 유지"; video3: "실업수당 30만+200DMA 아래 → 현금 비중 높여야")
  *
@@ -102,8 +105,10 @@ function validateEnvelopeConstraints(
       && (alloc.emerging ?? 0) > 10) {
     return { ok: false, reason: `${regime} emerging>10 (FX)` };
   }
-  // 은 상한: 경기확장 아닌 4개 레짐 (video2 정합)
-  if ((regime === 'CAUTION' || regime === 'CORRECTION' || regime === 'PANIC_BUT_OK' || regime === 'RECESSION_RISK')
+  // 은 상한: 경기확장 아닌 6개 레짐 (video2 정합). STAGFLATION/BOND_VIGILANTE 도 경기둔화
+  // 범주라 11차에서 추가 (video2 "경기침체 시 은 더 크게 하락" 일관성).
+  if ((regime === 'CAUTION' || regime === 'CORRECTION' || regime === 'PANIC_BUT_OK' ||
+       regime === 'RECESSION_RISK' || regime === 'STAGFLATION' || regime === 'BOND_VIGILANTE')
       && (alloc.silver ?? 0) > 5) {
     return { ok: false, reason: `${regime} silver>5 (non-expansion, video2)` };
   }
@@ -468,7 +473,8 @@ async function main() {
         if ((meanRow.emerging ?? 0) > 15) violations.push(`emerging=${meanRow.emerging} (기준 ≤15)`);
         if ((regime === 'CORRECTION' || regime === 'PANIC_BUT_OK' || regime === 'RECESSION_RISK')
             && (meanRow.emerging ?? 0) > 10) violations.push(`emerging=${meanRow.emerging} (FX 악화 기준 ≤10)`);
-        if ((regime === 'CAUTION' || regime === 'CORRECTION' || regime === 'PANIC_BUT_OK' || regime === 'RECESSION_RISK')
+        if ((regime === 'CAUTION' || regime === 'CORRECTION' || regime === 'PANIC_BUT_OK' ||
+             regime === 'RECESSION_RISK' || regime === 'STAGFLATION' || regime === 'BOND_VIGILANTE')
             && (meanRow.silver ?? 0) > 5)
           violations.push(`silver=${meanRow.silver} (경기확장 아님 기준 ≤5, video2)`);
         if ((regime === 'CAUTION' || regime === 'CORRECTION' || regime === 'RECESSION_RISK')
