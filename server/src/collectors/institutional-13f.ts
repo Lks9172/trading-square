@@ -85,7 +85,9 @@ export interface PositionChange {
   shareChangePct: number; // +/- %
 }
 
-const CACHE_KEY = 'institutional-13f-latest';
+// 11차 Phase 2: 캐시 구조 변경 (FundPositions[] → FundQuarterlyPositions[]) 로
+// 구버전 캐시와 역직렬화 충돌 방지를 위해 키 신설.
+const CACHE_KEY = 'institutional-13f-quarterly-v2';
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d
 const STALE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d
 
