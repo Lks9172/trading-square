@@ -31,7 +31,11 @@ const BASE_ALLOCATIONS: Record<Regime, Record<string, number>> = {
   //   overfit_warning=false, alpha_decay=-21.16%p (test α 오히려 큼 → 과적합 아님).
   //   기존 CAUTION.cash=28 은 신규 envelope (video5_analysis cash ≥ 30) 위반 — 교체로 정합 달성.
   //   TODO §15 "top1 → top-decile 이관" 본 커밋에서 해소.
-  NEUTRAL:        { cash: 12, nasdaq: 40, leverage: 0,  gold: 24, silver: 6,  copper: 5,  korea: 10, emerging: 3  },
+  // NEUTRAL 11차 시정 (2026-04): sweep top-decile 과적합 편향 의심 소폭 재조정.
+  //   nasdaq 40→38 (-2) / emerging 3→5 (+2). 분산 원칙 (video4 7가지 렌즈) + video2
+  //   "DXY 약세 → 신흥국 수혜" 관점. sweep baseline 2016-2026 NASDAQ 강세 편향 일부 상쇄.
+  //   sweep 알파 존중하되 향후 DXY 역전 시나리오 여유 확보.
+  NEUTRAL:        { cash: 12, nasdaq: 38, leverage: 0,  gold: 24, silver: 6,  copper: 5,  korea: 10, emerging: 5  },
   CAUTION:        { cash: 33, nasdaq: 21, leverage: 0,  gold: 25, silver: 4,  copper: 5,  korea: 10, emerging: 2  },
   // 11차 envelope 수동 시정 (2026-04): 기존 cash=13/silver=8 이 envelope 규칙
   //   `cash ≥ 30` (video5_analysis §3.3 "숨고르기 30-40%") 및 `silver ≤ 5` (video2
@@ -42,9 +46,13 @@ const BASE_ALLOCATIONS: Record<Regime, Record<string, number>> = {
   PANIC_BUT_OK:   { cash: 15, nasdaq: 35, leverage: 10, gold: 20, silver: 5,  copper: 5,  korea: 5,  emerging: 5  },
   RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0,  copper: 0,  korea: 5,  emerging: 5  },
   // Fix #5: 스태그플레이션 — 물가↑ + 성장↓. 금·은 방어, 위험자산 축소. (영상4 §145)
-  STAGFLATION:    { cash: 25, nasdaq: 15, leverage: 0,  gold: 30, silver: 10, copper: 5,  korea: 8,  emerging: 7  },
+  //   11차 시정 (2026-04): silver 10→5. STAGFLATION 은 성장↓ 포함이라 video2 "경기둔화
+  //   = 은 하락 (2008 금 -30% vs 은 -50%)" 정합. 감축 5 = gold +3 / cash +2 로 방어 강화.
+  STAGFLATION:    { cash: 27, nasdaq: 15, leverage: 0,  gold: 33, silver: 5,  copper: 5,  korea: 8,  emerging: 7  },
   // Fix #5: 채권 자경단 — 장기금리 급등 + DXY 약세 + HY 확대. 현금·금 극단 방어. (영상4 §137-147)
-  BOND_VIGILANTE: { cash: 30, nasdaq: 10, leverage: 0,  gold: 35, silver: 8,  copper: 3,  korea: 7,  emerging: 7  },
+  //   11차 시정 (2026-04): silver 8→5. BOND_VIGILANTE 는 재정 악화+금리 급등 경제 불안
+  //   국면이라 video2 "경기침체 시 은 더 크게 하락" 정합. 감축 3 = gold +2 / cash +1.
+  BOND_VIGILANTE: { cash: 31, nasdaq: 10, leverage: 0,  gold: 37, silver: 5,  copper: 3,  korea: 7,  emerging: 7  },
 };
 
 // 신호 배수는 PRD §6.3.2 스펙을 따른다.
