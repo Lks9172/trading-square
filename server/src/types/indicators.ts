@@ -34,6 +34,27 @@ export interface RegimeState {
   score: number; // 0~100
   components: Record<string, number>; // 지표별 점수
   date: string;
+  explanation?: {
+    preOverrideRegime: Regime;
+    overrides: string[];
+    positiveDrivers: Array<{
+      component: string;
+      score: number;
+      weight: number;
+      weightedContribution: number;
+    }>;
+    negativeDrivers: Array<{
+      component: string;
+      score: number;
+      weight: number;
+      weightedContribution: number;
+    }>;
+    weightedContributions: Record<string, {
+      score: number;
+      weight: number;
+      weightedContribution: number;
+    }>;
+  };
 }
 
 // ── 자산 신호 ──
@@ -53,6 +74,11 @@ export interface AssetSignal {
   date: string;
   // LEVERAGE 전용 3단계 티어 (SOFT/MEDIUM/HARD). null 은 미발동.
   tier?: LeverageTier | null;
+  explanation?: {
+    baseSignal: Signal;
+    finalSignal: Signal;
+    overrides: string[];
+  };
 }
 
 // ── 비중 ──
@@ -64,6 +90,31 @@ export interface AllocationPlan {
   // Fix #6: 결측(`NASDAQ_ABOVE_200DMA` 없음) 은 null 로 명시. UI 는 "데이터 없음" 표시.
   buyStage: 0 | 1 | 2 | 3 | null;
   date: string;
+  explanation?: {
+    baseRegimeAllocations: Record<string, number>;
+    horizonShift: Record<string, number>;
+    baseAfterHorizon: Record<string, number>;
+    signalAdjustments: Array<{
+      asset: string;
+      allocKey: string;
+      signal: Signal;
+      multiplier: number;
+      before: number;
+      after: number;
+    }>;
+    adjustments: Array<{
+      step: string;
+      detail: string;
+      allocKey?: string;
+      amount?: number;
+      before?: number;
+      after?: number;
+      mode?: string;
+    }>;
+    defenseMode: 'fiscal-hard' | 'fiscal' | 'overheated' | 'none';
+    preNormalize: Record<string, number>;
+    finalAllocations: Record<string, number>;
+  };
 }
 
 // ── 사용자 설정 ──

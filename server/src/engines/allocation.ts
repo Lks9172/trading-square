@@ -1,4 +1,4 @@
-import { Regime, Signal, AssetSignal, AllocationPlan, DerivedIndicator, MarketDataPoint } from '../types/indicators';
+import { Regime, Signal, AssetSignal, AllocationPlan, DerivedIndicator, MarketDataPoint, UserProfile } from '../types/indicators';
 import { ASSET_TO_ALLOC_KEY } from './asset-keys';
 
 // 백테스트 1/3/5/10Y 가중(1Y 25% + 3Y 10% + 5Y 30% + 10Y 35%, DD penalty 0.15) 기준
@@ -107,12 +107,46 @@ export function computeAllocation(
   raw: Record<string, MarketDataPoint>,
   horizon: string = 'medium',
   baseAllocationsOverride?: Record<Regime, Record<string, number>>,
+  profile?: Pick<UserProfile, 'leverageEnabled' | 'includeKR'>,
+  options?: { includeExplanation?: boolean },
 ): AllocationPlan {
   const bases = baseAllocationsOverride || BASE_ALLOCATIONS;
   const base = { ...bases[regime] };
+  const profileFlags = {
+    leverageEnabled: profile?.leverageEnabled ?? true,
+    includeKR: profile?.includeKR ?? true,
+  };
   const shift = HORIZON_SHIFT[horizon] || HORIZON_SHIFT.medium;
+  const explanation: AllocationPlan['explanation'] | undefined = options?.includeExplanation
+    ? {
+        baseRegimeAllocations: { ...bases[regime] },
+        horizonShift: { ...shift },
+        baseAfterHorizon: {},
+        signalAdjustments: [],
+        adjustments: [],
+        defenseMode: 'none',
+        preNormalize: {},
+        finalAllocations: {},
+      }
+    : undefined;
   for (const [k, v] of Object.entries(shift)) {
     if (base[k] !== undefined) base[k] = Math.max(0, base[k] + v);
+  }
+  if (explanation) {
+    explanation.baseAfterHorizon = { ...base };
+  }
+
+  if (!profileFlags.includeKR && (base.korea || 0) > 0) {
+    const moved = base.korea || 0;
+    base.cash = (base.cash || 0) + (base.korea || 0);
+    base.korea = 0;
+    explanation?.adjustments.push({
+      step: 'profile-includeKR',
+      detail: 'includeKR=false -> korea allocation moved to cash',
+      allocKey: 'korea',
+      amount: moved,
+      after: 0,
+    });
   }
 
   // Fix #4(2차 감사): M2_YOY_CROSS_DAYS 쿠션을 **signal multiplier 이전** 으로 이동.
@@ -127,15 +161,42 @@ export function computeAllocation(
     const cashAvail = base.cash || 0;
     const actualCushion = Math.min(cashAvail, cushion);
     if (actualCushion > 0) {
+      const beforeCash = cashAvail;
+      const beforeNasdaq = base.nasdaq || 0;
       base.cash = cashAvail - actualCushion;
       base.nasdaq = (base.nasdaq || 0) + actualCushion;
+      explanation?.adjustments.push({
+        step: 'm2-cross-cushion',
+        detail: `M2_YOY_CROSS_DAYS=${m2CrossDays} -> shifted cash into nasdaq`,
+        allocKey: 'nasdaq',
+        amount: actualCushion,
+        before: beforeNasdaq,
+        after: base.nasdaq,
+      });
+      explanation?.adjustments.push({
+        step: 'm2-cross-cushion',
+        detail: `M2_YOY_CROSS_DAYS=${m2CrossDays} -> reduced cash for nasdaq cushion`,
+        allocKey: 'cash',
+        amount: actualCushion,
+        before: beforeCash,
+        after: base.cash,
+      });
     }
   }
 
   for (const sig of signals) {
     const allocKey = SIGNAL_ASSET_MAP[sig.asset];
     if (allocKey && base[allocKey] !== undefined && sig.asset !== 'LEVERAGE') {
+      const before = base[allocKey];
       base[allocKey] = base[allocKey] * SIGNAL_MULTIPLIERS[sig.signal];
+      explanation?.signalAdjustments.push({
+        asset: sig.asset,
+        allocKey,
+        signal: sig.signal,
+        multiplier: SIGNAL_MULTIPLIERS[sig.signal],
+        before: parseFloat(before.toFixed(4)),
+        after: parseFloat(base[allocKey].toFixed(4)),
+      });
     }
   }
 
@@ -150,13 +211,31 @@ export function computeAllocation(
   const fxLevel = derived.KRW_FX_LEVEL?.value ?? null;
   if (fxLevel !== null) {
     if (fxLevel <= -2) {
+      const before = base.korea;
       const cut = base.korea * 0.5;
       base.korea -= cut;
       base.cash += cut;
+      explanation?.adjustments.push({
+        step: 'fx-level',
+        detail: `KRW_FX_LEVEL=${fxLevel} -> 50% korea cut to cash`,
+        allocKey: 'korea',
+        amount: cut,
+        before,
+        after: base.korea,
+      });
     } else if (fxLevel <= -1) {
+      const before = base.korea;
       const cut = base.korea * 0.3;
       base.korea -= cut;
       base.cash += cut;
+      explanation?.adjustments.push({
+        step: 'fx-level',
+        detail: `KRW_FX_LEVEL=${fxLevel} -> 30% korea cut to cash`,
+        allocKey: 'korea',
+        amount: cut,
+        before,
+        after: base.korea,
+      });
     }
   }
 
@@ -166,10 +245,19 @@ export function computeAllocation(
   // 중복 감산 방지: FX_LEVEL ≤ -2 는 이미 korea 50% cut 한 상태 → HARD 에서는 emerging 만 cut.
   const fxComboAlert = derived.FX_FOREIGN_COMBO_ALERT?.value ?? null;
   if (fxComboAlert === 2) {
+    const before = base.emerging || 0;
     const cut = (base.emerging || 0) * 0.3;
     if (cut > 0) {
       base.emerging -= cut;
       base.cash += cut;
+      explanation?.adjustments.push({
+        step: 'fx-foreign-combo',
+        detail: 'FX_FOREIGN_COMBO_ALERT=HARD -> 30% emerging cut to cash',
+        allocKey: 'emerging',
+        amount: cut,
+        before,
+        after: base.emerging,
+      });
     }
   }
 
@@ -200,6 +288,9 @@ export function computeAllocation(
     fiscalStress     ? 'fiscal' :
     overheated       ? 'overheated' :
                        'none';
+  if (explanation) {
+    explanation.defenseMode = defenseMode;
+  }
 
   if (defenseMode === 'fiscal-hard' || defenseMode === 'fiscal') {
     // 재정 리스크 보정 (영상4 §07 채권 자경단).
@@ -218,6 +309,12 @@ export function computeAllocation(
     // 60% cash, 40% gold 로 이관 (영상4 § 금은 장기 방어)
     base.cash = (base.cash || 0) + actual * 0.6;
     base.gold = (base.gold || 0) + actual * 0.4;
+    explanation?.adjustments.push({
+      step: 'defense-mode',
+      detail: `defenseMode=${defenseMode} -> shifted risk assets into cash/gold`,
+      mode: defenseMode,
+      amount: actual,
+    });
   } else if (defenseMode === 'overheated') {
     // 과열 보정 (OVERHEATED=1).
     // 철학: 과열 국면에서는 위험자산을 줄이고 현금·금으로 이관한다.
@@ -240,6 +337,12 @@ export function computeAllocation(
     // 20:5 비율 유지 (cash:gold = 4:1)
     base.cash = (base.cash || 0) + actual * (20 / 25);
     base.gold = (base.gold || 0) + actual * (5 / 25);
+    explanation?.adjustments.push({
+      step: 'defense-mode',
+      detail: 'defenseMode=overheated -> shifted risk assets into cash/gold',
+      mode: defenseMode,
+      amount: actual,
+    });
   }
 
   // Fix #4(2차 감사): M2 쿠션 블록은 승수 루프 이전으로 이동됨. 여기서 중복 적용 금지.
@@ -249,18 +352,32 @@ export function computeAllocation(
   // 처리되는 비대칭이 있었다(3/3 조건 충족 후 승격되면 오히려 차단되는 모순).
   const leverageSig = leverageSignal?.signal;
   // === 3단계 티어별 상한 계산 ===
-  // SOFT=5%, MEDIUM=10%, HARD=15%. 티어 미발동 → 0% (허용 차단).
+  // SOFT=5%, MEDIUM=10%, HARD=15%. 티어 미발동 또는 profile off → 0%.
   const leverageTier = leverageSignal?.tier ?? null;
-  const leverageCap =
-    leverageTier === 'HARD' ? 15 :
-    leverageTier === 'MEDIUM' ? 10 :
-    leverageTier === 'SOFT' ? 5 : 0;
+  const leverageCap = !profileFlags.leverageEnabled
+    ? 0
+    : leverageTier === 'HARD'
+      ? 15
+      : leverageTier === 'MEDIUM'
+        ? 10
+        : leverageTier === 'SOFT'
+          ? 5
+          : 0;
   const leverageAllowed = leverageCap > 0 && (leverageSig === 'BUY' || leverageSig === 'STRONG_BUY');
 
   if (!leverageAllowed) {
     if (base.leverage > 0) {
+      const before = base.leverage;
       base.nasdaq += base.leverage;
       base.leverage = 0;
+      explanation?.adjustments.push({
+        step: 'leverage-gate',
+        detail: `leverage disabled or signal=${leverageSig ?? 'none'} -> moved leverage into nasdaq`,
+        allocKey: 'leverage',
+        amount: before,
+        before,
+        after: 0,
+      });
     }
   }
   // 주의: base.leverage 에 대한 pre-normalize clamp 는 의도적으로 제거.
@@ -268,21 +385,39 @@ export function computeAllocation(
   // 후 실제 20% 까지 팽창 가능. 영상1 §전략C "짧게/20~30% 익절"의 상한을
   // 보호하기 위해 normalize 이후에 최종 clamp 한다(아래).
 
+  if (explanation) {
+    explanation.preNormalize = Object.fromEntries(
+      Object.entries(base).map(([key, value]) => [key, parseFloat(value.toFixed(4))]),
+    );
+  }
+
   let allocations = normalize(base);
 
   // === 레버리지 최종 상한 (영상1 §전략C + 3단계 티어) ===
   // 티어별 상한: SOFT=5% / MEDIUM=10% / HARD=15%. 티어 미발동 시 0%.
   // normalize 이후 실제 비중 기준. 초과분은 cash 로 이관해 현금 쿠션 유지.
   if (allocations.leverage > leverageCap) {
-    const excess = allocations.leverage - leverageCap;
+    const before = allocations.leverage;
+    const excess = before - leverageCap;
     allocations = {
       ...allocations,
       leverage: leverageCap,
       cash: (allocations.cash || 0) + excess,
     };
+    explanation?.adjustments.push({
+      step: 'leverage-cap',
+      detail: `normalize result exceeded ${leverageCap}% leverage cap (tier=${leverageTier ?? 'none'}) -> excess moved to cash`,
+      allocKey: 'leverage',
+      amount: excess,
+      before,
+      after: leverageCap,
+    });
   }
 
   const buyStage = determineBuyStage(derived, raw);
+  if (explanation) {
+    explanation.finalAllocations = { ...allocations };
+  }
 
   return {
     regime,
@@ -291,5 +426,6 @@ export function computeAllocation(
     leverageAllowed,
     buyStage,
     date: new Date().toISOString().split('T')[0],
+    explanation,
   };
 }

@@ -99,16 +99,27 @@ function scoreWTI(wti: number | null): number {
 }
 
 function scoreLiquidityDirection(derived: Record<string, DerivedIndicator>): number {
+  const liquidityDir = derived.LIQUIDITY_DIRECTION?.value;
+  if (liquidityDir !== undefined && liquidityDir !== null) {
+    if (liquidityDir >= 2) return 2;
+    if (liquidityDir >= 1) return 1;
+    if (liquidityDir <= -2) return -2;
+    if (liquidityDir <= -1) return -1;
+    return 0;
+  }
+
   let score = 0;
   let count = 0;
   const rrp = derived.RRP_DIRECTION?.value;
   const tga = derived.TGA_DIRECTION?.value;
   const mmf = derived.MMF_DIRECTION?.value;
+  const wresbal = derived.WRESBAL_DIRECTION?.value;
   const gm2 = derived.GLOBAL_M2_PROXY?.value;
 
-  if (rrp !== undefined) { score += rrp < -1 ? 1 : rrp > 1 ? -1 : 0; count++; }
-  if (tga !== undefined) { score += tga < -10000 ? 1 : tga > 10000 ? -1 : 0; count++; }
-  if (mmf !== undefined) { score += mmf < -5 ? 1 : mmf > 5 ? -1 : 0; count++; }
+  if (rrp !== undefined) { score += rrp <= -1 ? 1 : rrp >= 1 ? -1 : 0; count++; }
+  if (tga !== undefined) { score += tga <= -2 ? 1 : tga >= 2 ? -1 : 0; count++; }
+  if (mmf !== undefined) { score += mmf <= -0.5 ? 1 : mmf >= 0.5 ? -1 : 0; count++; }
+  if (wresbal !== undefined) { score += wresbal >= 1 ? 1 : wresbal <= -1 ? -1 : 0; count++; }
   if (gm2 !== undefined) { score += gm2 > 1 ? 1 : gm2 < -1 ? -1 : 0; count++; }
 
   if (count === 0) return 0;
@@ -137,7 +148,10 @@ const WEIGHTS: Record<string, number> = {
   geoRisk: 0.5,
 };
 
-export function classifyRegime(input: ScoringInput): RegimeState {
+export function classifyRegime(
+  input: ScoringInput,
+  options?: { includeExplanation?: boolean },
+): RegimeState {
   const { raw, derived, manualInputs, smartMoneyScore } = input;
 
   const components: Record<string, number> = {
@@ -185,10 +199,16 @@ export function classifyRegime(input: ScoringInput): RegimeState {
 
   let weightedSum = 0;
   let totalWeight = 0;
+  const weightedContributions: NonNullable<RegimeState['explanation']>['weightedContributions'] = {};
   for (const [key, score] of Object.entries(components)) {
     const w = WEIGHTS[key] ?? 1;
     weightedSum += score * w;
     totalWeight += w;
+    weightedContributions[key] = {
+      score,
+      weight: w,
+      weightedContribution: parseFloat((score * w).toFixed(2)),
+    };
   }
 
   const normalized = ((weightedSum / totalWeight + 2) / 4) * 100;
@@ -200,21 +220,13 @@ export function classifyRegime(input: ScoringInput): RegimeState {
   const stagflation = dv(derived, 'STAGFLATION_WARNING');
   const bondVigilante = dv(derived, 'BOND_VIGILANTE_WARNING');
   let regime: Regime;
+  const overrides: string[] = [];
 
-  // Fix #5: STAGFLATION / BOND_VIGILANTE 최우선 override.
-  // 두 국면은 일반 score 분류보다 우선한다 — 플래그가 의미하는 구조적 신호는
-  // 0~100 점수에 완전히 매핑되지 않기 때문. 영상4 §137-147 / §145.
-  if (stagflation === 1) {
-    regime = 'STAGFLATION';
-  } else if (bondVigilante === 1) {
-    regime = 'BOND_VIGILANTE';
   // TODO(Fix #FE3): score 컷 {75, 55, 40, 25} 근거 재확인.
   //   Monte Carlo sweep + PRD §레짐 전환 구간 크로스체크 미실시. 현 컷은 0~100 score 를
   //   5분위(80/60/40/20 근방)에 살짝 당겨 놓은 heuristic. 14개 component × 가중합 분포가
   //   실제로 어떤 밴드에 분포하는지 backtest 로 관측 후 다시 결정 필요.
-  } else if (overheated === 1 && score >= 55) {
-    regime = 'CAUTION';
-  } else if (score >= 75) {
+  if (score >= 75) {
     regime = 'RISK_ON';
   } else if (score >= 55) {
     regime = 'NEUTRAL';
@@ -225,6 +237,21 @@ export function classifyRegime(input: ScoringInput): RegimeState {
   } else {
     regime = icsa !== null && icsa < 300000 ? 'PANIC_BUT_OK' : 'RECESSION_RISK';
   }
+  const preOverrideRegime = regime;
+
+  // Fix #5: STAGFLATION / BOND_VIGILANTE 최우선 override.
+  // 두 국면은 일반 score 분류보다 우선한다 — 플래그가 의미하는 구조적 신호는
+  // 0~100 점수에 완전히 매핑되지 않기 때문. 영상4 §137-147 / §145.
+  if (stagflation === 1) {
+    overrides.push('STAGFLATION_WARNING=1 -> regime forced to STAGFLATION');
+    regime = 'STAGFLATION';
+  } else if (bondVigilante === 1) {
+    overrides.push('BOND_VIGILANTE_WARNING=1 -> regime forced to BOND_VIGILANTE');
+    regime = 'BOND_VIGILANTE';
+  } else if (overheated === 1 && score >= 55) {
+    overrides.push('OVERHEATED=1 and score>=55 -> regime forced to CAUTION');
+    regime = 'CAUTION';
+  }
 
   // Fix #4: CREDIT_STRESS_FLAG 소비.
   // HY OAS ≥ 600bp 또는 HYG/IEF z ≤ -2 발동 시 신용시장 스트레스.
@@ -233,16 +260,38 @@ export function classifyRegime(input: ScoringInput): RegimeState {
   // STAGFLATION / BOND_VIGILANTE 는 이미 방어적이므로 추가 강등하지 않는다.
   if (creditStress === 1) {
     if (regime === 'RISK_ON') {
+      overrides.push('CREDIT_STRESS_FLAG=1 -> RISK_ON downgraded to NEUTRAL');
       regime = 'NEUTRAL';
     } else if (regime === 'NEUTRAL') {
+      overrides.push('CREDIT_STRESS_FLAG=1 -> NEUTRAL downgraded to CAUTION');
       regime = 'CAUTION';
     }
   }
+
+  const sortedDrivers = Object.entries(weightedContributions).sort(
+    (a, b) => b[1].weightedContribution - a[1].weightedContribution,
+  );
+  const positiveDrivers = sortedDrivers
+    .filter(([, value]) => value.weightedContribution > 0)
+    .slice(0, 4)
+    .map(([component, value]) => ({ component, ...value }));
+  const negativeDrivers = [...sortedDrivers]
+    .reverse()
+    .filter(([, value]) => value.weightedContribution < 0)
+    .slice(0, 4)
+    .map(([component, value]) => ({ component, ...value }));
 
   return {
     regime,
     score,
     components,
     date: new Date().toISOString().split('T')[0],
+    explanation: options?.includeExplanation ? {
+      preOverrideRegime,
+      overrides,
+      positiveDrivers,
+      negativeDrivers,
+      weightedContributions,
+    } : undefined,
   };
 }
