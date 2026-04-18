@@ -285,6 +285,12 @@ function nasdaqSignal(
   if (copperStockDiv === -1) {
     overheatFlags.push('COPPER_STOCK_DIVERGENCE bearish (구리 선행 하락, video2 §3)');
   }
+  // 11차 Phase 2: 기관 FLOW 집단 매도 — video4 §기관 "돈은 거짓말 안 함"
+  const instFlow = dv(derived, 'INSTITUTIONAL_NASDAQ_FLOW');
+  if (instFlow !== null && instFlow <= -1) {
+    const magnitude = instFlow === -2 ? '강한 ' : '';
+    overheatFlags.push(`INSTITUTIONAL_NASDAQ_FLOW ${magnitude}매도 (레벨 ${instFlow}, 13F 분기 비교, video4 §기관)`);
+  }
   if (overheatFlags.length >= 2 && signal !== 'SELL') {
     signal = 'REDUCE';
     const overrideReason = `과열 REDUCE override: ${overheatFlags.join(' · ')}`;

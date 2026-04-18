@@ -2289,15 +2289,19 @@ export async function computeDerived(
     /* LEVERAGE_TIER_RAW 실패는 파이프라인 막지 않음 */
   }
 
-  // === INSTITUTIONAL_NASDAQ_EXPOSURE_PCT (11차 #8 MVP, 2026-04) ===
+  // === INSTITUTIONAL_NASDAQ_EXPOSURE_PCT + FLOW (11차 #8, 2026-04) ===
   // 영상4 §기관리포트: "말은 거짓말 할 수 있지만 돈은 거짓말을 하지 않거든요".
-  // 주요 헤지펀드 10곳의 최근 13F-HR 공시에서 NASDAQ 메가캡 7종목 비중 평균.
-  //   MVP: 현재 시점 단일 스냅샷. 분기 비교 / 포지션 변화 추적은 Phase 2.
-  //   TTL 7일, stale 30일 (분기 배치라 갱신 여유).
+  // Phase 1: 현재 시점 메가캡 비중 스냅샷.
+  // Phase 2 (2026-04 추가): 이전 분기 대비 증감(FLOW, 레벨 -2~+2).
   try {
-    const { fetchInstitutional13F, computeNasdaqMegacapExposure } = await import('../collectors/institutional-13f');
-    const funds = await fetchInstitutional13F();
-    const exposure = computeNasdaqMegacapExposure(funds);
+    const {
+      fetchInstitutional13FQuarterly,
+      computeNasdaqMegacapExposure,
+      computeNasdaqMegacapFlow,
+    } = await import('../collectors/institutional-13f');
+    const quarterly = await fetchInstitutional13FQuarterly();
+    const currentFunds = quarterly.map((q) => q.current);
+    const exposure = computeNasdaqMegacapExposure(currentFunds);
     if (exposure) {
       d.INSTITUTIONAL_NASDAQ_EXPOSURE_PCT = {
         name: 'institutional_nasdaq_exposure_pct',
@@ -2309,8 +2313,21 @@ export async function computeDerived(
           `영상4 §기관리포트 정합. SEC EDGAR, 7일 캐시.`,
       };
     }
+    const flow = computeNasdaqMegacapFlow(quarterly);
+    if (flow) {
+      d.INSTITUTIONAL_NASDAQ_FLOW = {
+        name: 'institutional_nasdaq_flow',
+        value: flow.level,
+        date: today(),
+        formula:
+          `메가캡 비중 분기 변화: ${flow.previousPct}% → ${flow.currentPct}% ` +
+          `(Δ ${flow.deltaPct > 0 ? '+' : ''}${flow.deltaPct}%p, ${flow.fundCount}곳 기준). ` +
+          `레벨: +2(>+2%p), +1(>+0.5%p), 0, -1(<-0.5%p), -2(<-2%p). ` +
+          `영상4 §기관 "집단이 어디로 움직이나" 정합.`,
+      };
+    }
   } catch {
-    /* INSTITUTIONAL_NASDAQ_EXPOSURE 실패는 파이프라인 막지 않음 */
+    /* INSTITUTIONAL_* 실패는 파이프라인 막지 않음 */
   }
 
   return d;
