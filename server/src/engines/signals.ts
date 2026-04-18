@@ -269,6 +269,11 @@ function nasdaqSignal(
   if (vix !== null && vix < 16) overheatFlags.push(`VIX ${vix.toFixed(1)} < 16 방심`);
   const chaseWarning = dv(derived, 'NASDAQ_CHASE_WARNING');
   if (chaseWarning === 1) overheatFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
+  // 11차 신규: 구리-주식 괴리 (bearish) — video2 "주식 괜찮은데 구리 먼저 빠지면 경고"
+  const copperStockDiv = dv(derived, 'COPPER_STOCK_DIVERGENCE');
+  if (copperStockDiv === -1) {
+    overheatFlags.push('COPPER_STOCK_DIVERGENCE bearish (구리 선행 하락, video2 §3)');
+  }
   if (overheatFlags.length >= 2 && signal !== 'SELL') {
     signal = 'REDUCE';
     const overrideReason = `과열 REDUCE override: ${overheatFlags.join(' · ')}`;
@@ -558,6 +563,15 @@ function copperSignal(
   const strongSetup = dv(derived, 'COPPER_STRONG_SETUP');
   if (strongSetup === 1) reasons.push('🟢🟢 구리 강매수 3조건 복합 (ISM+금구리비+ICSA) 전부 충족 — 영상2 명시');
 
+  // 11차 신규 (2026-04): 금구리비 "하락 전환" (=CGR 상승 전환) 추세 감지 — video2 §3부 정합.
+  // video2: "경기 회복 3가지 동시 — ISM 바닥 반등 + 금구리비 하락 전환 + 실업수당 감소".
+  // 절대 레벨(CGR>0.00125) 외에 "전환 시점" 감지 — UPTURN=1 시 met 보조 가점.
+  const cgrUpturn = dv(derived, 'COPPER_GOLD_RATIO_UPTURN');
+  if (cgrUpturn === 1) {
+    reasons.push('✓ CGR 상승 전환 (영상2 "금구리비 하락 전환 = 경기회복 전조") — 타이밍 확정 +1');
+    met += 1;
+  }
+
   // Fix #6(2차 감사): REDUCE 분기 복구 — 기존 `met≥3 STRONG_BUY / met===2 BUY / else HOLD` 는
   //   met=0(3조건 모두 미충족) 에서도 HOLD 로 약세 강등이 없었다. signalFromScore 로 통일:
   //   total=3 기준 {strongBuy:3, buy:2, hold:1, reduce:0, sell:0} — 기존 BUY/STRONG_BUY 분기는 보존.
@@ -769,9 +783,12 @@ function kospiSignal(
   if (disparity !== null && disparity < -15) { met++; reasons.push(`코스피 이격도 ${disparity.toFixed(1)}% < -15% (가중치 1.0)`); }
   else { unmetReasons.push('코스피 이격도 -15% 이하 조건 미충족 (가중치 1.0 미충족)'); }
 
+  // 11차 시정 (2026-04): 영상 stt_kospi / video5_analysis "유가 60달러대 안정 /
+  //   100달러 재돌파 경고" 정합을 위해 WTI 임계 80→65 로 강화 (영상 기준 60 + 여유 5).
+  //   기존 80 은 영상의 "위험 구간 75-85" 상단이라 안정 판정 기준으로 부적절.
   const wti = v(raw, 'WTI');
-  if (wti !== null && wti < 80) { met++; reasons.push(`유가 $${wti.toFixed(1)} < $80 안정 (가중치 1.0)`); }
-  else { unmetReasons.push('유가 $80 미만 조건 미충족 (가중치 1.0 미충족)'); }
+  if (wti !== null && wti < 65) { met++; reasons.push(`유가 $${wti.toFixed(1)} < $65 안정 (영상5 §Takeaway, 가중치 1.0)`); }
+  else { unmetReasons.push('유가 $65 미만 조건 미충족 (영상 "60달러대 안정", 가중치 1.0 미충족)'); }
 
   const chaseKospi = dv(derived, 'CHASE_KOSPI');
   if (chaseKospi !== null && chaseKospi > 15) { unmetReasons.push(`⚠️ 코스피 20일 +${chaseKospi.toFixed(1)}% → 추격매수 주의 (보조조건)`); }
@@ -825,9 +842,18 @@ function kospiSignal(
   } else {
     unmetReasons.push('외국인 수급 데이터 없음 (가중치 1.0 미충족)');
   }
-  // 극단 이벤트 보조 경고
+  // 극단 이벤트 보조 경고 (일상 ±3조 임계)
   if (foreignExtreme === 1) unmetReasons.push(`⚠️ 외국인 20일 누적 +3조 초과 — 단기 과열 구간 (보조조건)`);
   else if (foreignExtreme === -1) reasons.push(`외국인 20일 누적 -3조 초과 — 과매도 반등 후보 (보조조건)`);
+
+  // 역사적 대량 이벤트 (±20조, 11차 신규) — stt_kospi "2025년 2~3월 45~60조 매도" 규모
+  const foreignHistoric = dv(derived, 'KOSPI_FOREIGN_HISTORIC_EXTREME');
+  if (foreignHistoric === -1) {
+    reasons.push('✓ 외국인 20일 누적 -20조 초과 — stt_kospi "2~3월 공황성 매도" 수준, 반등 후보 강화 (보조조건 +1)');
+    met += 1; // 역사적 과매도 = 반등 기회
+  } else if (foreignHistoric === 1) {
+    unmetReasons.push('⚠️ 외국인 20일 누적 +20조 초과 — 역사적 대규모 매수 과열 (보조조건)');
+  }
   if (foreignSellStreak !== null && foreignSellStreak >= 5) {
     unmetReasons.push(`⚠️ 외국인 ${foreignSellStreak}일 연속 순매도 → 구조적 이탈 경고 (보조조건)`);
   }
@@ -884,6 +910,22 @@ function kospiSignal(
   if (trendConfirmCount === 0 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
     signal = 'HOLD';
     const overrideReason = '추세전환 3조건 전부 미충족 → HOLD 상한 (보조조건)';
+    overrides.push(overrideReason);
+    reasons.push(overrideReason);
+  }
+
+  // 11차 신규 (2026-04): 지정학 급변 숏커버링 반등 가드 — stt_kospi §2부 정합.
+  // video5_analysis §3부: "환율 1,500 돌파 예상하고 코스피 하락 베팅한 세력이 휴전
+  //   뉴스에 놀라 급격히 손절" → 반등의 50% 는 숏커버링, 진짜 추세 아님.
+  // GEOPOLITICAL_UNWIND_EVENT=1 AND SHORT_COVER_SUSPECTED=1 동시 발동 시
+  //   KOSPI 신호 STRONG_BUY/BUY → HOLD 강제 (추세 재확인 필요).
+  const geoUnwind = dv(derived, 'GEOPOLITICAL_UNWIND_EVENT');
+  const shortCover = dv(derived, 'SHORT_COVER_SUSPECTED');
+  if (geoUnwind === 1 && shortCover === 1 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
+    signal = 'HOLD';
+    const overrideReason =
+      '⚠️ 지정학 급변 숏커버링 반등 (stt_kospi §2부) — 휴전/종전 뉴스 + 외인 1일 순매수 ≥1조. ' +
+      '반등의 질 감별 필요 → HOLD 강등 (추세 재개 3조건 확인 후 재진입)';
     overrides.push(overrideReason);
     reasons.push(overrideReason);
   }
