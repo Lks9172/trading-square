@@ -213,6 +213,43 @@ async function backtest(
       derived.NASDAQ_DISPARITY = { name: 'nasdaq_disparity_200', value: ((cur - sma200) / sma200) * 100, date: prevDate, formula: '' };
       derived.NASDAQ_ABOVE_200DMA = { name: 'nasdaq_above_200dma', value: cur > sma200 ? 1 : 0, date: prevDate, formula: '' };
     }
+    // 11차 신규 derived 3종 backtest 시점 재계산 (Yahoo history 기반). KOSPI_FOREIGN_HISTORIC
+    // 과 INSTITUTIONAL_* 는 과거 krx-flow/13F 데이터 없어 sweep 에서 skip.
+    //   - COPPER_GOLD_RATIO_UPTURN/DOWNTURN: copper/gold close history
+    //   - COPPER_STOCK_DIVERGENCE: nasdaq/copper 20일 수익률 비교
+    const copperEl = histories.copper?.filter((p) => p.date <= prevDate) || [];
+    const goldEl = histories.gold?.filter((p) => p.date <= prevDate) || [];
+    if (copperEl.length >= 25 && goldEl.length >= 25) {
+      const goldDateMap = new Map(goldEl.map((g) => [g.date, g.value]));
+      const cgrList: number[] = [];
+      for (const c of copperEl.slice(-25)) {
+        const g = goldDateMap.get(c.date);
+        if (g && g > 0) cgrList.push(c.value / g);
+      }
+      if (cgrList.length >= 25) {
+        const recent5 = cgrList.slice(-5).reduce((s, v) => s + v, 0) / 5;
+        const prev5 = cgrList.slice(-20, -15).reduce((s, v) => s + v, 0) / 5;
+        const mid5 = cgrList.slice(-15, -10).reduce((s, v) => s + v, 0) / 5;
+        const trendPct = prev5 > 0 ? (recent5 - prev5) / prev5 : 0;
+        const midToPrevPct = mid5 > 0 ? (prev5 - mid5) / mid5 : 0;
+        const upturn = trendPct > 0.005 && midToPrevPct <= 0.005 ? 1 : 0;
+        const downturn = trendPct < -0.005 && midToPrevPct >= -0.005 ? 1 : 0;
+        derived.COPPER_GOLD_RATIO_UPTURN = { name: 'copper_gold_ratio_upturn', value: upturn, date: prevDate, formula: '' };
+        derived.COPPER_GOLD_RATIO_DOWNTURN = { name: 'copper_gold_ratio_downturn', value: downturn, date: prevDate, formula: '' };
+      }
+    }
+    if (nqEl.length >= 21 && copperEl.length >= 21) {
+      const nq0 = nqEl[nqEl.length - 21].value;
+      const nq1 = nqEl[nqEl.length - 1].value;
+      const cu0 = copperEl[copperEl.length - 21].value;
+      const cu1 = copperEl[copperEl.length - 1].value;
+      const nqPct = nq0 > 0 ? ((nq1 - nq0) / nq0) * 100 : 0;
+      const cuPct = cu0 > 0 ? ((cu1 - cu0) / cu0) * 100 : 0;
+      let div = 0;
+      if (nqPct >= 0 && cuPct <= -3) div = -1;
+      else if (nqPct <= 0 && cuPct >= 3) div = 1;
+      derived.COPPER_STOCK_DIVERGENCE = { name: 'copper_stock_divergence', value: div, date: prevDate, formula: '' };
+    }
     const regime = classifyRegime({ raw, derived, manualInputs: DEFAULT_PROFILE.manualInputs });
     const signals = computeSignals(raw, derived, regime, DEFAULT_PROFILE);
     const alloc = computeAllocation(regime.regime, regime.score, signals, derived, raw, 'long', variant);
