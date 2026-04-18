@@ -152,8 +152,8 @@ export async function computeDerived(
   //   DIVERGENCE_BEARISH: 주식 ≥ 0 AND 구리 ≤ -3% → 경고 (주식 과열 or 경기 선행하락)
   //   DIVERGENCE_BULLISH: 주식 ≤ 0 AND 구리 ≥ +3% → 경기 회복 조기 신호
   try {
-    const nasdaqHist20 = await fetchYahooHistory('^IXIC', 25);
-    const copperHist20 = await fetchYahooHistory('HG=F', 25);
+    const nasdaqHist20 = await fetchYahooHistory('^IXIC', 40);
+    const copperHist20 = await fetchYahooHistory('HG=F', 40);
     if (nasdaqHist20.length >= 21 && copperHist20.length >= 21) {
       const nq0 = nasdaqHist20[nasdaqHist20.length - 21].close;
       const nq1 = nasdaqHist20[nasdaqHist20.length - 1].close;
