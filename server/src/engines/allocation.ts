@@ -21,7 +21,11 @@ import { ASSET_TO_ALLOC_KEY } from './asset-keys';
 //     3) 현 top1 과 diff 를 본 커밋과 별개로 검토 → 백테스트 회귀 후 교체.
 //   본 커밋 스코프에서는 BASE 숫자 변경 없음 — TODO 주석만 명시.
 const BASE_ALLOCATIONS: Record<Regime, Record<string, number>> = {
-  RISK_ON:        { cash: 8,  nasdaq: 32, leverage: 0,  gold: 7,  silver: 10, copper: 6,  korea: 18, emerging: 19 },
+  // 11차 envelope 수동 시정 (2026-04): 기존 emerging=19 가 envelope 규칙 `emerging ≤ 15` 를
+  //   위반했고, gold=7 은 video2 "중앙은행 구조 매수 대세 상승" 맥락에서 RISK_ON 이라도
+  //   과소했음. sweep 은 활성일 17일로 BLOCKED 이라 수동 편집: emerging 19→13 (-6) 을
+  //   gold 7→13 (+6) 으로 이관 (구조 헷지 강화).
+  RISK_ON:        { cash: 8,  nasdaq: 32, leverage: 0,  gold: 13, silver: 10, copper: 6,  korea: 18, emerging: 13 },
   // 11차 재선정 (2026-04, top-decile, N=30, --walk-forward, --tx-cost=5bp).
   //   CANDIDATE 조건(활성일 ≥ 100 AND envelopeViolations = 0) 통과 레짐만 교체.
   //   overfit_warning=false, alpha_decay=-21.16%p (test α 오히려 큼 → 과적합 아님).
@@ -29,7 +33,12 @@ const BASE_ALLOCATIONS: Record<Regime, Record<string, number>> = {
   //   TODO §15 "top1 → top-decile 이관" 본 커밋에서 해소.
   NEUTRAL:        { cash: 12, nasdaq: 40, leverage: 0,  gold: 24, silver: 6,  copper: 5,  korea: 10, emerging: 3  },
   CAUTION:        { cash: 33, nasdaq: 21, leverage: 0,  gold: 25, silver: 4,  copper: 5,  korea: 10, emerging: 2  },
-  CORRECTION:     { cash: 13, nasdaq: 35, leverage: 0,  gold: 19, silver: 8,  copper: 5,  korea: 11, emerging: 9  },
+  // 11차 envelope 수동 시정 (2026-04): 기존 cash=13/silver=8 이 envelope 규칙
+  //   `cash ≥ 30` (video5_analysis §3.3 "숨고르기 30-40%") 및 `silver ≤ 5` (video2
+  //   "경기둔화 = 은 하락") 을 이중 위반. sweep 활성일 29일로 BLOCKED 이라 수동 편집:
+  //   cash 13→30 (+17), silver 8→5 (-3), nasdaq 35→25 (-10), emerging 9→5 (-4) = 100.
+  //   nasdaq/emerging 감축은 조정 국면 방어 강화 (video5 "외인 이탈" 정합).
+  CORRECTION:     { cash: 30, nasdaq: 25, leverage: 0,  gold: 19, silver: 5,  copper: 5,  korea: 11, emerging: 5  },
   PANIC_BUT_OK:   { cash: 15, nasdaq: 35, leverage: 10, gold: 20, silver: 5,  copper: 5,  korea: 5,  emerging: 5  },
   RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0,  copper: 0,  korea: 5,  emerging: 5  },
   // Fix #5: 스태그플레이션 — 물가↑ + 성장↓. 금·은 방어, 위험자산 축소. (영상4 §145)
