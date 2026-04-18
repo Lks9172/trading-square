@@ -2341,9 +2341,9 @@ export async function computeDerived(
   //   (c) 실질금리 하락 추세 (REAL_YIELD_TREND < 0)
   // 3가지 중 2개 이상 충족 시 1 (구조 매수 환경), 아니면 0.
   try {
-    const gh = await fetchYahooHistory('GC=F', 260);
-    const dxyFull = await fetchYahooHistory('DX-Y.NYB', 260);
-    if (gh.length >= 250 && dxyFull.length >= 250) {
+    const gh = await fetchYahooHistory('GC=F', 400);
+    const dxyFull = await fetchYahooHistory('DX-Y.NYB', 400);
+    if (gh.length >= 252 && dxyFull.length >= 252) {
       const g0 = gh[gh.length - 252]?.close;
       const g1 = gh[gh.length - 1]?.close;
       const dx0 = dxyFull[dxyFull.length - 252]?.close;
