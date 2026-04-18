@@ -318,57 +318,86 @@ function nasdaqSignal(
   });
   let signal = baseSignal;
 
-  // Fix #2: NASDAQ 과열 REDUCE override.
-  // 4개 체크 중 2개 이상 발동 시 met 와 무관하게 REDUCE 강등(영상1 §추격매수 금지).
-  //   a) 이격도 ≥ +25%  (200DMA 대비 과열)
-  //   b) F&G ≥ 85       (극단 탐욕)
-  //   c) VIX < 16       (변동성 방심)
-  //   d) NASDAQ_CHASE_WARNING === 1  (이격률 ±15% 20일 지속)
+  // === Fix #2 + 13차 옵션 D 재설계 (2026-04): 과열 REDUCE override ===
+  //
+  // 영상1 §전략C: "경제 펀더멘털 살아있는 상태 -30% = 위기 아닌 기회"
+  // 영상3: "200일선 아래 + 실업수당 20만대 = 분할매수 구간"
+  //
+  // 이전 구현 버그:
+  //   (1) 이격도 음수(저점) 구간에서도 과열 플래그 누적 시 REDUCE 강등 → 영상 원칙 위반
+  //   (2) INSTITUTIONAL_NASDAQ_FLOW (메가캡 7종) + TECH_SECTOR_FLOW (테크 5종) 대부분
+  //       같은 종목 중복 → 1개 시그널이 2개로 카운트되어 임계 쉽게 도달
+  //   (3) 기관 매도는 "이미 진행된 조정 원인"인데 "고점 경고"로 오용 (후행 → 선행 오해)
+  //
+  // 재설계 원칙:
+  //   A) **저점 가드**: 이격도 < -5% 면 과열 REDUCE 블록 전면 보류.
+  //      대신 기관/거시 플래그는 "관찰 reason" 으로만 기록 (정보 보존).
+  //   B) **13F 중복 통합**: INSTITUTIONAL_NASDAQ_FLOW + TECH_SECTOR_FLOW 를 "기관 집단"
+  //      단일 플래그로 통합. 둘 중 하나만 -1 이어도 1회 카운트, 둘 다 -2 면 "강한".
+  //   C) **가격/심리 과열 vs 기관 플래그 분리**:
+  //      - "진짜 과열 플래그" (이격도/F&G/VIX/CHASE): 2개↑ 발동 시 REDUCE
+  //      - "조정-확인 플래그" (기관/괴리/꼬리): 저점 구간(< -5%)에서는 관찰 reason 만
+  const disparityIsLow = disparity !== null && disparity < -5;
+
+  // --- 진짜 과열 플래그 (이격도/F&G/VIX/CHASE) — 저점 구간과 무관 ---
   const overheatFlags: string[] = [];
   if (disparity !== null && disparity >= 25) overheatFlags.push(`이격도 +${disparity.toFixed(1)}% ≥ 25%`);
   if (fng !== null && fng >= 85) overheatFlags.push(`F&G ${fng} ≥ 85 극탐욕`);
   if (vix !== null && vix < 16) overheatFlags.push(`VIX ${vix.toFixed(1)} < 16 방심`);
   const chaseWarning = dv(derived, 'NASDAQ_CHASE_WARNING');
   if (chaseWarning === 1) overheatFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
-  // 11차 신규: 구리-주식 괴리 (bearish) — video2 "주식 괜찮은데 구리 먼저 빠지면 경고"
+
+  // --- 조정-확인 플래그 (기관/거시) — 저점 구간에서는 관찰만 ---
+  const confirmFlags: string[] = [];
+  // 13F: NASDAQ_FLOW 와 TECH_SECTOR_FLOW 통합 (대부분 같은 종목 — 중복 방지)
+  const instFlow = dv(derived, 'INSTITUTIONAL_NASDAQ_FLOW');
+  const techFlow = dv(derived, 'INSTITUTIONAL_SECTOR_TECH_FLOW');
+  const instCombined = Math.min(instFlow ?? 0, techFlow ?? 0); // 더 강한 신호 채택
+  if (instCombined <= -1) {
+    const magnitude = instCombined === -2 ? '강한 ' : '';
+    confirmFlags.push(
+      `기관 집단 ${magnitude}tech 감축 (NASDAQ_FLOW ${instFlow ?? 'n/a'} / TECH_FLOW ${techFlow ?? 'n/a'}, 13F, video4)`,
+    );
+  }
+  // 구리-주식 괴리 (bearish)
   const copperStockDiv = dv(derived, 'COPPER_STOCK_DIVERGENCE');
   if (copperStockDiv === -1) {
-    overheatFlags.push('COPPER_STOCK_DIVERGENCE bearish (구리 선행 하락, video2 §3)');
+    confirmFlags.push('COPPER_STOCK_DIVERGENCE bearish (구리 선행 하락, video2 §3)');
   }
-  // 11차 Phase 2: 기관 FLOW 집단 매도 — video4 §기관 "돈은 거짓말 안 함"
-  const instFlow = dv(derived, 'INSTITUTIONAL_NASDAQ_FLOW');
-  if (instFlow !== null && instFlow <= -1) {
-    const magnitude = instFlow === -2 ? '강한 ' : '';
-    overheatFlags.push(`INSTITUTIONAL_NASDAQ_FLOW ${magnitude}매도 (레벨 ${instFlow}, 13F 분기 비교, video4 §기관)`);
-  }
-  // 12차 Phase 3 신규: 섹터별 집단 이동 — TECH 섹터 감축 시 NASDAQ 과열 플래그 보강
-  // FIN / ENERGY 는 NASDAQ 에 직접 영향 약해 관측 전용 (summary 표시는 별도 컴포넌트).
-  const techFlow = dv(derived, 'INSTITUTIONAL_SECTOR_TECH_FLOW');
-  if (techFlow !== null && techFlow <= -1) {
-    const magnitude = techFlow === -2 ? '강한 ' : '';
-    overheatFlags.push(`INSTITUTIONAL_SECTOR_TECH_FLOW ${magnitude}매도 (레벨 ${techFlow}, 13F 기술주 집단 이탈, video4)`);
-  }
-  // 12차 N4: 꼬리 위험 (SKEW/VVIX/OVX) 고레벨 — video4 §꼬리
+  // TAIL_RISK
   const tailRisk = dv(derived, 'TAIL_RISK_LEVEL');
   if (tailRisk !== null && tailRisk >= 2) {
-    overheatFlags.push('TAIL_RISK_LEVEL 고위험 (SKEW/VVIX/OVX 중 2개 이상 과열, video4)');
+    confirmFlags.push('TAIL_RISK_LEVEL 고위험 (SKEW/VVIX/OVX 중 2개 이상 과열, video4)');
   }
-  // 12차 노션 HY 정합: regime score 외 signal 레벨 경고 (regime 롤백 보완).
-  // 노션 "5-7% 주의" 구간부터 NASDAQ 과열 플래그. 8% 이상은 이미 regime -2 반영.
+  // HY 5-7% 주의
   const hyRaw = v(raw, 'BAMLH0A0HYM2');
   if (hyRaw !== null && hyRaw >= 5 && hyRaw < 8) {
-    overheatFlags.push(`HY OAS ${hyRaw.toFixed(1)}% — 노션 "5-7% 주의" 구간 신용 스트레스`);
+    confirmFlags.push(`HY OAS ${hyRaw.toFixed(1)}% — 노션 "5-7% 주의" 구간 신용 스트레스`);
   }
-  // 13차 A7: 주가-경제 괴리 유동성 왜곡 — video4 "실물 약한데 주가 오른다"
+  // ECONOMY_STOCK_DIVERGENCE (이건 원래 "이격도>+10% + ISM<50" 이라 저점 구간 발동 불가)
   const econStockDiv = dv(derived, 'ECONOMY_STOCK_DIVERGENCE');
   if (econStockDiv === -1) {
-    overheatFlags.push('ECONOMY_STOCK_DIVERGENCE 유동성 왜곡 (ISM<50 + 이격도>+10%, video4)');
+    confirmFlags.push('ECONOMY_STOCK_DIVERGENCE 유동성 왜곡 (ISM<50 + 이격도>+10%, video4)');
   }
-  // 13차 A3: 유가-구리 교차래그 경기 둔화 임박
+  // WTI-COPPER lag
   const wtiCopperLag = dv(derived, 'WTI_COPPER_LAG_LEVEL');
   if (wtiCopperLag === -1) {
-    overheatFlags.push('WTI_COPPER_LAG 둔화 임박 (유가 과거 급등 → 구리 현재 약세, video2 §3부)');
+    confirmFlags.push('WTI_COPPER_LAG 둔화 임박 (유가 과거 급등 → 구리 현재 약세, video2 §3부)');
   }
+
+  // --- 판정 ---
+  // 저점 구간 (이격도 < -5%): confirmFlags 는 관찰 reason 으로만, 과열 REDUCE 블록
+  //   (기관 매도는 이미 진행된 조정의 원인 → "저점 근접" 신호로 재해석)
+  // 비저점 구간: confirmFlags 도 overheatFlags 에 합산, 2개↑ 발동 시 REDUCE
+  if (disparityIsLow && confirmFlags.length > 0) {
+    reasons.push(
+      `ℹ️ 조정-확인 플래그 ${confirmFlags.length}개 (이격도 ${disparity!.toFixed(1)}% 저점 구간 — ` +
+      `영상1 "펀더멘털 살아있는 -30% = 기회" 정합, REDUCE 보류): ${confirmFlags.join(' · ')}`,
+    );
+  } else if (!disparityIsLow) {
+    overheatFlags.push(...confirmFlags);
+  }
+
   if (overheatFlags.length >= 2 && signal !== 'SELL') {
     signal = 'REDUCE';
     const overrideReason = `과열 REDUCE override: ${overheatFlags.join(' · ')}`;
