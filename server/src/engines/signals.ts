@@ -157,10 +157,21 @@ function nasdaqSignal(
   if (vix !== null && vix > 30) { met++; reasons.push(`VIX ${vix.toFixed(1)} > 30 (가중치 1.0)`); }
   else { unmetReasons.push('VIX 30 초과 조건 미충족 (가중치 1.0 미충족)'); }
 
+  // 11차 이격도 계층화 (2026-04): 영상1 전략C "이격도 -25% 이하 = 평균회귀 최강" 정합.
+  //   기존 -10% 저점 조건은 "관찰 시작" 레벨이라 영상 근거 약함. 극저점(-25%) 시 +1 추가
+  //   가점으로 영상 정합 보강 (total 은 불변, 저점 확신도 차등화).
   const disparity = dv(derived, 'NASDAQ_DISPARITY');
-  if (disparity !== null && disparity < -10) { met++; reasons.push(`이격도 ${disparity.toFixed(1)}% < -10% (가중치 1.0)`); }
-  else if (disparity !== null) { unmetReasons.push(`이격도 ${disparity.toFixed(1)}% → -10% 미만 미충족 (가중치 1.0 미충족)`); }
-  else { unmetReasons.push('이격도 데이터 없음 (가중치 1.0 미충족)'); }
+  if (disparity !== null && disparity <= -25) {
+    met += 2;
+    reasons.push(`✓ 이격도 ${disparity.toFixed(1)}% ≤ -25% (영상1 §전략C 극저점, 보너스 +1, 총 2점)`);
+  } else if (disparity !== null && disparity < -10) {
+    met++;
+    reasons.push(`이격도 ${disparity.toFixed(1)}% < -10% (약한 저점 관찰, 가중치 1.0)`);
+  } else if (disparity !== null) {
+    unmetReasons.push(`이격도 ${disparity.toFixed(1)}% → -10% 미만 미충족 (가중치 1.0 미충족)`);
+  } else {
+    unmetReasons.push('이격도 데이터 없음 (가중치 1.0 미충족)');
+  }
 
   const fng = v(raw, 'FEAR_GREED');
   if (fng !== null && fng < 25) { met++; reasons.push(`F&G ${fng} < 25 (가중치 1.0)`); }
@@ -780,8 +791,17 @@ function kospiSignal(
   else { unmetReasons.push('환율 1480원 이하 조건 미충족 (가중치 1.0 미충족)'); }
 
   const disparity = dv(derived, 'KOSPI_DISPARITY');
-  if (disparity !== null && disparity < -15) { met++; reasons.push(`코스피 이격도 ${disparity.toFixed(1)}% < -15% (가중치 1.0)`); }
-  else { unmetReasons.push('코스피 이격도 -15% 이하 조건 미충족 (가중치 1.0 미충족)'); }
+  // 11차 이격도 계층화 (2026-04): stt_kospi 에 구체 수치 근거 없으나 역사적 "75% 상승 후
+  //   조정 통상 15-30%" 범위 기반. 극저점(-25%) 시 +1 추가 가점 — 2025년 2~3월 수준 대응.
+  if (disparity !== null && disparity <= -25) {
+    met += 2;
+    reasons.push(`✓ 코스피 이격도 ${disparity.toFixed(1)}% ≤ -25% (stt_kospi "역대급 하락" 수준, 보너스 +1, 총 2점)`);
+  } else if (disparity !== null && disparity < -15) {
+    met++;
+    reasons.push(`코스피 이격도 ${disparity.toFixed(1)}% < -15% (실용 저점 임계, 가중치 1.0)`);
+  } else {
+    unmetReasons.push('코스피 이격도 -15% 이하 조건 미충족 (가중치 1.0 미충족)');
+  }
 
   // 11차 시정 (2026-04): 영상 stt_kospi / video5_analysis "유가 60달러대 안정 /
   //   100달러 재돌파 경고" 정합을 위해 WTI 임계 80→65 로 강화 (영상 기준 60 + 여유 5).
