@@ -37,16 +37,13 @@ const FRED_SERIES: Record<string, string> = {
   EFFR: 'EFFR',
   IORB: 'IORB', // Interest on Reserve Balances — SOFR/IORB 스프레드 계산용
   INDPRO: 'INDPRO',
-  // OECD growth-rate series(MABMM301*657S)는 이미 변화율이라 YoY-of-YoY 왜곡이 생긴다.
-  // 글로벌 M2 프록시는 level-like 지수 시리즈로 교체해 12개월 변화율을 직접 계산한다.
-  M3_EURO: 'EA19MABMM301IXOBSAM',
-  M3_JAPAN: 'JPNMABMM301IXOBSAM',
+  // 13차 (2026-04): M3_EURO/M3_JAPAN 제거. FRED 상 OECD 공급 시리즈가 장기 정체
+  // (960일+ staleness) 로 GLOBAL_M2_PROXY 가 실질적으로 미국 M2 단일 기여였음.
+  // 영상 원문(video1/4) "유동성 방향" 논의도 주로 미국 유동성 중심이라 단순화.
+  // (구) M3_EURO: 'EA19MABMM301IXOBSAM', M3_JAPAN: 'JPNMABMM301IXOBSAM'
 };
 
-const FRED_LEVEL_SERIES_MIN_LATEST: Record<string, number> = {
-  M3_EURO: 20,
-  M3_JAPAN: 20,
-};
+const FRED_LEVEL_SERIES_MIN_LATEST: Record<string, number> = {};
 
 export { FRED_SERIES, FRED_LEVEL_SERIES_MIN_LATEST };
 
@@ -74,8 +71,6 @@ const FRED_SERIES_CADENCE: Record<string, FredCadence> = {
   EFFR: 'daily',
   IORB: 'daily',
   INDPRO: 'monthly',
-  M3_EURO: 'monthly',
-  M3_JAPAN: 'monthly',
 };
 
 function ageDaysFromDate(date: string): number {
@@ -106,7 +101,7 @@ function getFredLiveCacheTtlMs(key: string): number {
   if (['WALCL', 'WRESBAL', 'RRPONTSYD', 'WTREGEN', 'WRMFNS', 'WM2NS', 'ICSA', 'STLFSI4'].includes(key)) {
     return 36 * 60 * 60 * 1000;
   }
-  if (['M2SL', 'UNRATE', 'INDPRO', 'M3_EURO', 'M3_JAPAN'].includes(key)) {
+  if (['M2SL', 'UNRATE', 'INDPRO'].includes(key)) {
     return 7 * 24 * 60 * 60 * 1000;
   }
   return 12 * 60 * 60 * 1000;

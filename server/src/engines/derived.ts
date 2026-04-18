@@ -452,65 +452,40 @@ export async function computeDerived(
     void 0;
   }
 
-  // === 글로벌 M2 aggregate ===
-  // 미국 M2 + 유로/일본 broad money level index 의 "최신 vs 12개월 전" YoY% 평균.
-  // 유로/일본은 OECD growth-rate 시리즈가 아니라 level-like index 시리즈를 써야
-  // YoY-of-YoY 왜곡 없이 같은 축에서 비교할 수 있다.
+  // === 글로벌 M2 aggregate (13차 단순화, 2026-04) ===
+  // 미국 M2 단일 시리즈 사용. 이전 유로 M3 + 일본 M3 추가 평균 구조는 FRED 제공
+  // OECD 시리즈가 960일+ 정체로 이미 미국 M2 단일 기여로 동작하던 상태라 제거.
+  // 영상1/4 "유동성 방향" 논의도 미국 유동성 중심이라 단순화가 영상 정합.
   const GLOBAL_M2_MAX_AGE_DAYS = 400;
-  const readYoY = async (key: string, minExpectedLevel = 0): Promise<number | null> => {
-    const hist = await readHistory('fred', key);
-    return computeHistoryYoY(hist, minExpectedLevel, GLOBAL_M2_MAX_AGE_DAYS);
-  };
+  const usYoY = await computeHistoryYoY(
+    await readHistory('fred', 'M2SL'),
+    0,
+    GLOBAL_M2_MAX_AGE_DAYS,
+  );
 
-  const [usYoY, euroYoY, japanYoY] = await Promise.all([
-    readYoY('M2SL'),
-    readYoY('M3_EURO', 20),
-    readYoY('M3_JAPAN', 20),
-  ]);
-
-  // 광의통화 YoY 합리 범위: COVID 피크(미국 M2 약 +27%)까지 포섭하되,
-  // 시리즈 base 변경/스케일 오류로 인한 극단값(예: Japan M3 +96%)은 평균에서 제외.
+  // 광의통화 YoY 합리 범위: COVID 피크(미국 M2 약 +27%)까지 포섭. 범위 밖은 이상치.
   const M2_YOY_MIN = -20;
   const M2_YOY_MAX = 30;
   const isM2Anomaly = (v: number) => v < M2_YOY_MIN || v > M2_YOY_MAX;
 
-  const pushYoY = (
-    key: 'US_M2_YOY' | 'EURO_M3_YOY' | 'JAPAN_M3_YOY',
-    name: string,
-    source: string,
-    yoy: number | null,
-  ) => {
-    if (yoy === null) return;
-    const anomaly = isM2Anomaly(yoy);
-    d[key] = {
-      name,
-      value: parseFloat(yoy.toFixed(2)),
+  if (usYoY !== null) {
+    const anomaly = isM2Anomaly(usYoY);
+    d.US_M2_YOY = {
+      name: 'us_m2_yoy',
+      value: parseFloat(usYoY.toFixed(2)),
       date: dt,
       formula: anomaly
-        ? `${source} 최신월 / 12개월 전 - 1 (%). 이상치(${M2_YOY_MIN}~${M2_YOY_MAX}% 범위 밖) — GLOBAL 평균 계산에서 제외됨`
-        : `${source} 최신월 / 12개월 전 - 1 (%)`,
+        ? `미국 M2SL 최신월 / 12개월 전 - 1 (%). 이상치(${M2_YOY_MIN}~${M2_YOY_MAX}% 범위 밖)`
+        : '미국 M2SL 최신월 / 12개월 전 - 1 (%)',
     };
-  };
-
-  pushYoY('US_M2_YOY', 'us_m2_yoy', '미국 M2SL', usYoY);
-  pushYoY('EURO_M3_YOY', 'euro_m3_yoy', '유로 M3', euroYoY);
-  pushYoY('JAPAN_M3_YOY', 'japan_m3_yoy', '일본 M3', japanYoY);
-
-  const m2All = [usYoY, euroYoY, japanYoY].filter((v): v is number => v !== null);
-  const m2Valid = m2All.filter((v) => !isM2Anomaly(v));
-  const excludedCount = m2All.length - m2Valid.length;
-
-  if (m2Valid.length > 0) {
-    const globalAvg = m2Valid.reduce((s, v) => s + v, 0) / m2Valid.length;
-    d.GLOBAL_M2_PROXY = {
-      name: 'global_m2_proxy',
-      value: parseFloat(globalAvg.toFixed(2)),
-      date: dt,
-      formula:
-        `미국 M2 + 유로 M3 + 일본 M3 의 YoY% 평균 (${m2Valid.length}개 기여` +
-        (excludedCount > 0 ? `, ${excludedCount}개 이상치 제외` : '') +
-        `, ${M2_YOY_MIN}~${M2_YOY_MAX}% clamp)`,
-    };
+    if (!anomaly) {
+      d.GLOBAL_M2_PROXY = {
+        name: 'global_m2_proxy',
+        value: parseFloat(usYoY.toFixed(2)),
+        date: dt,
+        formula: `미국 M2SL YoY% (13차 단순화, ${M2_YOY_MIN}~${M2_YOY_MAX}% clamp). 이전 EU/JP M3 평균 구조에서 정체 소스 제거.`,
+      };
+    }
   }
 
   const usdkrw = val(raw, 'USDKRW');
