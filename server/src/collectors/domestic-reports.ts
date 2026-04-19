@@ -17,6 +17,7 @@
  */
 
 import axios from 'axios';
+import iconv from 'iconv-lite';
 import { childLogger, serializeError } from '../services/logger';
 import { readSourceCacheWithin, writeSourceCache } from '../services/source-cache';
 
@@ -65,14 +66,17 @@ function parseLatest(html: string): { latestDate: string; title?: string } | nul
 
 async function fetchOne(url: string): Promise<{ latestDate: string; title?: string } | null> {
   try {
-    const { data } = await axios.get(url, {
+    // Naver Finance 는 EUC-KR 을 반환 → arraybuffer 로 받아 iconv 로 decode.
+    const { data } = await axios.get<ArrayBuffer>(url, {
       timeout: 10000,
+      responseType: 'arraybuffer',
       headers: {
         'User-Agent': 'Mozilla/5.0',
         'Accept-Language': 'ko-KR,ko;q=0.9',
       },
     });
-    return parseLatest(typeof data === 'string' ? data : '');
+    const html = iconv.decode(Buffer.from(data as any), 'euc-kr');
+    return parseLatest(html);
   } catch (err) {
     log.warn({ url, error: serializeError(err) }, 'domestic report fetch failed');
     return null;
