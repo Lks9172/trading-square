@@ -2,7 +2,7 @@
 
 거시경제·유동성·기술적 지표를 종합해 **"지금 어떤 자산을 얼마나 들고 있어야 하는가"**를 판단하는 시스템.
 
-## 현재 구현 상태 (12차 2026-04)
+## 현재 구현 상태 (13차 2026-04)
 
 - 시장 데이터 수집: **FRED / Yahoo / CNN Fear & Greed / 대체 F&G / GPR / OpenInsider / Dataroma / Earnings**
 - 자동화 입력: **정책 방향 / 지정학 리스크 / 중앙은행 금 매수 proxy / ISM 자동 계산 / KRX 외국인 수급**
@@ -15,12 +15,20 @@
 - 백테스트: **벤치마크 + 포트폴리오 비중 기반 + Walk-forward OOS**
 - 알림: **텔레그램 신호 변경 / 비중 변경 / 전체 현황 요약**
 
-## 12차 파생지표 (영상/노션 정합 10종)
+## 12-13차 파생지표 (영상/노션 정합 신규 15종)
 
 - 영상 정합: GOLD_SEASONAL / CB_GOLD_STRUCTURAL_DEMAND / TAIL_RISK_LEVEL
-- 영상 정합: KOSPI_FOREIGN_HISTORIC_EXTREME / COPPER_GOLD_RATIO_UPTURN / COPPER_STOCK_DIVERGENCE
+- 영상 정합: KOSPI_FOREIGN_HISTORIC_EXTREME / COPPER_GOLD_RATIO_UPTURN/DOWNTURN / COPPER_STOCK_DIVERGENCE
+- 영상 정합 (13차): **DMA_CONVERGENCE_LEVEL** (video3 §수렴) / **WTI_COPPER_LAG_LEVEL** (video2 §3부) / **ECONOMY_STOCK_DIVERGENCE** (video4 §유동성 왜곡)
 - 노션 정합: FNG_TIER / WRESBAL_ABSOLUTE_LEVEL / RRP_ABSOLUTE_LEVEL
 - 13F: INSTITUTIONAL_NASDAQ_{EXPOSURE_PCT, FLOW} / SECTOR_{TECH, FIN, ENERGY}_FLOW
+- 13차 동적 계수: **FX_FOREIGN_BETA** (최근 1년 rolling 회귀)
+
+## 13차 NASDAQ 과열 REDUCE 재설계 (옵션 D)
+
+- **저점 구간 가드**: 이격도 < -5% 면 조정-확인 플래그 "관찰 reason" 만 기록, 과열 REDUCE 블록 비활성화 (video1 §전략C "펀더멘털 살아있는 -30% = 기회" 정합)
+- **13F 중복 통합**: NASDAQ_FLOW + TECH_SECTOR_FLOW 대부분 같은 종목 → `Math.min` 으로 단일 시그널 처리
+- **과열 플래그 2분류**: 진짜 과열 (이격도+25%/F&G≥85/VIX<16/CHASE) + 조정-확인 (기관/괴리/꼬리/HY/econ/wti)
 
 ## 장기 로드맵
 

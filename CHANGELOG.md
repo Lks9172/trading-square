@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## 2026-04-18 (13차 세션)
+
+### 13차 Critical (N8 / FE3 / 옵션 D)
+- **N8 DMA_CONVERGENCE_LEVEL**: video3 §수렴 "폭발 직전" 5/20/60/120/200 DMA
+  변동계수(CV) 5단계 레벨화 (+2 극수렴 ~ -2 극확산)
+- **FE3-1 Regime 점수 컷 근거 강화**: TODO 제거, 10년 sweep 활성일 기반 해설
+- **FE3-2 top-1→top-decile 이관 상태 명시**: NEUTRAL/CAUTION 완료, 저표본
+  6레짐은 수동 영상 시정 계승
+- **옵션 D NASDAQ 과열 REDUCE 재설계**: 저점 구간(이격도<-5%) 가드 +
+  13F NASDAQ_FLOW/TECH_FLOW 중복 통합 + 과열/조정-확인 2분류.
+  웹 전문가 관점 재검증 후 "이미 진행된 조정을 과열 REDUCE 오판" 버그 해소
+
+### 13차 High (A3 / A7 / B3 / B6)
+- **A3 WTI_COPPER_LAG_LEVEL**: video2 §3부 "유가 2-3개월 선행" WTI t-90~t-60 vs
+  COPPER 30D 비교, ±1 레벨
+- **A7 ECONOMY_STOCK_DIVERGENCE**: video4 "실물 약한데 주가 오른다" ISM vs
+  NASDAQ_DISPARITY 유동성 왜곡 / 회복 저점 감지
+- **B3 FX_FOREIGN_BETA**: stt_kospi 회귀 계수 하드코딩(-30000)을 rolling
+  회귀(최근 1년) 로 교체. KRX history 부족 시 영상 기본값 fallback
+- **B6 docs/history-alignment-audit.md**: 일간/주간/월간 시계열 정렬 감사
+
+### 13차 수집 단순화 (M2 단일화)
+- FRED 제거: `EA19MABMM301IXOBSAM` (유로 M3) / `JPNMABMM301IXOBSAM` (일본 M3)
+  — 960일+ 정체로 실질 기여 없었음
+- `GLOBAL_M2_PROXY` = 미국 M2SL YoY% 단일 (값 변화 없음, formula 명시)
+- derived: EURO_M3_YOY / JAPAN_M3_YOY 제거, US_M2_YOY 유지
+
+### 13차 Signal 통합
+- NASDAQ 과열 REDUCE override 11개 조건 → 2분류 (진짜 과열 4 + 조정-확인 7)
+- 저점 구간 가드로 "관찰 reason" 모드 신설
+- NASDAQ 긍정 reason: DMA 수렴 / ECONOMY 회복 저점 / WTI_COPPER 회복 조기 추가
+
+### 13차 배포 버그 수정
+- COPPER_STOCK_DIVERGENCE / CB_GOLD_STRUCTURAL_DEMAND fetch 요청량 증가
+  (length<21 회피)
+- 13F infotable 파일명 자유 형식 대응 — 6/10 → 10/10 펀드 파싱 복구
+- CNN F&G fallback 누락 (200+빈데이터 케이스) 수정
+
+---
+
 ## 2026-04-18 (11차-12차 세션)
 
 ### 11차 envelope / BASE 재선정

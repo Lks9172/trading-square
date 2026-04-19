@@ -222,7 +222,18 @@ MacroSquare가 현재 실제로 사용하는 데이터 소스 명세서.
 
 ---
 
-## 9. 12차 신규 임계값 (2026-04)
+## 9. 12-13차 신규 임계값 (2026-04)
+
+### 13차 추가 임계
+| 임계 | 값 | 출처 | 용도 |
+|---|---|---|---|
+| DMA 수렴 CV | ≤ 1.5%(+2) / ≤ 3%(+1) / ≤ 5%(0) / ≤ 8%(-1) / >8%(-2) | video3 §수렴 | DMA_CONVERGENCE_LEVEL |
+| WTI t-90~t-60 vs COPPER 30D | WTI<-5% AND 구리>+5% → +1 / WTI>+10% AND 구리<-5% → -1 | video2 §3부 | WTI_COPPER_LAG_LEVEL |
+| ISM-NASDAQ 괴리 | ISM<50 + 이격도>+10% → -1 / ISM≥50 + 이격도<-10% → +1 | video4 §유동성 왜곡 | ECONOMY_STOCK_DIVERGENCE |
+| 저점 가드 (NASDAQ 과열 무효화) | 이격도 < -5% | video1 §전략C | 조정-확인 플래그 관찰 모드 |
+| FX β rolling 회귀 | 최근 1년 관측치, no-intercept LS | stt_kospi 재검증 | FX_FOREIGN_BETA |
+
+### 12차 임계 (기존)
 
 ### 영상/노션 근거 수치
 | 임계 | 값 | 출처 | 용도 |

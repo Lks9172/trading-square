@@ -185,6 +185,15 @@
 - **11차**: 영상 원문 재검증 기반 envelope 정합 재조정 + BASE 재선정 (α +35.65%p)
 - **12차**: 영상 누락 derived 10종 추가 + 13F 수집기 Phase 1~3 + signal 통합 확장
 
+### 13차 추가 반영 (2026-04)
+- video3 §수렴 5/20/60/120/200 DMA 변동계수 (DMA_CONVERGENCE_LEVEL)
+- video2 §3부 "유가 2~3개월 선행" (WTI_COPPER_LAG_LEVEL)
+- video4 §유동성 왜곡 ISM vs NASDAQ 이격도 (ECONOMY_STOCK_DIVERGENCE)
+- stt_kospi FX 회귀 계수 동적화 (FX_FOREIGN_BETA rolling)
+- NASDAQ 과열 REDUCE override 재설계 — video1 §전략C "펀더멘털 살아있는
+  -30% = 기회" 정합 복구 (저점 구간 가드 + 13F 중복 통합)
+- GLOBAL_M2_PROXY 미국 M2 단일화 (EU/JP M3 정체 소스 제거)
+
 ### 12차 추가 반영 (2026-04)
 - video1 §전략B 5가지 겹침 동시 플래그
 - video2 §3부 구리 2~3개월 선행 괴리 감지 (COPPER_STOCK_DIVERGENCE)
