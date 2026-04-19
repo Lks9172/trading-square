@@ -459,21 +459,44 @@ signalFromScore(met, total, { sell, reduce, hold, buy, strongBuy })
 표준 권고: `strongBuy = total`, `buy = total-2`, `hold = total-4`, `reduce = total-5`, `sell = 0`.
 자산별 PRD 스펙이 있으면 우선. 기존 HOLD 범위는 보존해 실서비스 회귀 최소화.
 
-#### 5.2.3 과열 REDUCE override (감사 Fix #2)
+#### 5.2.3 과열 REDUCE override (감사 Fix #2 → 13차 옵션 D 재설계)
 
 met 계산 및 `signalFromScore` 판정 후, 최종 반환 직전에 과열 조건 2+ 충족 시
 신호를 REDUCE 로 강등 (SELL 은 override 하지 않음).
 
-**NASDAQ** — 4개 체크 중 2+ 발동 시 REDUCE:
-- 이격도 ≥ +25%
-- F&G ≥ 85
-- VIX < 16
-- `NASDAQ_CHASE_WARNING === 1` (이격률 ±15% 20일 지속)
+**13차 옵션 D — NASDAQ 과열 플래그 2분류 + 저점 가드**:
+
+과열 플래그가 "진짜 가격/심리 과열" vs "이미 진행된 조정 확인" 성격이 다른데
+같이 카운트하면 저점 구간에서 오판 발생. 이를 해소:
+
+① **진짜 과열 플래그 (저점 무관, 항시 REDUCE 대상)**:
+  - 이격도 ≥ +25%
+  - F&G ≥ 85 극탐욕
+  - VIX < 16 방심
+  - `NASDAQ_CHASE_WARNING === 1`
+
+② **조정-확인 플래그 (저점 구간에선 관찰 reason 으로만)**:
+  - `INSTITUTIONAL_NASDAQ_FLOW + TECH_SECTOR_FLOW 통합 ≤ -1` (Math.min 중복 제거)
+  - `COPPER_STOCK_DIVERGENCE = -1` (bearish)
+  - `TAIL_RISK_LEVEL ≥ 2` (노션 2단계 soft/hard 합산)
+  - HY OAS 5-7% (노션 "주의" 구간)
+  - `ECONOMY_STOCK_DIVERGENCE = -1` (ISM<50 + 이격도>+10%)
+  - `WTI_COPPER_LAG_LEVEL = -1` (유가 과거 급등 → 구리 현재 약세)
+
+③ **저점 가드**: 이격도 < -5% 면 ②는 관찰 reason 으로만 기록, ①만 REDUCE 대상.
+  근거: video1 §전략C "경제 펀더멘털 살아있는 -30% = 기회"
+        video3 §200DMA "200일선 아래 + 실업수당 20만대 = 분할매수 시작 구간"
+
+판정: (저점 구간이면 ①만, 비저점이면 ①+② 합산) ≥ 2 개 발동 시 REDUCE.
 
 **KOSPI** — 3개 체크 중 2+ 발동 시 REDUCE:
 - 코스피 이격도 ≥ +20%
 - `KOSPI_CHASE_WARNING === 1`
 - `KOSPI_FX_ELASTICITY_DEVIATION ≥ 2` (외인 실매도가 환율 기대 대비 2배 이상)
+
+**KOSPI 13차 추가**: `GEOPOLITICAL_UNWIND_EVENT=1 AND SHORT_COVER_SUSPECTED=1`
+동시 발동 시 STRONG_BUY/BUY → HOLD 강등 (stt_kospi §2부 "휴전 뉴스 숏커버링
+반등 = 가짜 추세").
 
 #### 5.2.2 신호 출력 형태
 
@@ -930,6 +953,54 @@ CONSTRAINTS lo/hi 는 위 envelope 과 호환되도록 조정 — RISK_ON/NEUTRA
 - `CANDIDATE`: 활성일 ≥ 100 **AND** envelopeViolations = 0 → BASE 교체 후보
 - `BLOCKED`: 저표본 (활성일 < 100) 또는 envelope 위반 존재 → 교체 금지
 - 종합 요약에 후보/보류 카운트 출력, JSON 출력에 `recommendation`/`blockReason` 필드 포함
+
+---
+
+### 6.3.2 12-14차 신규 파생지표 (영상/노션 정합)
+
+**12차 영상 정합 신규 (10종)**
+
+| derived | 영상 근거 | 매핑 값 |
+|---|---|---|
+| GOLD_SEASONAL | video2 §4부 "금의 계절성" | +1 강시즌 / -1 약시즌 / 0 중립 (20년 월별 평균) |
+| CB_GOLD_STRUCTURAL_DEMAND | video2 §1부 "중앙은행 3년 1000톤+" | 1=proxy (12M 금↑/DXY↓/실질금리↓ 중 2+) |
+| TAIL_RISK_LEVEL (14차 재정합) | video4 §꼬리 + 노션 | 0/1/2 (SKEW/VVIX/OVX soft 1 hard 2점 합 ≥4/≥2) |
+| FNG_TIER | 노션 F&G 5단계 | -2~+2 (0-24/25-44/45-55/56-74/75-100) |
+| WRESBAL_ABSOLUTE_LEVEL | 노션 "3조 이상 안전" | 1(≥3조) / 0 |
+| RRP_ABSOLUTE_LEVEL | 노션 "100B/50B 임계" | +1(≥100B) / 0(50-100B) / -1(<50B) |
+| KOSPI_FOREIGN_HISTORIC_EXTREME | stt_kospi "45~60조 매도" | ±1 (20일 ±20조 돌파) |
+| COPPER_GOLD_RATIO_UPTURN/DOWNTURN | video2 §3부 "금구리비 하락 전환" | 1 (CGR 5D vs 15~20D 꺾임) |
+| COPPER_STOCK_DIVERGENCE | video2 "구리 2~3개월 선행" | ±1 (NASDAQ 20D vs COPPER 20D 괴리) |
+| INSTITUTIONAL_NASDAQ_{EXPOSURE_PCT, FLOW} | video4 §기관 | 메가캡 비중% + 분기 Δ -2~+2 |
+| INSTITUTIONAL_SECTOR_{TECH, FIN, ENERGY}_FLOW | 동 확장 | 섹터 5종 CUSIP 기반 분기 Δ |
+
+**13차 Critical/High 추가 (5종)**
+
+| derived | 영상 근거 | 매핑 값 |
+|---|---|---|
+| **DMA_CONVERGENCE_LEVEL** | video3 §수렴 "폭발 직전" | 5/20/60/120/200 DMA CV — +2(≤1.5%) ~ -2(>8%) |
+| **WTI_COPPER_LAG_LEVEL** | video2 §3부 유가 2-3개월 선행 | WTI t-90~t-60 vs COPPER 30D — ±1 |
+| **ECONOMY_STOCK_DIVERGENCE** | video4 "실물 약한데 주가↑" | ISM<50+이격>+10%→-1 / ISM≥50+이격<-10%→+1 |
+| **FX_FOREIGN_BETA** | stt_kospi 회귀 동적화 | 최근 1년 rolling 회귀 (fallback: -30000) |
+
+**14차 노션 대시보드 정합 tier 8종 (신규)**
+
+| derived | 노션 임계 | 레벨 |
+|---|---|---|
+| **WALCL_TIER** | 8.5T / 7T / 6T | +2 QE ~ -1 긴축 |
+| **TGA_TIER** | 800B / 400B | -1 흡수 ~ +1 공급 |
+| **MMF_TIER** | 2.5T / 2T (retail) | ±1 |
+| **SOFR_IORB_TIER** | ±5bp | ±1 |
+| **DGS10_TIER** | 5% / 4% / 3% | +1 저금리 ~ -2 경계 |
+| **UNRATE_TIER** | 4% / 5% / 6% | +2 완전고용 ~ -2 침체 |
+| **M2SL_LEVEL_TIER** | 21T / 20T / 19T | +2 풍부 ~ -2 수축 |
+| **DXY_TIER** | 105 / 100 / 95 | -1 강세 ~ +2 약세(금/EM 우호) |
+
+### 6.3.3 GLOBAL_M2_PROXY 13차 단순화
+
+이전 미국 M2 + 유로 M3 + 일본 M3 평균 구조에서, FRED 상 OECD 공급 유로/일본
+M3 시리즈가 960일+ 정체로 실질 기여가 없었음. 영상1/4 "유동성 방향" 논의도
+미국 중심이라 **미국 M2SL YoY% 단일** 로 단순화. 값 자체는 변화 없음.
 
 **Walk-forward OOS (과적합 진단):**
 - train: 2016-01-01 ~ 2023-12-31 / test: 2024-01-01 ~ 현재
