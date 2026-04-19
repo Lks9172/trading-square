@@ -41,9 +41,9 @@ const FRED_SERIES: Record<string, string> = {
   //   "IMF 2031 미국 부채 GDP 140% 예측" 정합. 부채 규모 감지에 활용.
   FEDERAL_DEBT_GDP: 'GFDEGDQ188S',
   // 15차 Phase 1-A (2026-04): video4 §매크로 "골디락스 경제 온도" —
-  //   고용/CPI/PCE/ISM 합산 판정. CPI/PCE 신규 수집.
-  CPI_YOY: 'CPIAUCSL',   // Consumer Price Index (월간 level, YoY% 계산)
-  PCE_YOY: 'PCEPI',      // Personal Consumption Expenditures Price Index
+  //   고용/CPI/PCE/ISM 합산 판정. CPI/PCE 신규 수집 (level 저장, derived 에서 YoY 계산).
+  CPI: 'CPIAUCSL',   // Consumer Price Index (월간 level)
+  PCE: 'PCEPI',      // Personal Consumption Expenditures Price Index (level)
   // 15차 Phase 1-B: video4 §채권 자경단 "재정 적자 5.8% GDP" — 플로우 지표
   //   기존 FEDERAL_DEBT_GDP 는 누적 스톡. 적자 속도(플로우)가 선행 신호.
   FEDERAL_DEFICIT_GDP: 'FYFSGDA188S',
@@ -82,8 +82,8 @@ const FRED_SERIES_CADENCE: Record<string, FredCadence> = {
   IORB: 'daily',
   INDPRO: 'monthly',
   FEDERAL_DEBT_GDP: 'monthly', // 분기 발표 but monthly cadence 로 체크 충분
-  CPI_YOY: 'monthly',
-  PCE_YOY: 'monthly',
+  CPI: 'monthly',
+  PCE: 'monthly',
   FEDERAL_DEFICIT_GDP: 'monthly', // 연간 발표 but cadence check 월간
 };
 
@@ -115,7 +115,7 @@ function getFredLiveCacheTtlMs(key: string): number {
   if (['WALCL', 'WRESBAL', 'RRPONTSYD', 'WTREGEN', 'WRMFNS', 'WM2NS', 'ICSA', 'STLFSI4'].includes(key)) {
     return 36 * 60 * 60 * 1000;
   }
-  if (['M2SL', 'UNRATE', 'INDPRO', 'FEDERAL_DEBT_GDP', 'CPI_YOY', 'PCE_YOY', 'FEDERAL_DEFICIT_GDP'].includes(key)) {
+  if (['M2SL', 'UNRATE', 'INDPRO', 'FEDERAL_DEBT_GDP', 'CPI', 'PCE', 'FEDERAL_DEFICIT_GDP'].includes(key)) {
     return 7 * 24 * 60 * 60 * 1000;
   }
   return 12 * 60 * 60 * 1000;

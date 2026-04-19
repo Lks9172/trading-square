@@ -2812,8 +2812,8 @@ export async function computeDerived(
       const hist = await readHistory('fred', key);
       return computeHistoryYoY(hist, 0, 400);
     };
-    const cpiYoy = await readYoYPct('CPI_YOY');
-    const pceYoy = await readYoYPct('PCE_YOY');
+    const cpiYoy = await readYoYPct('CPI');
+    const pceYoy = await readYoYPct('PCE');
     const ism = d.ISM_PROXY?.value ?? null;
     const ur = raw.UNRATE?.value ?? null;
 
@@ -2912,7 +2912,7 @@ export async function computeDerived(
   //   ±10% → 0
   //   <-10% → +1 (과거 유가 하락 → 앞으로 CPI 완화)
   try {
-    const wtiHistLag = await fetchYahooHistory('CL=F', 120);
+    const wtiHistLag = await fetchYahooHistory('CL=F', 180);
     if (wtiHistLag.length >= 91) {
       const oldSlice = wtiHistLag.slice(-90, -60).map((h) => h.close).filter((v) => v > 0);
       const recentSlice = wtiHistLag.slice(-30).map((h) => h.close).filter((v) => v > 0);
