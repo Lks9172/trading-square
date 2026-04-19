@@ -3426,6 +3426,161 @@ export async function computeDerived(
     }
   } catch { /* skip */ }
 
+  // === 17차 Phase 2 C1: NASDAQ_MULTIFRAME_ALIGNMENT (video3 §차트 순서) ===
+  // "월봉으로 큰 그림 → 주봉으로 위치 → 일봉으로 타이밍" 3프레임 일관성.
+  //   월봉: NASDAQ_MONTHLY_EXHAUSTION 기반 (0=정상, 1=소진 경고)
+  //   주봉: NASDAQ_WEEKLY_REVERSAL (0=정상, 1=하락 전환)
+  //   일봉: NASDAQ_ABOVE_200DMA (1=위, 0=아래) + DISPARITY
+  //
+  // 해석:
+  //   +3: 월봉 정상 + 주봉 정상 + 일봉 200DMA 위 = 강한 상승 구조
+  //   +1: 장기 유지 + 단기 조정 = 분할매수 적기
+  //   -1: 장기 균열 조짐
+  //   -3: 모든 프레임 약세 = 구조적 위험
+  try {
+    const mtfExhaustion = d.NASDAQ_MONTHLY_EXHAUSTION?.value ?? null;
+    const mtfReversal = d.NASDAQ_WEEKLY_REVERSAL?.value ?? null;
+    const above200 = d.NASDAQ_ABOVE_200DMA?.value ?? null;
+    const disp = d.NASDAQ_DISPARITY?.value ?? null;
+    const monthlyOk = mtfExhaustion === 0 ? 1 : mtfExhaustion === 1 ? -1 : 0;
+    const weeklyOk = mtfReversal === 0 ? 1 : mtfReversal === 1 ? -1 : 0;
+    // 일봉: 200DMA 위 + 과열 아님 = +1 / 200DMA 아래 + 저점 구간 = 0 (분할매수) / 200DMA 아래 + 깊은 하락 = -1
+    let dailyOk = 0;
+    if (above200 === 1 && disp !== null && disp < 15) dailyOk = 1;
+    else if (above200 === 1 && disp !== null && disp >= 15) dailyOk = 0; // 과열 근접
+    else if (above200 === 0 && disp !== null && disp > -20) dailyOk = 0; // 분할매수 구간
+    else if (above200 === 0 && disp !== null && disp <= -20) dailyOk = -1;
+    const score = monthlyOk + weeklyOk + dailyOk;
+    let label: string;
+    if (score >= 3) label = '완전 정합 상승 (월/주/일 모두 강세)';
+    else if (score >= 1) label = '혼재-상승 기조';
+    else if (score >= -1) label = '중립';
+    else if (score >= -3) label = '혼재-약세 기조';
+    else label = '구조적 약세 (3프레임 동시 경고)';
+    d.NASDAQ_MULTIFRAME_ALIGNMENT = {
+      name: 'nasdaq_multiframe_alignment',
+      value: score,
+      date: today(),
+      formula:
+        `월봉 ${monthlyOk === 1 ? '정상' : monthlyOk === -1 ? '소진' : 'n/a'}[${monthlyOk}] + ` +
+        `주봉 ${weeklyOk === 1 ? '정상' : weeklyOk === -1 ? '반전' : 'n/a'}[${weeklyOk}] + ` +
+        `일봉 ${dailyOk === 1 ? '200DMA 위' : dailyOk === 0 ? '분할매수/과열근접' : '깊은 하락'}[${dailyOk}] = ${score} → ${label}. video3 §차트 순서.`,
+    };
+  } catch { /* skip */ }
+
+  // === 17차 Phase 2 C2: NASDAQ_YEARLY_AREA_INDEX (KOSPI 대칭 확장) ===
+  // video3 §8:23 "2025년 연봉 = 아래꼬리 긴 강한 양봉 핀바" + video5_analysis §1부 "아래꼬리 <15% 위험"
+  // closes 기반 근사 (OHLC 없이): KOSPI_YEARLY_AREA_INDEX 와 동일 로직.
+  try {
+    const nqYear = await fetchYahooHistory('^IXIC', 260);
+    if (nqYear.length >= 200) {
+      const closes = nqYear.map((h) => h.close);
+      const yearSlice = closes.slice(-250);
+      const yearHigh = Math.max(...yearSlice);
+      const yearLow = Math.min(...yearSlice);
+      const yearFirst = yearSlice[0];
+      const yearLast = yearSlice[yearSlice.length - 1];
+      const bodyBottom = Math.min(yearFirst, yearLast);
+      const lowerTail = Math.max(0, bodyBottom - yearLow);
+      const fullRange = yearHigh - yearLow;
+      if (fullRange > 0) {
+        const areaIndex = (lowerTail / fullRange) * 100;
+        const level = areaIndex >= 15 ? 1 : -1;
+        d.NASDAQ_YEARLY_AREA_INDEX = {
+          name: 'nasdaq_yearly_area_index',
+          value: parseFloat(areaIndex.toFixed(2)),
+          date: today(),
+          formula:
+            `연봉 아래꼬리 ${lowerTail.toFixed(0)} / 전체 높이 ${fullRange.toFixed(0)} = ${areaIndex.toFixed(1)}%. ` +
+            `${level === 1 ? '정상(≥15% 핀바 양호)' : '위험(<15% 누적 매수 미소화)'}. video3 §8:23 정합.`,
+        };
+        // 장대양봉 여부: 연간 종가상승 > 20% + 아래꼬리 ≥ 15%
+        const yearReturn = yearFirst > 0 ? ((yearLast - yearFirst) / yearFirst) * 100 : 0;
+        if (yearReturn >= 20 && areaIndex >= 15) {
+          d.NASDAQ_YEARLY_BULL_PINBAR = {
+            name: 'nasdaq_yearly_bull_pinbar',
+            value: 1,
+            date: today(),
+            formula: `연간 ${yearReturn.toFixed(1)}% + 아래꼬리 ${areaIndex.toFixed(1)}% → 장대양봉 핀바 (video3 §8:23 정합).`,
+          };
+        } else if (yearReturn <= -20) {
+          d.NASDAQ_YEARLY_BEAR_CANDLE = {
+            name: 'nasdaq_yearly_bear_candle',
+            value: 1,
+            date: today(),
+            formula: `연간 ${yearReturn.toFixed(1)}% → 장대 음봉 (2008/2022 수준 위험).`,
+          };
+        }
+      }
+    }
+  } catch { /* skip */ }
+
+  // === 17차 Phase 2 D3: M2_LEAD_SHIFT_CORRELATION (노션 §StreetStats M2-S&P) ===
+  // 글로벌 M2 를 10주 앞으로 shift 했을 때 S&P500 과의 선행 상관. 양수 강할수록 M2 → S&P 유동성 기여 유효.
+  try {
+    const m2Hist = await readHistory('fred', 'M2SL');
+    const spxHist = await fetchYahooHistory('^GSPC', 400);
+    if (m2Hist.length >= 100 && spxHist.length >= 300) {
+      // M2 는 월간. 주간 데이터로 근사 불가 → M2 (월간) / S&P (주간) 둘 다 월간 변환.
+      const toMonthlyLast = (arr: Array<{ date: string; value?: number; close?: number }>, valueKey: 'value' | 'close') => {
+        const byYM = new Map<string, number>();
+        for (const p of arr) {
+          const ym = p.date.slice(0, 7);
+          const v = (p as any)[valueKey];
+          if (typeof v === 'number' && Number.isFinite(v)) byYM.set(ym, v);
+        }
+        return Array.from(byYM.entries()).sort(([a], [b]) => (a < b ? -1 : 1));
+      };
+      const m2Monthly = toMonthlyLast(m2Hist, 'value');
+      const spMonthly = toMonthlyLast(spxHist, 'close');
+      // M2 를 3개월 shift (≈10주 근사): M2[i-3] vs SP[i]
+      const m2Map = new Map(m2Monthly);
+      const spMap = new Map(spMonthly);
+      const sharedKeys = spMonthly.map(([k]) => k);
+      const pairs: Array<{ m2: number; sp: number }> = [];
+      for (let i = 3; i < sharedKeys.length; i++) {
+        const k = sharedKeys[i];
+        const kLag = sharedKeys[i - 3];
+        const m2Val = m2Map.get(kLag);
+        const spVal = spMap.get(k);
+        if (m2Val !== undefined && spVal !== undefined) pairs.push({ m2: m2Val, sp: spVal });
+      }
+      if (pairs.length >= 24) {
+        // YoY 기반 (level 은 절대 다른 축)
+        const returns: Array<{ m2R: number; spR: number }> = [];
+        for (let i = 12; i < pairs.length; i++) {
+          const m2R = pairs[i].m2 / pairs[i - 12].m2 - 1;
+          const spR = pairs[i].sp / pairs[i - 12].sp - 1;
+          returns.push({ m2R, spR });
+        }
+        if (returns.length >= 24) {
+          const meanM = returns.reduce((s, r) => s + r.m2R, 0) / returns.length;
+          const meanS = returns.reduce((s, r) => s + r.spR, 0) / returns.length;
+          let num = 0, dm = 0, ds = 0;
+          for (const r of returns) {
+            num += (r.m2R - meanM) * (r.spR - meanS);
+            dm += (r.m2R - meanM) ** 2;
+            ds += (r.spR - meanS) ** 2;
+          }
+          const corr = Math.sqrt(dm * ds) > 0 ? num / Math.sqrt(dm * ds) : 0;
+          let label: string;
+          if (corr > 0.5) label = '강한 선행 상관 (M2 → S&P 유동성 기여 유효)';
+          else if (corr > 0.2) label = '양의 선행 상관';
+          else if (corr < -0.2) label = '음의 상관 (정합성 약화)';
+          else label = '약한 상관';
+          d.M2_LEAD_SHIFT_CORRELATION = {
+            name: 'm2_lead_shift_correlation',
+            value: parseFloat(corr.toFixed(3)),
+            date: today(),
+            formula:
+              `M2 t-3M YoY vs S&P t YoY Pearson (n=${returns.length}월) = ${corr.toFixed(3)}. ` +
+              `${label}. 노션 §StreetStats M2 선행 shift 정합.`,
+          };
+        }
+      }
+    }
+  } catch { /* skip */ }
+
   // === 16차 Phase 2 C1: ANALYST_CONSENSUS + RESEARCH_13F_DIVERGENCE ===
   // video4 §기관 "말 (애널리스트 추천) vs 돈 (13F 포지션)" 괴리 감지.
   try {
@@ -3487,6 +3642,20 @@ export async function computeDerived(
         value: dday,
         date: today(),
         formula: `다음 FOMC ${nextFomc.toISOString().slice(0,10)} → ${label}. video4 §FOMC 발언 중요도.`,
+      };
+    }
+
+    // BOK 경제전망 발표 D-Day (연 4회: 2/22, 5/29, 8/28, 11/27 기준)
+    const bokDates2026 = ['2026-05-29', '2026-08-28', '2026-11-27']
+      .map((s) => new Date(s + 'T01:00:00Z'));
+    const nextBok = bokDates2026.find((d) => d.getTime() > now.getTime());
+    if (nextBok) {
+      const dday = Math.ceil((nextBok.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      d.BOK_FORECAST_DDAY = {
+        name: 'bok_forecast_dday',
+        value: dday,
+        date: today(),
+        formula: `다음 한은 경제전망 ${nextBok.toISOString().slice(0,10)} (D-${dday}). 연 4회 발표.`,
       };
     }
 

@@ -259,6 +259,31 @@ export function interpretDerived(
     if (value <= -10) return '🔴 중국 FXI -10% — 구리 수요 우려';
     return null;
   }
+  // 17차 신규
+  if (key === 'NASDAQ_MULTIFRAME_ALIGNMENT') {
+    if (value >= 3) return '🟢 월/주/일 3프레임 완전 정합 상승 — video3 §차트 순서 최적 구조';
+    if (value >= 1) return '🟢 멀티프레임 상승 기조 — 분할매수 적기';
+    if (value <= -3) return '🔴 3프레임 동시 약세 — 구조적 위험';
+    if (value <= -1) return '🟠 멀티프레임 약세 기조 — 방어 검토';
+    return '🟡 멀티프레임 중립';
+  }
+  if (key === 'NASDAQ_YEARLY_BULL_PINBAR') {
+    return value === 1 ? '🟢 연봉 장대양봉 핀바 (video3 §8:23 정합)' : null;
+  }
+  if (key === 'NASDAQ_YEARLY_BEAR_CANDLE') {
+    return value === 1 ? '🔴 연봉 장대 음봉 — 2008/2022 수준 위험' : null;
+  }
+  if (key === 'NASDAQ_YEARLY_AREA_INDEX') {
+    if (value < 15) return '🟠 NASDAQ 연봉 아래꼬리 <15% — 누적 매수 미소화 (video3)';
+    return '🟢 NASDAQ 연봉 아래꼬리 ≥15% — 정상';
+  }
+  if (key === 'M2_LEAD_SHIFT_CORRELATION') {
+    if (value > 0.5) return '🟢 M2→S&P 강한 선행 상관 — 유동성 기여 유효';
+    if (value > 0.2) return '🟢 M2→S&P 양의 선행 상관';
+    if (value < -0.2) return '🟠 M2→S&P 음의 상관 — 정합성 약화';
+    return null;
+  }
+
   if (key === 'BTC_MOMENTUM') {
     if (value >= 20) return '🟠 BTC +20% — 위험선호 극대 (video4 proxy, allocation 제외)';
     if (value <= -20) return '🔴 BTC -20% — 위험회피 극대';
