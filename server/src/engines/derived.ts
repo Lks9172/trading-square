@@ -3073,5 +3073,382 @@ export async function computeDerived(
     /* INSTITUTIONAL_* 실패는 파이프라인 막지 않음 */
   }
 
+  // ============================================================================
+  // 15차 Phase 1-3 일괄 추가 (2026-04): 영상/노션 재독 기반 13종
+  // ============================================================================
+
+  // === Phase 1 A1: RSI_14 (video2 §22:51 "RSI 50 수준 중립") ===
+  // Wilder 14-period RSI. NASDAQ/GOLD/KOSPI 3종.
+  const computeRSI = (closes: number[], period = 14): number | null => {
+    if (closes.length < period + 1) return null;
+    let gains = 0;
+    let losses = 0;
+    // 초기 평균 (Wilder)
+    for (let i = 1; i <= period; i++) {
+      const diff = closes[i] - closes[i - 1];
+      if (diff >= 0) gains += diff; else losses -= diff;
+    }
+    let avgGain = gains / period;
+    let avgLoss = losses / period;
+    // smoothing
+    for (let i = period + 1; i < closes.length; i++) {
+      const diff = closes[i] - closes[i - 1];
+      const gain = diff > 0 ? diff : 0;
+      const loss = diff < 0 ? -diff : 0;
+      avgGain = (avgGain * (period - 1) + gain) / period;
+      avgLoss = (avgLoss * (period - 1) + loss) / period;
+    }
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - 100 / (1 + rs);
+  };
+  const rsiLabel = (rsi: number): string =>
+    rsi >= 70 ? '과매수' : rsi >= 60 ? '강세' : rsi >= 50 ? '중립-강' :
+    rsi >= 40 ? '중립-약' : rsi >= 30 ? '약세' : '과매도';
+  for (const [symbol, derivedKey] of [
+    ['^IXIC', 'NASDAQ_RSI_14'],
+    ['GC=F', 'GOLD_RSI_14'],
+    ['^KS11', 'KOSPI_RSI_14'],
+  ] as const) {
+    try {
+      const hist = await fetchYahooHistory(symbol, 60);
+      if (hist.length >= 20) {
+        const closes = hist.map((h) => h.close);
+        const rsi = computeRSI(closes, 14);
+        if (rsi !== null) {
+          d[derivedKey] = {
+            name: derivedKey.toLowerCase(),
+            value: parseFloat(rsi.toFixed(2)),
+            date: today(),
+            formula: `Wilder 14-period RSI = ${rsi.toFixed(1)} → ${rsiLabel(rsi)}. video2 [22:51] 정합.`,
+          };
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  // === Phase 2 A2: GOLD_FIB_LEVEL (video2 §23:34 "피보나치 0.382/0.5 지지") ===
+  // 52주 고/저 기반 0.382 / 0.5 / 0.618 되돌림 구간 중 현재가 위치.
+  try {
+    const goldHist52 = await fetchYahooHistory('GC=F', 260);
+    if (goldHist52.length >= 200) {
+      const closes52 = goldHist52.map((h) => h.close);
+      const high52 = Math.max(...closes52);
+      const low52 = Math.min(...closes52);
+      const cur = closes52[closes52.length - 1];
+      const range = high52 - low52;
+      if (range > 0) {
+        const fib382 = high52 - range * 0.382;
+        const fib500 = high52 - range * 0.500;
+        const fib618 = high52 - range * 0.618;
+        const position = (cur - low52) / range; // 0~1 범위
+        // 지지 구간 근접도 (±3% 허용)
+        const near = (target: number) => Math.abs(cur - target) / target < 0.03;
+        let level: string;
+        let score: number;
+        if (cur >= fib382) { level = '상단 구간(저항↑)'; score = -1; }
+        else if (near(fib382)) { level = '0.382 지지 근접'; score = 1; }
+        else if (cur >= fib500) { level = '0.382~0.5 분할1'; score = 1; }
+        else if (near(fib500)) { level = '0.5 지지 근접(1차 분할2)'; score = 2; }
+        else if (cur >= fib618) { level = '0.5~0.618 분할3'; score = 2; }
+        else if (near(fib618)) { level = '0.618 지지 근접(강한 지지)'; score = 2; }
+        else { level = '0.618 하방 이탈(약세)'; score = -2; }
+        d.GOLD_FIB_LEVEL = {
+          name: 'gold_fib_level',
+          value: score,
+          date: today(),
+          formula:
+            `52W high $${high52.toFixed(0)} / low $${low52.toFixed(0)} / 현재 $${cur.toFixed(0)} (${(position * 100).toFixed(0)}%). ` +
+            `fib 0.382=$${fib382.toFixed(0)} / 0.5=$${fib500.toFixed(0)} / 0.618=$${fib618.toFixed(0)}. ` +
+            `${level} (score ${score}). video2 §23:34 정합.`,
+        };
+      }
+    }
+  } catch { /* skip */ }
+
+  // === Phase 2 A4: NASDAQ_OUTSIDE_BAR_YEARLY (video3 §8:23 "아웃사이드 바") ===
+  // 현재 연간 캔들이 이전 연간 캔들의 high-low 범위를 **완전히 덮는지** 판정.
+  try {
+    const ixicHist = await fetchYahooHistory('^IXIC', 520); // 2년치
+    if (ixicHist.length >= 480) {
+      const closes = ixicHist.map((h) => h.close);
+      const half = Math.floor(ixicHist.length / 2);
+      const prevYear = closes.slice(0, half);
+      const curYear = closes.slice(half);
+      const prevHigh = Math.max(...prevYear);
+      const prevLow = Math.min(...prevYear);
+      const curHigh = Math.max(...curYear);
+      const curLow = Math.min(...curYear);
+      const isOutside = curHigh > prevHigh && curLow < prevLow ? 1 : 0;
+      const direction = closes[closes.length - 1] > prevHigh ? 1 :
+                        closes[closes.length - 1] < prevLow ? -1 : 0;
+      d.NASDAQ_OUTSIDE_BAR_YEARLY = {
+        name: 'nasdaq_outside_bar_yearly',
+        value: isOutside,
+        date: today(),
+        formula:
+          `전년 high/low $${prevHigh.toFixed(0)}/$${prevLow.toFixed(0)}, 당년 $${curHigh.toFixed(0)}/$${curLow.toFixed(0)}. ` +
+          `${isOutside === 1 ? `아웃사이드 확정 (방향: ${direction === 1 ? '상방' : direction === -1 ? '하방' : '내부'})` : '아웃사이드 아님'}. video3 §8:23 정합.`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // === Phase 2 B2: ASSET_CORRELATION_HEATMAP — 6자산 90D Pearson ===
+  // S&P500 / US Bonds(IEF) / Gold / Dollar(DXY) / Oil / Bitcoin — 노션 heatmap 정합
+  try {
+    const fetchCloses = async (sym: string) => {
+      const hist = await fetchYahooHistory(sym, 120);
+      return hist.length >= 90 ? hist.slice(-90).map((h) => h.close) : null;
+    };
+    const [sp, ief, gold, dxy, oil, btc] = await Promise.all([
+      fetchCloses('^GSPC'),
+      fetchCloses('IEF'),
+      fetchCloses('GC=F'),
+      fetchCloses('DX-Y.NYB'),
+      fetchCloses('CL=F'),
+      fetchCloses('BTC-USD'),
+    ]);
+    const toReturns = (closes: number[]): number[] => {
+      const out: number[] = [];
+      for (let i = 1; i < closes.length; i++) out.push((closes[i] - closes[i - 1]) / closes[i - 1]);
+      return out;
+    };
+    const pearson = (a: number[], b: number[]): number => {
+      const n = Math.min(a.length, b.length);
+      if (n < 30) return 0;
+      const aa = a.slice(-n), bb = b.slice(-n);
+      const meanA = aa.reduce((s, v) => s + v, 0) / n;
+      const meanB = bb.reduce((s, v) => s + v, 0) / n;
+      let num = 0, denA = 0, denB = 0;
+      for (let i = 0; i < n; i++) {
+        const da = aa[i] - meanA;
+        const db = bb[i] - meanB;
+        num += da * db;
+        denA += da * da;
+        denB += db * db;
+      }
+      const den = Math.sqrt(denA * denB);
+      return den > 0 ? num / den : 0;
+    };
+    const assets: Array<[string, number[] | null]> = [
+      ['SP', sp ? toReturns(sp) : null],
+      ['BOND', ief ? toReturns(ief) : null],
+      ['GOLD', gold ? toReturns(gold) : null],
+      ['DXY', dxy ? toReturns(dxy) : null],
+      ['OIL', oil ? toReturns(oil) : null],
+      ['BTC', btc ? toReturns(btc) : null],
+    ];
+    const corrMap: Record<string, number> = {};
+    for (let i = 0; i < assets.length; i++) {
+      for (let j = i + 1; j < assets.length; j++) {
+        const [ka, ra] = assets[i];
+        const [kb, rb] = assets[j];
+        if (ra && rb) corrMap[`${ka}_${kb}`] = parseFloat(pearson(ra, rb).toFixed(3));
+      }
+    }
+    // 포트폴리오 집중 위험: SP-BOND, SP-GOLD, GOLD-DXY (영상2 분산 원칙 관점)
+    const spGold = corrMap.SP_GOLD;
+    let concentration = 0;
+    let label = '';
+    if (spGold !== undefined) {
+      if (spGold > 0.5) { concentration = -1; label = 'SP-GOLD 상관 +0.5 초과 = 분산 효과 악화'; }
+      else if (spGold < -0.2) { concentration = 1; label = 'SP-GOLD 음의 상관 = 분산 효과 양호'; }
+      else { concentration = 0; label = '중립'; }
+    }
+    d.ASSET_CORRELATION_SP_GOLD = {
+      name: 'asset_correlation_sp_gold',
+      value: spGold ?? 0,
+      date: today(),
+      formula: `90D Pearson SP500 vs GOLD = ${spGold?.toFixed(3) ?? 'n/a'}. 전체: ${JSON.stringify(corrMap)}`,
+    };
+    d.DIVERSIFICATION_LEVEL = {
+      name: 'diversification_level',
+      value: concentration,
+      date: today(),
+      formula: `SP-GOLD ${spGold?.toFixed(3) ?? 'n/a'} → ${label} (+1 양호 / 0 중립 / -1 악화). video2 §분산 원칙.`,
+    };
+  } catch { /* skip */ }
+
+  // === Phase 2 B3: DRAWDOWN_ATH (video1 "펀더멘털 살아있는 -30%") ===
+  for (const [symbol, derivedKey] of [
+    ['^IXIC', 'NASDAQ_DRAWDOWN_ATH'],
+    ['^KS11', 'KOSPI_DRAWDOWN_ATH'],
+  ] as const) {
+    try {
+      const hist = await fetchYahooHistory(symbol, 260); // 52주
+      if (hist.length >= 200) {
+        const closes = hist.map((h) => h.close);
+        const ath = Math.max(...closes);
+        const cur = closes[closes.length - 1];
+        const drawdown = ath > 0 ? ((cur - ath) / ath) * 100 : 0;
+        let level: number;
+        let label: string;
+        if (drawdown >= -5) { level = 2; label = 'ATH 근접(강세장)'; }
+        else if (drawdown >= -10) { level = 1; label = '소폭 조정(-5~-10%)'; }
+        else if (drawdown >= -20) { level = 0; label = '조정(-10~-20%)'; }
+        else if (drawdown >= -30) { level = -1; label = '약세(-20~-30%, video1 기회 구간)'; }
+        else { level = -2; label = '심각한 약세(<-30%, 구조적 위험 가능)'; }
+        d[derivedKey] = {
+          name: derivedKey.toLowerCase(),
+          value: parseFloat(drawdown.toFixed(2)),
+          date: today(),
+          formula: `ATH $${ath.toFixed(0)} / 현재 $${cur.toFixed(0)} → ${drawdown.toFixed(2)}% (${label}). 노션 drawdown chart 정합.`,
+        };
+      }
+    } catch { /* skip */ }
+  }
+
+  // === Phase 2 C1: DGS30_TIER + 30Y10Y_SPREAD_TIER (video4 §장기국채) ===
+  try {
+    const dgs30 = raw.DGS30?.value ?? null;
+    const dgs10 = raw.DGS10?.value ?? null;
+    if (dgs30 !== null) {
+      let level: number;
+      let label: string;
+      if (dgs30 >= 5.5) { level = -2; label = '심각(≥5.5% 역사적 고수준)'; }
+      else if (dgs30 >= 5) { level = -1; label = '경계(5-5.5%)'; }
+      else if (dgs30 >= 4) { level = 0; label = '중립(4-5%)'; }
+      else { level = 1; label = '완화(<4%)'; }
+      d.DGS30_TIER = {
+        name: 'dgs30_tier',
+        value: level,
+        date: today(),
+        formula: `DGS30 ${dgs30.toFixed(2)}% → ${label}. video4 §장기국채 금리 상승 = 채권 자경단 신호.`,
+      };
+    }
+    if (dgs30 !== null && dgs10 !== null) {
+      const spread = dgs30 - dgs10;
+      let level: number;
+      let label: string;
+      if (spread > 1) { level = -1; label = '급경사화(>1% 채권 자경단 발동 중)'; }
+      else if (spread > 0.5) { level = 0; label = '정상화(0.5-1%)'; }
+      else if (spread > 0) { level = 1; label = '평탄화(0-0.5%, 경기 둔화 조짐)'; }
+      else { level = -2; label = '역전 심화(<0%, 장기 수요 쇼크)'; }
+      d.SPREAD_30Y10Y_TIER = {
+        name: 'spread_30y10y_tier',
+        value: level,
+        date: today(),
+        formula: `DGS30-DGS10 ${spread.toFixed(2)}% → ${label}. 급경사화 = 장기금리 우려 (video4).`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // === Phase 2 C2: ELECTION_DDAY (video4 §11월 중간선거) ===
+  // 2026년 미국 중간선거 = 2026-11-03 (11월 첫째 월요일 다음 화요일).
+  try {
+    const electionDate = new Date('2026-11-03T00:00:00Z');
+    const now = new Date();
+    const diffMs = electionDate.getTime() - now.getTime();
+    const dday = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    let level: number;
+    let label: string;
+    if (dday > 180) { level = 1; label = '선거 전 6개월+ (경기 부양 우호, 정책 공격적)'; }
+    else if (dday > 30) { level = 2; label = '선거 30-180일 전 (부양 최고조, 주가 우호 경향)'; }
+    else if (dday > 0) { level = 0; label = '선거 30일 이내 (변동성 증가 구간)'; }
+    else if (dday > -90) { level = -1; label = '선거 직후 3개월 (post-election 불확실성)'; }
+    else { level = 0; label = '선거 사이클 외 (일반 구간)'; }
+    d.ELECTION_DDAY_LEVEL = {
+      name: 'election_dday_level',
+      value: level,
+      date: today(),
+      formula: `D-${dday} (2026-11-03 미국 중간선거) → ${label}. video4 §트럼프 시험 기간 정합.`,
+    };
+  } catch { /* skip */ }
+
+  // === Phase 2 C3: 중국 경제 지표 (video2 §구리 수요 / video4 §달러 패권) ===
+  // FXI (iShares China Large-Cap ETF) 20D 추세 — Yahoo 수집 추가 필요
+  try {
+    const fxiHist = await fetchYahooHistory('FXI', 60);
+    if (fxiHist.length >= 21) {
+      const c = fxiHist.map((h) => h.close);
+      const ret20 = ((c[c.length - 1] - c[c.length - 21]) / c[c.length - 21]) * 100;
+      let level: number;
+      let label: string;
+      if (ret20 > 10) { level = 2; label = '강세 (+10%, 구리 수요 확대 우호)'; }
+      else if (ret20 > 3) { level = 1; label = '양호 (+3-10%)'; }
+      else if (ret20 > -3) { level = 0; label = '중립 (±3%)'; }
+      else if (ret20 > -10) { level = -1; label = '약세 (-3 ~ -10%)'; }
+      else { level = -2; label = '하락 (<-10%, 구리 수요 우려)'; }
+      d.CHINA_EQUITY_MOMENTUM = {
+        name: 'china_equity_momentum',
+        value: parseFloat(ret20.toFixed(2)),
+        date: today(),
+        formula: `FXI 20D ${ret20.toFixed(2)}% → ${label}. video2 "중국 경기 부양 늦으면 구리 하방 압력".`,
+      };
+    }
+  } catch { /* skip */ }
+  try {
+    const cnyhHist = await fetchYahooHistory('CNH=X', 60);
+    if (cnyhHist.length >= 21) {
+      const c = cnyhHist.map((h) => h.close);
+      const cur = c[c.length - 1];
+      const past = c[c.length - 21];
+      const change = ((cur - past) / past) * 100;
+      // CNY 약세 = CNYH 상승 = 중국 디플레/경기 둔화 신호
+      let level: number;
+      let label: string;
+      if (cur >= 7.3) { level = -1; label = '위안 약세(CNH≥7.3, 중국 둔화)'; }
+      else if (cur >= 7.1) { level = 0; label = '중립(7.1-7.3)'; }
+      else { level = 1; label = '위안 강세(<7.1, 중국 회복)'; }
+      d.CNH_USD_TIER = {
+        name: 'cnh_usd_tier',
+        value: level,
+        date: today(),
+        formula: `USD/CNH ${cur.toFixed(3)} (20D ${change.toFixed(2)}%) → ${label}. video4 §달러 패권 / video2 §중국 수요.`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // === Phase 3 A3: NASDAQ_WEDGE_PATTERN 경량 감지 (video2 §쐐기) ===
+  // 20일 high / low 의 **수렴도** (high-low 간격이 이전 대비 축소?)
+  try {
+    const nqWedge = await fetchYahooHistory('^IXIC', 60);
+    if (nqWedge.length >= 40) {
+      const cs = nqWedge.map((h) => h.close);
+      const recent20 = cs.slice(-20);
+      const prev20 = cs.slice(-40, -20);
+      const range = (arr: number[]) => Math.max(...arr) - Math.min(...arr);
+      const r1 = range(recent20);
+      const r0 = range(prev20);
+      const convergenceRatio = r0 > 0 ? r1 / r0 : 1;
+      let level: number;
+      let label: string;
+      if (convergenceRatio < 0.5) { level = 2; label = '강한 수렴(<50%, 폭발 직전)'; }
+      else if (convergenceRatio < 0.75) { level = 1; label = '수렴(<75%)'; }
+      else if (convergenceRatio > 1.5) { level = -1; label = '확산(>150%, 추세 강세)'; }
+      else { level = 0; label = '정상'; }
+      d.NASDAQ_WEDGE_CONVERGENCE = {
+        name: 'nasdaq_wedge_convergence',
+        value: parseFloat((convergenceRatio * 100).toFixed(1)),
+        date: today(),
+        formula: `최근 20D range / 직전 20D range = ${(convergenceRatio * 100).toFixed(1)}%. ${label}. video2 §쐐기 패턴 경량 근사.`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // === Phase 3 B1: BITCOIN 지표 (수집만, allocation 제외) ===
+  // 사용자 지침: "비트코인 지표는 사용하되 포트폴리오 비율에는 포함하지 말 것"
+  // BTC-USD 수집 + 위험선호 proxy 로만 활용 (NASDAQ 과열 플래그 등).
+  try {
+    const btcHist = await fetchYahooHistory('BTC-USD', 30);
+    if (btcHist.length >= 21) {
+      const cs = btcHist.map((h) => h.close);
+      const ret20 = ((cs[cs.length - 1] - cs[cs.length - 21]) / cs[cs.length - 21]) * 100;
+      let level: number;
+      let label: string;
+      if (ret20 > 20) { level = 2; label = '극강세 (+20%, 위험선호 극대)'; }
+      else if (ret20 > 10) { level = 1; label = '강세 (+10-20%)'; }
+      else if (ret20 > -10) { level = 0; label = '중립 (±10%)'; }
+      else if (ret20 > -20) { level = -1; label = '약세 (-10 ~ -20%)'; }
+      else { level = -2; label = '폭락 (<-20%, 위험회피 극대)'; }
+      d.BTC_MOMENTUM = {
+        name: 'btc_momentum',
+        value: parseFloat(ret20.toFixed(2)),
+        date: today(),
+        formula: `BTC-USD 20D ${ret20.toFixed(2)}% → ${label}. video4 "위험선호 지표" proxy. allocation 제외 (사용자 지침).`,
+      };
+    }
+  } catch { /* skip */ }
+
   return d;
 }
