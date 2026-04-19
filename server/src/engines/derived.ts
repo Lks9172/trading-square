@@ -2498,28 +2498,34 @@ export async function computeDerived(
   }
 
 
-// === N4 TAIL_RISK_LEVEL (12차 2026-04) — video4 §꼬리 위험 ===
-  // 수집된 SKEW/VVIX/OVX 를 signal 에 통합.
-  //   SKEW > 150 → 꼬리 위험 주의 (참여자 downside 보호 과도 = 역설적 안정 or 불안)
-  //   VVIX > 120 → VIX 자체 변동성 과열
-  //   OVX > 50  → 유가 변동성 경계
-  // 3개 중 2개 이상 발동 = 2 (고위험), 1개 = 1, 0개 = 0.
+// === N4 TAIL_RISK_LEVEL (14차 노션 2단계 정합, 2026-04) — video4 §꼬리 위험 ===
+  // 노션 대시보드 soft/hard 2단계:
+  //   SKEW: 120 soft / 140 hard (블랙스완 경계)
+  //   VVIX: 110 soft / 130 hard
+  //   OVX:  40 soft / 60 hard
+  // 각 지표 hard=2점, soft=1점, 미발동=0점. 합 0~6.
+  //   score >= 4 → level 2 (고위험)
+  //   score >= 2 → level 1 (경계)
+  //   else → 0 (정상)
   try {
     const skew = raw.SKEW?.value ?? null;
     const vvix = raw.VVIX?.value ?? null;
     const ovx = raw.OVX?.value ?? null;
-    const skewHit = skew !== null && skew > 150 ? 1 : 0;
-    const vvixHit = vvix !== null && vvix > 120 ? 1 : 0;
-    const ovxHit = ovx !== null && ovx > 50 ? 1 : 0;
-    const tailCount = skewHit + vvixHit + ovxHit;
-    const level = tailCount >= 2 ? 2 : tailCount >= 1 ? 1 : 0;
+    const skewPt = skew === null ? 0 : skew > 140 ? 2 : skew > 120 ? 1 : 0;
+    const vvixPt = vvix === null ? 0 : vvix > 130 ? 2 : vvix > 110 ? 1 : 0;
+    const ovxPt = ovx === null ? 0 : ovx > 60 ? 2 : ovx > 40 ? 1 : 0;
+    const tailScore = skewPt + vvixPt + ovxPt;
+    const level = tailScore >= 4 ? 2 : tailScore >= 2 ? 1 : 0;
+    const ptLabel = (pt: number) => (pt === 2 ? 'hard' : pt === 1 ? 'soft' : '-');
     d.TAIL_RISK_LEVEL = {
       name: 'tail_risk_level',
       value: level,
       date: today(),
       formula:
-        `SKEW ${skew?.toFixed(1) ?? 'n/a'}>150[${skewHit}], VVIX ${vvix?.toFixed(1) ?? 'n/a'}>120[${vvixHit}], ` +
-        `OVX ${ovx?.toFixed(1) ?? 'n/a'}>50[${ovxHit}]. 합 ${tailCount} → level ${level} (0=정상,1=경계,2=고위험).`,
+        `SKEW ${skew?.toFixed(1) ?? 'n/a'} [${ptLabel(skewPt)}] (노션 120/140), ` +
+        `VVIX ${vvix?.toFixed(1) ?? 'n/a'} [${ptLabel(vvixPt)}] (110/130), ` +
+        `OVX ${ovx?.toFixed(1) ?? 'n/a'} [${ptLabel(ovxPt)}] (40/60). ` +
+        `score ${tailScore}/6 → level ${level} (0=정상,1=경계,2=고위험). 노션 대시보드 정합.`,
     };
   } catch {
     /* skip */
@@ -2587,6 +2593,160 @@ export async function computeDerived(
   } catch {
     /* skip */
   }
+
+  // === 14차 Phase B-1 유동성 tier 5종 (노션 대시보드 정합) ===
+
+  // WALCL_TIER — 연준 총자산 (millions 단위, 노션 8.5T/7T/6T 임계)
+  try {
+    const walcl = raw.WALCL?.value ?? null;
+    if (walcl !== null) {
+      let level: number;
+      let label: string;
+      if (walcl >= 8_500_000) { level = 2; label = '양적완화(≥8.5T)'; }
+      else if (walcl >= 7_000_000) { level = 1; label = '완만QT(7-8.5T)'; }
+      else if (walcl >= 6_000_000) { level = 0; label = 'QT진행(6-7T)'; }
+      else { level = -1; label = '긴축심화(<6T)'; }
+      d.WALCL_TIER = {
+        name: 'walcl_tier',
+        value: level,
+        date: today(),
+        formula: `WALCL ${(walcl / 1_000_000).toFixed(2)}T → ${label}. 노션 기준 +2(≥8.5T) / +1(7-8.5T) / 0(6-7T) / -1(<6T).`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // TGA_TIER — WTREGEN (millions 단위, 노션 800B/400B 임계). 음수 방향: 유동성 흡수
+  try {
+    const tga = raw.WTREGEN?.value ?? null;
+    if (tga !== null) {
+      let level: number;
+      let label: string;
+      if (tga >= 800_000) { level = -1; label = '유동성 흡수(≥800B)'; }
+      else if (tga >= 400_000) { level = 0; label = '보통(400-800B)'; }
+      else { level = 1; label = '유동성 공급(<400B)'; }
+      d.TGA_TIER = {
+        name: 'tga_tier',
+        value: level,
+        date: today(),
+        formula: `TGA ${(tga / 1000).toFixed(0)}B → ${label}. 노션 기준 -1(≥800B 흡수) / 0(400-800B) / +1(<400B 공급).`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // MMF_TIER — WRMFNS (billions 단위, retail MMF 소매 수준). 노션 "6T" 는 전체 MMF 기준이라
+  // retail 수준 (≈2T 대) 으로 임계 재조정: 2.5T / 2T.
+  try {
+    const mmf = raw.WRMFNS?.value ?? null;
+    if (mmf !== null) {
+      let level: number;
+      let label: string;
+      if (mmf >= 2500) { level = 1; label = '역대 최고(≥2.5T retail)'; }
+      else if (mmf >= 2000) { level = 0; label = '높음(2-2.5T)'; }
+      else { level = -1; label = '보통(<2T)'; }
+      d.MMF_TIER = {
+        name: 'mmf_tier',
+        value: level,
+        date: today(),
+        formula: `WRMFNS (retail MMF) ${(mmf / 1000).toFixed(2)}T → ${label}. 노션 "6T 전체" 를 retail 수준으로 환산.`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // SOFR_IORB_SPREAD_TIER — 이미 계산된 spread 재활용 (노션 0.05% 임계)
+  try {
+    const spread = d.SOFR_IORB_SPREAD?.value ?? null;
+    if (spread !== null) {
+      let level: number;
+      let label: string;
+      if (spread > 0.05) { level = -1; label = '자금시장 긴장(SOFR>IORB+5bp)'; }
+      else if (spread >= -0.05) { level = 0; label = '균형(±5bp)'; }
+      else { level = 1; label = '유동성 풍부(SOFR<IORB-5bp)'; }
+      d.SOFR_IORB_TIER = {
+        name: 'sofr_iorb_tier',
+        value: level,
+        date: today(),
+        formula: `SOFR-IORB ${spread.toFixed(3)}% → ${label}. 노션 ±5bp 기준.`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // DGS10_TIER — 10년물 금리 (노션 5%/4%/3% 임계)
+  try {
+    const dgs10 = raw.DGS10?.value ?? null;
+    if (dgs10 !== null) {
+      let level: number;
+      let label: string;
+      if (dgs10 >= 5) { level = -2; label = '경계(≥5%)'; }
+      else if (dgs10 >= 4) { level = -1; label = '부담(4-5%)'; }
+      else if (dgs10 >= 3) { level = 0; label = '중립(3-4%)'; }
+      else { level = 1; label = '저금리(<3%)'; }
+      d.DGS10_TIER = {
+        name: 'dgs10_tier',
+        value: level,
+        date: today(),
+        formula: `DGS10 ${dgs10.toFixed(2)}% → ${label}. 노션 대시보드 5%/4%/3% 임계.`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // === 14차 Phase B-2 경제 건강 tier 3종 (노션 대시보드 정합) ===
+
+  // UNRATE_TIER — 실업률 (노션 4%/5%/6% 임계)
+  try {
+    const ur = raw.UNRATE?.value ?? null;
+    if (ur !== null) {
+      let level: number;
+      let label: string;
+      if (ur < 4) { level = 2; label = '완전 고용(<4%)'; }
+      else if (ur < 5) { level = 1; label = '양호(4-5%)'; }
+      else if (ur < 6) { level = -1; label = '주의(5-6%)'; }
+      else { level = -2; label = '침체 우려(≥6%)'; }
+      d.UNRATE_TIER = {
+        name: 'unrate_tier',
+        value: level,
+        date: today(),
+        formula: `UNRATE ${ur.toFixed(1)}% → ${label}. 노션 4%/5%/6% 기준.`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // M2SL_LEVEL_TIER — 미국 M2 절대 레벨 (노션 21T/20T/19T 임계, billions 단위)
+  try {
+    const m2 = raw.M2SL?.value ?? null;
+    if (m2 !== null) {
+      let level: number;
+      let label: string;
+      if (m2 >= 21000) { level = 2; label = '풍부(≥21T)'; }
+      else if (m2 >= 20000) { level = 1; label = '정상(20-21T)'; }
+      else if (m2 >= 19000) { level = -1; label = '감소(19-20T)'; }
+      else { level = -2; label = '수축(<19T)'; }
+      d.M2SL_LEVEL_TIER = {
+        name: 'm2sl_level_tier',
+        value: level,
+        date: today(),
+        formula: `M2SL ${(m2 / 1000).toFixed(2)}T → ${label}. 노션 21T/20T/19T 기준.`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // DXY_TIER — 달러인덱스 (노션 105/100/95 임계). 부호: DXY 약세가 위험자산/금 우호
+  try {
+    const dxy = raw.DXY?.value ?? null;
+    if (dxy !== null) {
+      let level: number;
+      let label: string;
+      if (dxy >= 105) { level = -1; label = '강세(≥105)'; }
+      else if (dxy >= 100) { level = 0; label = '우위(100-105)'; }
+      else if (dxy >= 95) { level = 1; label = '중립(95-100)'; }
+      else { level = 2; label = '약세(<95, 금/EM 우호)'; }
+      d.DXY_TIER = {
+        name: 'dxy_tier',
+        value: level,
+        date: today(),
+        formula: `DXY ${dxy.toFixed(2)} → ${label}. 노션 105/100/95 기준.`,
+      };
+    }
+  } catch { /* skip */ }
 
   // === INSTITUTIONAL_NASDAQ_EXPOSURE_PCT + FLOW (11차 #8, 2026-04) ===
   // 영상4 §기관리포트: "말은 거짓말 할 수 있지만 돈은 거짓말을 하지 않거든요".
