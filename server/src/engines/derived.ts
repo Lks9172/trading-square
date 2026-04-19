@@ -3130,8 +3130,8 @@ export async function computeDerived(
   // === Phase 2 A2: GOLD_FIB_LEVEL (video2 §23:34 "피보나치 0.382/0.5 지지") ===
   // 52주 고/저 기반 0.382 / 0.5 / 0.618 되돌림 구간 중 현재가 위치.
   try {
-    const goldHist52 = await fetchYahooHistory('GC=F', 260);
-    if (goldHist52.length >= 200) {
+    const goldHist52 = await fetchYahooHistory('GC=F', 400);
+    if (goldHist52.length >= 100) {
       const closes52 = goldHist52.map((h) => h.close);
       const high52 = Math.max(...closes52);
       const low52 = Math.min(...closes52);
@@ -3169,8 +3169,8 @@ export async function computeDerived(
   // === Phase 2 A4: NASDAQ_OUTSIDE_BAR_YEARLY (video3 §8:23 "아웃사이드 바") ===
   // 현재 연간 캔들이 이전 연간 캔들의 high-low 범위를 **완전히 덮는지** 판정.
   try {
-    const ixicHist = await fetchYahooHistory('^IXIC', 520); // 2년치
-    if (ixicHist.length >= 480) {
+    const ixicHist = await fetchYahooHistory('^IXIC', 540); // 2년치
+    if (ixicHist.length >= 250) {
       const closes = ixicHist.map((h) => h.close);
       const half = Math.floor(ixicHist.length / 2);
       const prevYear = closes.slice(0, half);
@@ -3275,8 +3275,8 @@ export async function computeDerived(
     ['^KS11', 'KOSPI_DRAWDOWN_ATH'],
   ] as const) {
     try {
-      const hist = await fetchYahooHistory(symbol, 260); // 52주
-      if (hist.length >= 200) {
+      const hist = await fetchYahooHistory(symbol, 400); // 52주 여유
+      if (hist.length >= 100) {
         const closes = hist.map((h) => h.close);
         const ath = Math.max(...closes);
         const cur = closes[closes.length - 1];
@@ -3378,7 +3378,7 @@ export async function computeDerived(
     }
   } catch { /* skip */ }
   try {
-    const cnyhHist = await fetchYahooHistory('CNH=X', 60);
+    const cnyhHist = await fetchYahooHistory('CNY=X', 90);
     if (cnyhHist.length >= 21) {
       const c = cnyhHist.map((h) => h.close);
       const cur = c[c.length - 1];
