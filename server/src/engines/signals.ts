@@ -241,6 +241,34 @@ function nasdaqSignal(
     met += 1;
   }
 
+  // 15차 Phase 2 B3: NASDAQ_DRAWDOWN_ATH (video1 "펀더멘털 살아있는 -30% = 기회")
+  const nqDd = dv(derived, 'NASDAQ_DRAWDOWN_ATH');
+  if (nqDd !== null && nqDd <= -20 && nqDd >= -30) {
+    reasons.push(`✓ NASDAQ ATH 대비 ${nqDd.toFixed(1)}% 조정 (video1 "펀더멘털 살아있는 -20~-30% = 기회" 구간)`);
+    met += 1;
+  } else if (nqDd !== null && nqDd < -30) {
+    unmetReasons.push(`⚠️ NASDAQ ATH 대비 ${nqDd.toFixed(1)}% — 구조적 위험 가능성 (video1 "-55% 시스템 위기" 경계)`);
+  }
+
+  // 15차 Phase 1 A1: NASDAQ_RSI_14 (video2 §22:51 RSI 중립/모멘텀 평가)
+  const rsi = dv(derived, 'NASDAQ_RSI_14');
+  if (rsi !== null) {
+    if (rsi < 30) {
+      reasons.push(`✓ NASDAQ RSI ${rsi.toFixed(1)} < 30 과매도 — video2 §RSI 평균회귀 매수 구간`);
+      met += 1;
+    } else if (rsi > 70) {
+      unmetReasons.push(`⚠️ NASDAQ RSI ${rsi.toFixed(1)} > 70 과매수 — 추격 매수 주의`);
+    }
+  }
+
+  // 15차 Phase 3 B1: BTC 위험선호 reason 로만 (NASDAQ signal 참고 정보, allocation 은 별개)
+  const btcMom = dv(derived, 'BTC_MOMENTUM');
+  if (btcMom !== null && btcMom <= -20) {
+    unmetReasons.push(`⚠️ BTC 20D ${btcMom.toFixed(1)}% 급락 — 위험회피 신호 (video4 proxy, 보조조건)`);
+  } else if (btcMom !== null && btcMom >= 20) {
+    unmetReasons.push(`⚠️ BTC 20D +${btcMom.toFixed(1)}% 급등 — 위험선호 극대, 과열 힌트 (video4)`);
+  }
+
   // 13차 N8: DMA 수렴 (video3 §수렴 "폭발 직전")
   const dmaConv = dv(derived, 'DMA_CONVERGENCE_LEVEL');
   if (dmaConv !== null) {
@@ -496,6 +524,24 @@ function goldSignal(
   if (seasonal === 1) reasons.push('✓ 금 강시즌 (20년 기준 상위 4개월, video2 §4부 보조조건 +0.5)');
   else if (seasonal === -1) unmetReasons.push('⚠️ 금 약시즌 (20년 기준 하위 4개월, video2 §4부 보조조건)');
   if (seasonal === 1) { score += 0.5; maxScore += 0.5; }
+
+  // 15차 Phase 1 A1 + Phase 2 A2: GOLD RSI + 피보나치 되돌림
+  const goldRsi = dv(derived, 'GOLD_RSI_14');
+  if (goldRsi !== null) {
+    if (goldRsi < 35) {
+      reasons.push(`✓ GOLD RSI ${goldRsi.toFixed(1)} 과매도 근접 (video2 §22:51 모멘텀 매수 구간)`);
+      score += 0.5; maxScore += 0.5;
+    } else if (goldRsi > 70) {
+      unmetReasons.push(`⚠️ GOLD RSI ${goldRsi.toFixed(1)} 과매수 — 추격 매수 주의`);
+    }
+  }
+  const goldFib = dv(derived, 'GOLD_FIB_LEVEL');
+  if (goldFib !== null && goldFib >= 2) {
+    reasons.push('✓ GOLD 피보나치 주요 지지 근접 (0.5 또는 0.618, video2 §23:34 분할매수 구간)');
+    score += 0.5; maxScore += 0.5;
+  } else if (goldFib !== null && goldFib === -2) {
+    unmetReasons.push('⚠️ GOLD 피보나치 0.618 하방 이탈 — 약세 전환 가능');
+  }
 
   if (profile.manualInputs.geoRisk >= 3) { score += 0.5; metCount += 1; reasons.push('지정학 리스크 확대 (가중치 0.5)'); }
   else { unmetReasons.push('지정학 리스크 확대 조건 미충족 (가중치 0.5 미충족)'); }
@@ -1070,6 +1116,22 @@ function kospiSignal(
     const overrideReason = '추세전환 3조건 전부 미충족 → HOLD 상한 (보조조건)';
     overrides.push(overrideReason);
     reasons.push(overrideReason);
+  }
+
+  // 15차 Phase 1+2: KOSPI RSI + DRAWDOWN_ATH
+  const kRsi = dv(derived, 'KOSPI_RSI_14');
+  if (kRsi !== null) {
+    if (kRsi < 35) {
+      reasons.push(`✓ KOSPI RSI ${kRsi.toFixed(1)} 과매도 근접 (video2 §RSI 정합)`);
+      met += 1;
+    } else if (kRsi > 70) {
+      unmetReasons.push(`⚠️ KOSPI RSI ${kRsi.toFixed(1)} 과매수 — 추격 주의`);
+    }
+  }
+  const kDd = dv(derived, 'KOSPI_DRAWDOWN_ATH');
+  if (kDd !== null && kDd <= -15 && kDd >= -30) {
+    reasons.push(`✓ KOSPI ATH 대비 ${kDd.toFixed(1)}% 조정 (stt_kospi "75% 상승 후 통상 15-30% 조정" 범위)`);
+    met += 1;
   }
 
   // 14차 Phase B-2: KOSPI W 반등 + 연봉 아래꼬리 지수 reason 노출
