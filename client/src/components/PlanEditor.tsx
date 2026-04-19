@@ -1,0 +1,327 @@
+'use client';
+
+/**
+ * 실전 투자 템플릿 UI (17차 Phase 1 A1).
+ *
+ * 영상 원문 정합:
+ *   - video1 §5부 "시계열 먼저 정해야 한다 — 시스템이 있으면 심리 싸움에서 이길 수 있다"
+ *   - notion "내 투자 원칙 나만의 체크리스트 만들기"
+ *
+ * 기능:
+ *   - InvestmentPlan CRUD (horizon / target / leverage / 분할매수)
+ *   - 최근 Trade Log 50건 열람 + 관찰 기록 추가
+ *   - Weekly Report 미리보기 (서버 생성 텍스트)
+ *   - 7가지 렌즈 체크리스트 (경제/유동성/심리/수급/밸류/이격/모멘텀)
+ *   - "내 기준은?" 프롬프트 (P3 E1)
+ */
+
+import { useState } from 'react';
+
+interface InvestmentPlan {
+  horizon: 'short' | 'medium' | 'long';
+  targetReturnAnnualPct: number;
+  maxDrawdownTolerancePct: number;
+  rebalanceIntervalDays: number;
+  leverageMaxPct: number;
+  profitTakeTargetPct: number;
+  stopLossPct: number;
+  monthlyDCA_KRW: number;
+  notes?: string;
+  updatedAt: string;
+}
+
+interface TradeLogEntry {
+  ts: string;
+  kind: 'signal_change' | 'allocation_change' | 'user_action' | 'observation';
+  asset?: string;
+  from?: string;
+  to?: string;
+  notes?: string;
+}
+
+interface WeeklyReport {
+  generatedAt: string;
+  period: { from: string; to: string };
+  warnings: string[];
+  ruleViolations: string[];
+  keySignals: Array<{ asset: string; signal: string; met: string }>;
+}
+
+interface Props {
+  initialPlan: InvestmentPlan | null;
+  initialLog: TradeLogEntry[];
+  weeklyReport: WeeklyReport | null;
+  weeklyText: string;
+}
+
+const LENSES = [
+  { key: 'economy', label: '① 경제 (GDP / 고용 / 소비)' },
+  { key: 'liquidity', label: '② 유동성 (M2 / Fed / RRP)' },
+  { key: 'psych', label: '③ 심리 (F&G / Put-Call / VIX)' },
+  { key: 'flow', label: '④ 수급 (외인·기관 / 13F)' },
+  { key: 'value', label: '⑤ 밸류에이션 (PER / ERP / Buffett)' },
+  { key: 'disparity', label: '⑥ 이격도 (200MA / 연봉)' },
+  { key: 'momentum', label: '⑦ 모멘텀 (MACD / 52W Hi / 멀티프레임)' },
+];
+
+export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText }: Props) {
+  const [plan, setPlan] = useState<InvestmentPlan | null>(initialPlan);
+  const [log, setLog] = useState<TradeLogEntry[]>(initialLog);
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [checks, setChecks] = useState<Record<string, boolean>>({});
+  const [reason, setReason] = useState('');
+
+  if (!plan) {
+    return <div className="text-slate-400">Plan 로딩 실패 — 서버 연결을 확인해주세요.</div>;
+  }
+
+  async function savePlan(patch: Partial<InvestmentPlan>) {
+    setSavingPlan(true);
+    try {
+      const res = await fetch('/api/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json();
+      if (data?.plan) setPlan(data.plan);
+    } finally {
+      setSavingPlan(false);
+    }
+  }
+
+  async function addObservation() {
+    if (!noteDraft.trim()) return;
+    const body = {
+      kind: 'observation' as const,
+      notes: noteDraft.trim(),
+      context: { checklist: { ...checks }, reason },
+    };
+    const res = await fetch('/api/trade-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      setLog([{ ts: new Date().toISOString(), ...body }, ...log].slice(0, 50));
+      setNoteDraft('');
+      setReason('');
+      setChecks({});
+    }
+  }
+
+  const checkedCount = Object.values(checks).filter(Boolean).length;
+
+  return (
+    <div className="space-y-6">
+      <header className="border-b border-slate-800 pb-4">
+        <h1 className="text-2xl font-bold text-slate-100">🧭 나만의 투자 템플릿</h1>
+        <p className="text-sm text-slate-400 mt-1">
+          video1 §5부 — "시스템이 있으면 심리 싸움에서 이길 수 있다"
+        </p>
+      </header>
+
+      {/* Plan Form */}
+      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 md:p-6">
+        <h2 className="text-lg font-semibold text-slate-100 mb-4">📋 투자 계획</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field label="시계열">
+            <select
+              value={plan.horizon}
+              onChange={(e) => savePlan({ horizon: e.target.value as InvestmentPlan['horizon'] })}
+              className="bg-slate-800 text-slate-100 rounded px-3 py-2 w-full"
+            >
+              <option value="short">단기 (&lt; 6개월)</option>
+              <option value="medium">중기 (6개월~3년)</option>
+              <option value="long">장기 (3년+)</option>
+            </select>
+          </Field>
+          <NumberField
+            label="목표 연수익률 (%)"
+            value={plan.targetReturnAnnualPct}
+            onChange={(v) => savePlan({ targetReturnAnnualPct: v })}
+          />
+          <NumberField
+            label="최대 감수 MDD (%)"
+            value={plan.maxDrawdownTolerancePct}
+            onChange={(v) => savePlan({ maxDrawdownTolerancePct: v })}
+          />
+          <NumberField
+            label="리밸런싱 주기 (일)"
+            value={plan.rebalanceIntervalDays}
+            onChange={(v) => savePlan({ rebalanceIntervalDays: v })}
+          />
+          <NumberField
+            label="레버리지 상한 (%)"
+            value={plan.leverageMaxPct}
+            onChange={(v) => savePlan({ leverageMaxPct: v })}
+            hint="video1 §전략C — 최대 15%"
+          />
+          <NumberField
+            label="익절 목표 (%)"
+            value={plan.profitTakeTargetPct}
+            onChange={(v) => savePlan({ profitTakeTargetPct: v })}
+            hint="video1 §전략C — 20~30%"
+          />
+          <NumberField
+            label="손절 기준 (%)"
+            value={plan.stopLossPct}
+            onChange={(v) => savePlan({ stopLossPct: v })}
+          />
+          <NumberField
+            label="월 분할매수 (KRW)"
+            value={plan.monthlyDCA_KRW}
+            onChange={(v) => savePlan({ monthlyDCA_KRW: v })}
+          />
+        </div>
+        <div className="mt-4 text-xs text-slate-500">
+          최종 업데이트: {new Date(plan.updatedAt).toLocaleString('ko-KR')}
+          {savingPlan && <span className="ml-2 text-cyan-400">저장 중…</span>}
+        </div>
+      </section>
+
+      {/* 7가지 렌즈 체크리스트 + 본인 판단 유도 */}
+      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 md:p-6">
+        <h2 className="text-lg font-semibold text-slate-100 mb-3">🔍 7 렌즈 체크리스트</h2>
+        <p className="text-xs text-slate-400 mb-4">
+          시스템 신호에만 의존하지 말고 본인 눈으로 교차 검증하기 위한 체크리스트입니다.
+          체크된 항목 수 = {checkedCount}/{LENSES.length}
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {LENSES.map((l) => (
+            <label key={l.key} className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!checks[l.key]}
+                onChange={(e) => setChecks({ ...checks, [l.key]: e.target.checked })}
+                className="accent-cyan-500"
+              />
+              {l.label}
+            </label>
+          ))}
+        </div>
+
+        <div className="mt-4">
+          <label className="block text-sm text-slate-300 mb-1">🤔 내 판단 근거 (본인의 말로)</label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            placeholder="예: 나스닥 이격도 +12% 과열이지만 어닝 시즌 직전 — 관망 우선"
+            className="w-full bg-slate-800 text-slate-100 rounded px-3 py-2 text-sm"
+          />
+        </div>
+
+        <div className="mt-3">
+          <label className="block text-sm text-slate-300 mb-1">📝 관찰/판단 기록 (저장용 요약)</label>
+          <textarea
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            rows={2}
+            placeholder="짧은 요약 한 줄"
+            className="w-full bg-slate-800 text-slate-100 rounded px-3 py-2 text-sm"
+          />
+          <button
+            onClick={addObservation}
+            disabled={!noteDraft.trim()}
+            className="mt-2 px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm"
+          >
+            Trade Log 기록
+          </button>
+        </div>
+      </section>
+
+      {/* Weekly Report Preview */}
+      {weeklyReport && (
+        <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 md:p-6">
+          <h2 className="text-lg font-semibold text-slate-100 mb-3">
+            📊 주간 리포트 미리보기 ({weeklyReport.period.from} ~ {weeklyReport.period.to})
+          </h2>
+          {weeklyReport.ruleViolations.length > 0 && (
+            <div className="mb-3 rounded border border-red-800 bg-red-950/40 p-3">
+              <div className="text-sm font-semibold text-red-300 mb-1">🚨 계획 규칙 위반</div>
+              <ul className="text-xs text-red-200 space-y-1">
+                {weeklyReport.ruleViolations.map((v, i) => (
+                  <li key={i}>• {v}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {weeklyReport.warnings.length > 0 && (
+            <div className="mb-3 rounded border border-amber-800 bg-amber-950/20 p-3">
+              <div className="text-sm font-semibold text-amber-300 mb-1">⚠️ 경고 신호</div>
+              <ul className="text-xs text-amber-200 space-y-1">
+                {weeklyReport.warnings.slice(0, 6).map((w, i) => (
+                  <li key={i}>• {w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <pre className="text-xs text-slate-300 whitespace-pre-wrap bg-slate-950/60 rounded p-3 overflow-x-auto">
+            {weeklyText}
+          </pre>
+        </section>
+      )}
+
+      {/* Trade Log */}
+      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 md:p-6">
+        <h2 className="text-lg font-semibold text-slate-100 mb-3">🗂️ 최근 Trade Log (50건)</h2>
+        {log.length === 0 ? (
+          <p className="text-sm text-slate-500">기록이 없습니다.</p>
+        ) : (
+          <ul className="space-y-2 max-h-96 overflow-y-auto">
+            {log.map((e, i) => (
+              <li key={i} className="text-xs border-b border-slate-800 pb-2">
+                <div className="text-slate-400">
+                  {new Date(e.ts).toLocaleString('ko-KR')} · {e.kind}
+                  {e.asset ? ` · ${e.asset}` : ''}
+                  {e.from && e.to ? ` · ${e.from} → ${e.to}` : ''}
+                </div>
+                {e.notes && <div className="text-slate-200 mt-1">{e.notes}</div>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-sm text-slate-300 mb-1">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  hint?: string;
+}) {
+  const [local, setLocal] = useState(String(value));
+  return (
+    <Field label={label}>
+      <input
+        type="number"
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={() => {
+          const n = parseFloat(local);
+          if (Number.isFinite(n) && n !== value) onChange(n);
+        }}
+        className="bg-slate-800 text-slate-100 rounded px-3 py-2 w-full"
+      />
+      {hint && <p className="text-xs text-slate-500 mt-1">{hint}</p>}
+    </Field>
+  );
+}
