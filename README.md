@@ -2,11 +2,11 @@
 
 거시경제·유동성·기술적 지표를 종합해 **"지금 어떤 자산을 얼마나 들고 있어야 하는가"**를 판단하는 시스템.
 
-## 현재 구현 상태 (13차 2026-04)
+## 현재 구현 상태 (14차 2026-04)
 
 - 시장 데이터 수집: **FRED / Yahoo / CNN Fear & Greed / 대체 F&G / GPR / OpenInsider / Dataroma / Earnings**
 - 자동화 입력: **정책 방향 / 지정학 리스크 / 중앙은행 금 매수 proxy / ISM 자동 계산 / KRX 외국인 수급**
-- 국면 엔진: **14개 컴포넌트 기반 점수화 + 8개 레짐 분류 (STAGFLATION/BOND_VIGILANTE override)**
+- 국면 엔진: **16개 컴포넌트 기반 점수화 + 8개 레짐 분류 (STAGFLATION/BOND_VIGILANTE override)**
 - 자산 신호: **나스닥 / 코스피 / 금 / 은 / 구리 / 신흥국 / 현금 / 레버리지**
 - 비중 조절: **국면 템플릿 + 신호 배수 + 환율/과열/방어 모드 3단계 보정**
 - **기관 13F 추적**: 주요 헤지펀드 10곳 분기 포지션 변화 (NASDAQ + TECH/FIN/ENERGY 섹터)
@@ -15,14 +15,17 @@
 - 백테스트: **벤치마크 + 포트폴리오 비중 기반 + Walk-forward OOS**
 - 알림: **텔레그램 신호 변경 / 비중 변경 / 전체 현황 요약**
 
-## 12-13차 파생지표 (영상/노션 정합 신규 15종)
+## 12-14차 파생지표 (영상/노션 정합 신규 27종)
 
-- 영상 정합: GOLD_SEASONAL / CB_GOLD_STRUCTURAL_DEMAND / TAIL_RISK_LEVEL
-- 영상 정합: KOSPI_FOREIGN_HISTORIC_EXTREME / COPPER_GOLD_RATIO_UPTURN/DOWNTURN / COPPER_STOCK_DIVERGENCE
-- 영상 정합 (13차): **DMA_CONVERGENCE_LEVEL** (video3 §수렴) / **WTI_COPPER_LAG_LEVEL** (video2 §3부) / **ECONOMY_STOCK_DIVERGENCE** (video4 §유동성 왜곡)
-- 노션 정합: FNG_TIER / WRESBAL_ABSOLUTE_LEVEL / RRP_ABSOLUTE_LEVEL
-- 13F: INSTITUTIONAL_NASDAQ_{EXPOSURE_PCT, FLOW} / SECTOR_{TECH, FIN, ENERGY}_FLOW
-- 13차 동적 계수: **FX_FOREIGN_BETA** (최근 1년 rolling 회귀)
+- 영상 정합 (12차): GOLD_SEASONAL / CB_GOLD_STRUCTURAL_DEMAND / TAIL_RISK_LEVEL / KOSPI_FOREIGN_HISTORIC_EXTREME / COPPER_GOLD_RATIO_UPTURN·DOWNTURN / COPPER_STOCK_DIVERGENCE
+- 영상 정합 (13차): DMA_CONVERGENCE_LEVEL (video3 §수렴) / WTI_COPPER_LAG_LEVEL (video2 §3부) / ECONOMY_STOCK_DIVERGENCE (video4 §유동성 왜곡)
+- 영상 정합 (14차): **KOSPI_YEARLY_AREA_INDEX/LEVEL** (video5 §1부 "아래꼬리 <15%") / **FEDERAL_DEBT_GDP_TIER** (video4 §채권자경단 + IMF 2031)
+- W 반등 reason 노출 (14차): NASDAQ_W_BOTTOM / KOSPI_W_BOTTOM
+- 노션 정합 (12차): FNG_TIER / WRESBAL_ABSOLUTE_LEVEL / RRP_ABSOLUTE_LEVEL
+- 노션 대시보드 tier (14차 UI 전용): WALCL_TIER / TGA_TIER / MMF_TIER / SOFR_IORB_TIER / M2SL_LEVEL_TIER / DXY_TIER
+- 노션 대시보드 tier (14차 regime 통합): **DGS10_TIER / UNRATE_TIER** (각 가중치 0.5)
+- 13F (12차): INSTITUTIONAL_NASDAQ_{EXPOSURE_PCT, FLOW} / SECTOR_{TECH, FIN, ENERGY}_FLOW
+- 동적 계수 (13차): FX_FOREIGN_BETA (최근 1년 rolling 회귀)
 
 ## 13차 NASDAQ 과열 REDUCE 재설계 (옵션 D)
 

@@ -185,6 +185,15 @@
 - **11차**: 영상 원문 재검증 기반 envelope 정합 재조정 + BASE 재선정 (α +35.65%p)
 - **12차**: 영상 누락 derived 10종 추가 + 13F 수집기 Phase 1~3 + signal 통합 확장
 
+### 14차 추가 반영 (2026-04)
+- TAIL_RISK_LEVEL 노션 대시보드 2단계 (soft/hard) 정합 재조정
+- 유동성/경제 건강 tier 8종 신규 — 6종 UI 전용, 2종 (DGS10/UNRATE) regime 통합
+- Regime 14 → 16 컴포넌트 확장 (dgs10Level + unrateLevel 각 0.5)
+- video5_analysis §1부 "연봉 아래꼬리 <15% 위험" (KOSPI_YEARLY_AREA_INDEX/LEVEL)
+- video3 W 반등 reason 노출 (NASDAQ/KOSPI signal +1)
+- video4 §채권 자경단 + IMF 2031 140% 예측 (FEDERAL_DEBT_GDP_TIER)
+- FRED GFDEGDQ188S 신규 수집
+
 ### 13차 추가 반영 (2026-04)
 - video3 §수렴 5/20/60/120/200 DMA 변동계수 (DMA_CONVERGENCE_LEVEL)
 - video2 §3부 "유가 2~3개월 선행" (WTI_COPPER_LAG_LEVEL)

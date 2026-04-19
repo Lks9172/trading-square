@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## 2026-04-18 (14차 세션)
+
+### 14차 노션 대시보드 정합 9종 (Phase A)
+- **TAIL_RISK_LEVEL 재정합**: SKEW/VVIX/OVX soft(120/110/40) + hard(140/130/60) 2단계 합산 → level 0/1/2
+- **유동성 tier 5종 신규**: WALCL_TIER / TGA_TIER / MMF_TIER / SOFR_IORB_TIER / DGS10_TIER (UI 대시보드 전용)
+- **경제 건강 tier 3종 신규**: UNRATE_TIER / M2SL_LEVEL_TIER / DXY_TIER (UI 대시보드 전용)
+
+### 14차 Phase A — 5차 감사 후속
+- regime 통합 2종 (scoreDGS10Level + scoreUnrateLevel 각 가중치 0.5)
+- 14 → **16 컴포넌트 regime 점수화**
+- 나머지 6종 tier UI 전용 재분류 주석 (중복 지표 회피)
+
+### 14차 Phase B — 영상 정합 3종 신규
+- **KOSPI_YEARLY_AREA_INDEX/LEVEL** (video5_analysis §1부 "연봉 아래꼬리 <15% 위험")
+- **NASDAQ/KOSPI W 반등 reason 노출** (video3 분할매수 3차 타이밍)
+- **FEDERAL_DEBT_GDP_TIER** (video4 §채권 자경단 + IMF 2031 140% 예측)
+  - FRED `GFDEGDQ188S` 신규 수집
+
+### 14차 Signal 통합
+- NASDAQ: W_BOTTOM=1 → met +1 가점
+- KOSPI: W_BOTTOM=1 → met +1 / AREA_INDEX<15% → unmet 경고
+
+### 14차 테스트
+- regime.test.ts PANIC_BUT_OK 경계 케이스에 DGS10/UNRATE override 추가
+- 64/64 통과 유지
+
+---
+
 ## 2026-04-18 (13차 세션)
 
 ### 13차 Critical (N8 / FE3 / 옵션 D)

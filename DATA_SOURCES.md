@@ -58,6 +58,7 @@ MacroSquare가 현재 실제로 사용하는 데이터 소스 명세서.
 | `UNRATE` | 실업률 | 월간 | 고용건강도 |
 | `INDPRO` | 산업생산지수 | 월간 | ISM 프록시 |
 | `M2SL` | 미국 M2 | 월간 | 미국 유동성 / GLOBAL_M2_PROXY (13차 미국 M2 단일화) |
+| `FEDERAL_DEBT_GDP` (`GFDEGDQ188S`) | 연방 부채/GDP | 분기 | 14차: video4 §채권 자경단 + IMF 2031 140% 예측 정합 |
 
 > 13차 (2026-04): 이전 `M3_EURO` (`EA19MABMM301IXOBSAM`) / `M3_JAPAN`
 > (`JPNMABMM301IXOBSAM`) 는 FRED 상 OECD 공급 시리즈가 장기 정체 (960일+
@@ -222,7 +223,22 @@ MacroSquare가 현재 실제로 사용하는 데이터 소스 명세서.
 
 ---
 
-## 9. 12-13차 신규 임계값 (2026-04)
+## 9. 12-14차 신규 임계값 (2026-04)
+
+### 14차 추가 임계
+| 임계 | 값 | 출처 | 용도 |
+|---|---|---|---|
+| TAIL_RISK 노션 2단계 | SKEW 120/140 · VVIX 110/130 · OVX 40/60 (soft/hard) | 노션 | TAIL_RISK_LEVEL 재정합 |
+| WALCL | 8.5T(+2) / 7T(+1) / 6T(0) / <6T(-1) | 노션 | WALCL_TIER (UI 전용) |
+| TGA | 800B(-1 흡수) / 400B(0) / <400B(+1 공급) | 노션 | TGA_TIER (UI 전용) |
+| MMF retail | 2.5T(+1) / 2T(0) / <2T(-1) | 노션 (6T 환산) | MMF_TIER (UI 전용) |
+| SOFR-IORB | ±5bp (±1) | 노션 | SOFR_IORB_TIER (UI 전용) |
+| **DGS10** | 5%(-2) / 4%(-1) / 3%(0) / <3%(+1) | 노션 | **DGS10_TIER (regime 통합)** |
+| **UNRATE** | <4%(+2) / <5%(+1) / <6%(-1) / ≥6%(-2) | 노션 | **UNRATE_TIER (regime 통합)** |
+| M2SL level | 21T(+2) / 20T(+1) / 19T(-1) / <19T(-2) | 노션 | M2SL_LEVEL_TIER (UI 전용) |
+| DXY | 105(-1) / 100(0) / 95(+1) / <95(+2) | 노션 | DXY_TIER (UI 전용) |
+| 연봉 아래꼬리 | <15% (-1 위험) / ≥15% (+1 정상) | video5 §1부 | KOSPI_YEARLY_AREA_LEVEL |
+| 연방 부채/GDP | <100%(+1) / <120%(0) / <140%(-1) / ≥140%(-2) | video4 + IMF 2031 | FEDERAL_DEBT_GDP_TIER |
 
 ### 13차 추가 임계
 | 임계 | 값 | 출처 | 용도 |

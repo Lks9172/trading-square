@@ -958,6 +958,24 @@ CONSTRAINTS lo/hi 는 위 envelope 과 호환되도록 조정 — RISK_ON/NEUTRA
 
 ### 6.3.2 12-14차 신규 파생지표 (영상/노션 정합)
 
+**14차 Phase A/B 추가 (2026-04)**:
+
+| derived | 근거 | 역할 |
+|---|---|---|
+| TAIL_RISK_LEVEL (재정합) | 노션 SKEW 120/140, VVIX 110/130, OVX 40/60 | soft(1점)/hard(2점) 합산 → level 0/1/2 |
+| WALCL_TIER / TGA_TIER / MMF_TIER / SOFR_IORB_TIER / M2SL_LEVEL_TIER / DXY_TIER | 노션 대시보드 | **UI 전용** (기존 지표 중복 회피) |
+| **DGS10_TIER** (regime 통합) | 노션 5/4/3% + video4 장기금리 | regime 컴포넌트 (가중치 0.5) |
+| **UNRATE_TIER** (regime 통합) | 노션 4/5/6% + video3 실업률 | regime 컴포넌트 (가중치 0.5) |
+| KOSPI_YEARLY_AREA_INDEX/LEVEL | video5_analysis §1부 "아래꼬리 <15% 위험" | 연봉 누적 매수 포지션 소화 여부 |
+| W 반등 reason 노출 | video3 분할매수 3차 | NASDAQ/KOSPI signal met +1 |
+| FEDERAL_DEBT_GDP_TIER | video4 §채권 자경단 + IMF 2031 140% | FRED GFDEGDQ188S 기반 4단계 |
+
+Regime 14 → **16 컴포넌트** 확장:
+- 신규: dgs10Level (0.5) + unrateLevel (0.5)
+- 총 가중치 합: 13.7 (정규화 기준)
+
+
+
 **12차 영상 정합 신규 (10종)**
 
 | derived | 영상 근거 | 매핑 값 |
