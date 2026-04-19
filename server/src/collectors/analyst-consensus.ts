@@ -36,19 +36,60 @@ function scoreFromTrend(t: Trend): number {
   return weighted / total;
 }
 
+// Yahoo Finance crumb + cookie 인증 (2024+ 필수)
+let cachedCrumb: { crumb: string; cookie: string; at: number } | null = null;
+const CRUMB_TTL_MS = 60 * 60 * 1000; // 1시간
+
+async function getCrumb(): Promise<{ crumb: string; cookie: string } | null> {
+  if (cachedCrumb && Date.now() - cachedCrumb.at < CRUMB_TTL_MS) {
+    return { crumb: cachedCrumb.crumb, cookie: cachedCrumb.cookie };
+  }
+  try {
+    // 1) cookie 획득
+    const step1 = await axios.get('https://fc.yahoo.com', {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 10000,
+      validateStatus: () => true,
+      maxRedirects: 5,
+    });
+    const setCookie = step1.headers['set-cookie'];
+    const cookie = Array.isArray(setCookie) ? setCookie.map((c) => c.split(';')[0]).join('; ') : '';
+    if (!cookie) return null;
+    // 2) crumb 획득
+    const step2 = await axios.get('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+      headers: { 'User-Agent': 'Mozilla/5.0', Cookie: cookie },
+      timeout: 10000,
+    });
+    const crumb = typeof step2.data === 'string' ? step2.data.trim() : '';
+    if (!crumb) return null;
+    cachedCrumb = { crumb, cookie, at: Date.now() };
+    return { crumb, cookie };
+  } catch (err) {
+    log.warn({ error: serializeError(err) }, 'crumb acquire failed');
+    return null;
+  }
+}
+
 async function fetchOneTicker(ticker: string): Promise<{ ticker: string; score: number } | null> {
   try {
-    const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=recommendationTrend`;
+    const auth = await getCrumb();
+    if (!auth) return null;
+    const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=recommendationTrend&crumb=${encodeURIComponent(auth.crumb)}`;
     const { data } = await axios.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        Accept: 'application/json',
+        Cookie: auth.cookie,
+      },
       timeout: 10000,
     });
     const trends: Trend[] = data?.quoteSummary?.result?.[0]?.recommendationTrend?.trend || [];
     if (trends.length === 0) return null;
-    // 가장 최근 period (period: '0m' / '-1m' / '-2m' / '-3m') 우선
     const current = trends.find((t) => t.period === '0m') || trends[0];
     return { ticker, score: scoreFromTrend(current) };
-  } catch (error) {
+  } catch (error: any) {
+    // 401 반복 시 crumb 무효화 → 다음 호출에서 재취득
+    if (error?.response?.status === 401) cachedCrumb = null;
     log.warn({ ticker, error: serializeError(error) }, 'analyst fetch failed');
     return null;
   }
