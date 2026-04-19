@@ -277,6 +277,29 @@ export async function sendStartupSnapshot(signals: AssetSignal[], regime: Regime
   return false;
 }
 
+// 17차 Phase 2 D1: Weekly report Telegram 전송
+export async function sendWeeklyReportText(text: string): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return false;
+  // Telegram message limit = 4096 chars. 넘치면 분할.
+  const MAX = 3800;
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += MAX) chunks.push(text.slice(i, i + MAX));
+  try {
+    for (const chunk of chunks) {
+      await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+        chat_id: chatId,
+        text: chunk,
+      }, { timeout: 10000, httpsAgent: ipv4Agent });
+    }
+    return true;
+  } catch (err: any) {
+    console.error('Weekly report telegram failed:', err?.message || err?.code);
+    return false;
+  }
+}
+
 export async function sendTestMessage() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;

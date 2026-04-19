@@ -308,9 +308,15 @@ export async function getSnapshot(profile: UserProfile, force = false) {
     return existing;
   }
 
+  const prevSnapshot = cachedSnapshot;
   const pending = buildSnapshot(profile)
     .then((snapshot) => {
       writeCache(snapshot);
+      // 17차 Phase 2 E2: regime/signal 변화 자동 trade log 기록
+      // 비동기 로깅 — 실패해도 snapshot 반환에는 영향 없음.
+      import('../services/weekly-report')
+        .then(({ autoLogSnapshotDelta }) => autoLogSnapshotDelta(prevSnapshot, snapshot))
+        .catch(() => {/* swallow */});
       return snapshot;
     })
     .finally(() => {
