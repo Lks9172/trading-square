@@ -220,8 +220,11 @@ function nasdaqSignal(
   }
 
   const cross = dv(derived, 'NASDAQ_CROSS');
-  if (cross === -1) { reasons.push('데드크로스 발생 → 역발상 분할매수 구간 (보조조건)'); }
-  else if (cross === 1) { unmetReasons.push('골든크로스 발생 → 추격매수 주의 (보조조건)'); }
+  if (cross === -1) {
+    reasons.push('✓ 데드크로스 발생 → video3 §역발상 "공포 극점 = 분할매수 시작 구간" (보조조건 +1)');
+    met += 1;
+  }
+  else if (cross === 1) { unmetReasons.push('⚠️ 골든크로스 발생 → video3 §역발상 "이미 20-30% 오른 후 늦은 신호, 추격매수 주의" (보조조건)'); }
   else if (cross === -0.5) { reasons.push('역배열 유지 (50DMA < 200DMA, 보조조건)'); }
 
   const chaseNasdaq = dv(derived, 'CHASE_NASDAQ');

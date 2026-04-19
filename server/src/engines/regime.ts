@@ -202,16 +202,26 @@ export function classifyRegime(
     })(),
     smartMoney: clamp(smartMoneyScore ?? 0, -2, 2),
     sectorMomentum: (() => {
-      const xlk = dv(derived, 'SECTOR_XLK');
-      const xli = dv(derived, 'SECTOR_XLI');
-      const xlv = dv(derived, 'SECTOR_XLV');
-      const xle = dv(derived, 'SECTOR_XLE');
+      // 15차 Phase 2-G (2026-04): 10 섹터로 확장. 공격적 섹터 (성장 우호 시 +1),
+      // 방어 섹터 (성장 우호 시 -0.5, 방어 활성화 시 +0.5), 중립 0.
+      const get = (k: string) => dv(derived, `SECTOR_${k}`);
+      const xlk = get('XLK'); const xli = get('XLI'); const xly = get('XLY');
+      const xlc = get('XLC'); const xlb = get('XLB'); const xlf = get('XLF');
+      const xlv = get('XLV'); const xle = get('XLE'); const xlre = get('XLRE'); const xlu = get('XLU');
       let score = 0;
       let count = 0;
+      // 공격적 (+1 / -1) — 성장 우호 = 위험자산 강세
       if (xlk !== null) { score += xlk > 0 ? 1 : -1; count++; }
       if (xli !== null) { score += xli > 0 ? 1 : -1; count++; }
+      if (xly !== null) { score += xly > 0 ? 1 : -1; count++; }
+      if (xlc !== null) { score += xlc > 0 ? 1 : -1; count++; }
+      if (xlb !== null) { score += xlb > 0 ? 0.5 : -0.5; count++; }
+      if (xlf !== null) { score += xlf > 0 ? 0.5 : -0.5; count++; }
+      // 방어/역상관 (성장 우호 시 -0.5, 방어 강세 = 위험 신호)
       if (xlv !== null) { score += xlv > 0 ? -0.5 : 0.5; count++; }
       if (xle !== null) { score += xle > 0 ? -0.25 : 0.25; count++; }
+      if (xlu !== null) { score += xlu > 0 ? -0.5 : 0.5; count++; }
+      if (xlre !== null) { score += xlre > 0 ? 0.25 : -0.25; count++; }
       if (count === 0) return 0;
       const avg = score / count;
       if (avg >= 0.75) return 2;

@@ -767,7 +767,12 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
-  const sectorEtfs: Array<[string, string]> = [['XLK','기술'],['XLF','금융'],['XLE','에너지'],['XLV','헬스케어'],['XLI','산업재'],['XLY','임의소비재'],['SOXX','반도체(광역)'],['SMH','반도체(대형주)']];
+  // 15차 Phase 2-G (2026-04): 섹터 4종 추가 — XLC 통신 / XLB 소재 / XLRE 부동산 / XLU 유틸리티.
+  const sectorEtfs: Array<[string, string]> = [
+    ['XLK','기술'],['XLF','금융'],['XLE','에너지'],['XLV','헬스케어'],['XLI','산업재'],['XLY','임의소비재'],
+    ['XLC','통신'],['XLB','소재'],['XLRE','부동산'],['XLU','유틸리티'],
+    ['SOXX','반도체(광역)'],['SMH','반도체(대형주)'],
+  ];
   try {
     // 2026-04 로그 관측성 개선: derived 7s 병목 세분화 — 섹터/MTF/yearly 각각 child span.
     await withSpan('macrosquare.engine.derived.sector', async (span) => {
@@ -2789,6 +2794,195 @@ export async function computeDerived(
         value: level,
         date: today(),
         formula: `DXY ${dxy.toFixed(2)} → ${label}. 노션 105/100/95 기준.`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // === 15차 Phase 1-A GOLDILOCKS_ZONE (2026-04, video4 §매크로) ===
+  // video4 [8:22-8:38]: "고용, CPI, PCE, ISM — 너무 뜨겁지도 차갑지도 않은 골디락스"
+  //
+  // CPI_YOY / PCE_YOY / ISM_PROXY / UNRATE 4축 합산 → zone 결정:
+  //   각 축 점수 -2 ~ +2 (2=이상적 / 0=중립 / -2=위기)
+  //   total >= 4  → +2 Hot Goldilocks (과열 살짝)
+  //   total >= 1  → +1 Normal Goldilocks (이상적)
+  //   total >= -2 → 0  Mixed
+  //   else       → -1 Stagflation / Recession 진입
+  try {
+    const readYoYPct = async (key: string): Promise<number | null> => {
+      const hist = await readHistory('fred', key);
+      return computeHistoryYoY(hist, 0, 400);
+    };
+    const cpiYoy = await readYoYPct('CPI_YOY');
+    const pceYoy = await readYoYPct('PCE_YOY');
+    const ism = d.ISM_PROXY?.value ?? null;
+    const ur = raw.UNRATE?.value ?? null;
+
+    // 각 축 점수 함수 (Fed 2% 타겟 기준)
+    //   CPI/PCE: 1.5~2.5% → +2 / 2.5~3.5% → +1 / <1 or >4 → -1 / <0 or >5 → -2
+    //   ISM: 50~55 → +2 / 48~50 or 55~60 → +1 / <45 or >62 → -1 / <42 or >65 → -2
+    //   UNRATE: <4 → +2 / <5 → +1 / <6 → 0 / <7 → -1 / ≥7 → -2
+    const scorePricing = (v: number | null): number => {
+      if (v === null) return 0;
+      if (v >= 1.5 && v <= 2.5) return 2;
+      if (v >= 1.0 && v <= 3.5) return 1;
+      if (v < 0 || v > 5) return -2;
+      return -1;
+    };
+    const scoreISM = (v: number | null): number => {
+      if (v === null) return 0;
+      if (v >= 50 && v <= 55) return 2;
+      if (v >= 48 && v <= 60) return 1;
+      if (v < 42 || v > 65) return -2;
+      return -1;
+    };
+    const scoreUr = (v: number | null): number => {
+      if (v === null) return 0;
+      if (v < 4) return 2;
+      if (v < 5) return 1;
+      if (v < 6) return 0;
+      if (v < 7) return -1;
+      return -2;
+    };
+
+    const cpiPt = scorePricing(cpiYoy);
+    const pcePt = scorePricing(pceYoy);
+    const ismPt = scoreISM(ism);
+    const urPt = scoreUr(ur);
+    const total = cpiPt + pcePt + ismPt + urPt;
+    let zone: number;
+    let label: string;
+    if (total >= 4) { zone = 2; label = 'Hot Goldilocks (약간 과열)'; }
+    else if (total >= 1) { zone = 1; label = 'Normal Goldilocks (이상적)'; }
+    else if (total >= -2) { zone = 0; label = 'Mixed'; }
+    else { zone = -1; label = 'Stagflation/Recession 진입'; }
+
+    d.GOLDILOCKS_ZONE = {
+      name: 'goldilocks_zone',
+      value: zone,
+      date: today(),
+      formula:
+        `CPI ${cpiYoy?.toFixed(2) ?? 'n/a'}%[${cpiPt}] + PCE ${pceYoy?.toFixed(2) ?? 'n/a'}%[${pcePt}] + ` +
+        `ISM ${ism?.toFixed(1) ?? 'n/a'}[${ismPt}] + UNRATE ${ur?.toFixed(1) ?? 'n/a'}%[${urPt}] ` +
+        `= ${total}/8 → ${label}. video4 [8:22-8:38] 정합.`,
+    };
+
+    if (cpiYoy !== null) {
+      d.CPI_YOY = { name: 'cpi_yoy', value: parseFloat(cpiYoy.toFixed(2)), date: today(), formula: 'CPI 최신월 YoY%. Fed 2% 타겟 기준.' };
+    }
+    if (pceYoy !== null) {
+      d.PCE_YOY = { name: 'pce_yoy', value: parseFloat(pceYoy.toFixed(2)), date: today(), formula: 'PCE 최신월 YoY%. Fed 선호 인플레 지표.' };
+    }
+  } catch {
+    /* skip */
+  }
+
+  // === 15차 Phase 1-B FEDERAL_DEFICIT_GDP_TIER (2026-04, video4 §채권 자경단) ===
+  // video4 [10:11]: "연간 재정 적자가 GDP의 5.8%" — 스톡 부채 외 플로우 속도 추적
+  //   <3% → +1 건전
+  //   <5% → 0 보통
+  //   <7% → -1 경계
+  //   ≥7% → -2 위기 (채권 자경단 발동 임박)
+  try {
+    const def = raw.FEDERAL_DEFICIT_GDP?.value ?? null;
+    // FYFSGDA188S 는 적자일 때 음수 값. 크기는 abs 사용.
+    if (def !== null) {
+      const absPct = Math.abs(def);
+      let level: number;
+      let label: string;
+      if (absPct < 3) { level = 1; label = '건전(<3% GDP)'; }
+      else if (absPct < 5) { level = 0; label = '보통(3-5%)'; }
+      else if (absPct < 7) { level = -1; label = '경계(5-7%, 2026 수준)'; }
+      else { level = -2; label = '위기(≥7%, 채권 자경단 임박)'; }
+      d.FEDERAL_DEFICIT_GDP_TIER = {
+        name: 'federal_deficit_gdp_tier',
+        value: level,
+        date: today(),
+        formula: `연간 재정적자/GDP ${absPct.toFixed(2)}% → ${label}. video4 [10:11] "5.8% 적자" 정합.`,
+      };
+    }
+  } catch {
+    /* skip */
+  }
+
+  // === 15차 Phase 2-H WTI_CPI_LAG_RISK (video5 "유가 2-3개월 뒤 CPI 지연") ===
+  // video5: "유가 하락도 공급망 충격은 2~3개월 뒤 CPI 로 지연 반영"
+  //   WTI t-90~t-60 평균 vs WTI 현재 평균 변화율.
+  //   >+20% → -2 (과거 유가 급등 → 앞으로 CPI 상승 위험)
+  //   >+10% → -1
+  //   ±10% → 0
+  //   <-10% → +1 (과거 유가 하락 → 앞으로 CPI 완화)
+  try {
+    const wtiHistLag = await fetchYahooHistory('CL=F', 120);
+    if (wtiHistLag.length >= 91) {
+      const oldSlice = wtiHistLag.slice(-90, -60).map((h) => h.close).filter((v) => v > 0);
+      const recentSlice = wtiHistLag.slice(-30).map((h) => h.close).filter((v) => v > 0);
+      if (oldSlice.length >= 20 && recentSlice.length >= 20) {
+        const oldAvg = oldSlice.reduce((s, v) => s + v, 0) / oldSlice.length;
+        const recentAvg = recentSlice.reduce((s, v) => s + v, 0) / recentSlice.length;
+        const changePct = oldAvg > 0 ? ((recentAvg - oldAvg) / oldAvg) * 100 : 0;
+        let level: number;
+        let label: string;
+        if (changePct > 20) { level = -2; label = '고위험(과거 급등 +20%)'; }
+        else if (changePct > 10) { level = -1; label = '경계(과거 +10%)'; }
+        else if (changePct > -10) { level = 0; label = '중립'; }
+        else { level = 1; label = '완화(과거 -10%)'; }
+        d.WTI_CPI_LAG_RISK = {
+          name: 'wti_cpi_lag_risk',
+          value: level,
+          date: today(),
+          formula:
+            `WTI t-90~t-60 평균 $${oldAvg.toFixed(1)} → 최근30D $${recentAvg.toFixed(1)} (${changePct > 0 ? '+' : ''}${changePct.toFixed(1)}%). ` +
+            `${label}. video5 "유가 → CPI 2-3개월 지연".`,
+        };
+      }
+    }
+  } catch {
+    /* skip */
+  }
+
+  // === 15차 Phase 2-C STABLECOIN_TBILL_DEMAND (video4 §달러 패권) ===
+  // video4 [5:59]: "스테이블 코인으로 채권 수요까지 만들었어요"
+  // STABLECOIN_MCAP (billions USD) 은 USDT/USDC 발행액 = T-Bill 수요 프록시.
+  // 레벨:
+  //   ≥300B → +2 (강한 채권 수요 기여, 금리 하방)
+  //   ≥200B → +1
+  //   ≥150B → 0
+  //   ≥100B → -1
+  //   <100B → -2
+  try {
+    const stbl = raw.STABLECOIN_MCAP?.value ?? null;
+    if (stbl !== null) {
+      let level: number;
+      let label: string;
+      if (stbl >= 300) { level = 2; label = '강한 채권 수요(≥300B)'; }
+      else if (stbl >= 200) { level = 1; label = '양호(200-300B)'; }
+      else if (stbl >= 150) { level = 0; label = '보통(150-200B)'; }
+      else if (stbl >= 100) { level = -1; label = '감소(100-150B)'; }
+      else { level = -2; label = '약화(<100B)'; }
+      d.STABLECOIN_TBILL_DEMAND = {
+        name: 'stablecoin_tbill_demand',
+        value: level,
+        date: today(),
+        formula:
+          `스테이블코인 총 발행 ${stbl.toFixed(1)}B USD → ${label}. ` +
+          `video4 [5:59] "스테이블 코인으로 채권 수요까지 만들었어요".`,
+      };
+    }
+  } catch {
+    /* skip */
+  }
+
+  // === 15차 Phase 3-F CASH_YIELD (UI 전용, video1 §파킹 통장/CMA) ===
+  // video1 [7:00]: "파킹 통장, 단기채 ETF, CMA 활용하면 조금의 이자라도"
+  // SOFR (=단기 금리 근사) 를 현금 보유 중 기대 yield 로 UI 에 라벨화.
+  try {
+    const sofr = raw.SOFR?.value ?? null;
+    if (sofr !== null) {
+      d.CASH_YIELD_ANNUAL = {
+        name: 'cash_yield_annual',
+        value: parseFloat(sofr.toFixed(2)),
+        date: today(),
+        formula: `SOFR ${sofr.toFixed(2)}% — 현금/파킹 통장/단기채 ETF 보유 시 기대 연 수익률. video1 §파킹 통장.`,
       };
     }
   } catch { /* skip */ }
