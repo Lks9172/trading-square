@@ -3426,6 +3426,106 @@ export async function computeDerived(
     }
   } catch { /* skip */ }
 
+  // === 16차 Phase 2 C1: ANALYST_CONSENSUS + RESEARCH_13F_DIVERGENCE ===
+  // video4 §기관 "말 (애널리스트 추천) vs 돈 (13F 포지션)" 괴리 감지.
+  try {
+    const { fetchAnalystConsensus } = await import('../collectors/analyst-consensus');
+    const analyst = await fetchAnalystConsensus();
+    if (analyst) {
+      d.ANALYST_CONSENSUS_NASDAQ_MEGACAP = {
+        name: 'analyst_consensus_nasdaq_megacap',
+        value: parseFloat(analyst.avgScore.toFixed(3)),
+        date: today(),
+        formula:
+          `메가캡 ${analyst.tickerCount}종 애널리스트 평균 rating (${analyst.avgScore.toFixed(3)}, -2~+2 scale). ` +
+          `종목별: ${JSON.stringify(analyst.perTicker)}. video4 §기관 "말" 측정.`,
+      };
+      // 13F flow 와 비교 (돈)
+      const instFlow = d.INSTITUTIONAL_NASDAQ_FLOW?.value ?? null;
+      if (instFlow !== null) {
+        // analyst.avgScore 는 -2~+2 (연속), instFlow 는 -2~+2 (정수 tier)
+        // divergence = analyst - instFlow (양수 = 애널리스트 긍정인데 기관 매도 = "말과 돈 괴리")
+        const divergence = analyst.avgScore - instFlow;
+        let level: number;
+        let label: string;
+        if (divergence > 2) { level = -2; label = '강한 괴리 (애널↑, 기관↓↓) — 위험'; }
+        else if (divergence > 1) { level = -1; label = '괴리 경계 (애널↑, 기관↓)'; }
+        else if (divergence < -2) { level = 2; label = '강한 동조 (애널↓, 기관↑) — 매수 기회'; }
+        else if (divergence < -1) { level = 1; label = '동조 (애널↓, 기관↑)'; }
+        else { level = 0; label = '정합 (말과 돈 일치)'; }
+        d.RESEARCH_13F_DIVERGENCE = {
+          name: 'research_13f_divergence',
+          value: parseFloat(divergence.toFixed(3)),
+          date: today(),
+          formula:
+            `애널리스트 ${analyst.avgScore.toFixed(2)} − 기관 FLOW ${instFlow} = ${divergence.toFixed(2)}. ` +
+            `${label} (level ${level}). video4 §기관 "말과 돈 괴리".`,
+        };
+      }
+    }
+  } catch { /* skip */ }
+
+  // === 16차 Phase 2 C3: 경제 이벤트 D-Day (FOMC + CPI) ===
+  // FOMC: 2026년 기본 일정 (실제는 Fed 공식 발표 기준 하드코딩).
+  //   1/28, 3/18, 4/29, 6/10, 7/29, 9/16, 10/28, 12/16 (8회, 연준 표준)
+  // CPI: 매월 10-15일 경 발표. 2026년 4월은 4/10 발표 가정.
+  try {
+    const now = new Date();
+    const upcomingFomc = [
+      '2026-04-29', '2026-06-10', '2026-07-29', '2026-09-16', '2026-10-28', '2026-12-16',
+    ].map((s) => new Date(s + 'T19:00:00Z')); // FOMC 18:00 EST ≈ 22:00 UTC 발표
+    const nextFomc = upcomingFomc.find((d) => d.getTime() > now.getTime());
+    if (nextFomc) {
+      const dday = Math.ceil((nextFomc.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      let level: number;
+      let label: string;
+      if (dday <= 3) { level = 2; label = `⚠️ FOMC 임박 D-${dday} — 변동성 증가, 신규 진입 보수`; }
+      else if (dday <= 7) { level = 1; label = `FOMC D-${dday} — 일주일 내 정책 결정`; }
+      else { level = 0; label = `FOMC D-${dday}`; }
+      d.FOMC_DDAY = {
+        name: 'fomc_dday',
+        value: dday,
+        date: today(),
+        formula: `다음 FOMC ${nextFomc.toISOString().slice(0,10)} → ${label}. video4 §FOMC 발언 중요도.`,
+      };
+    }
+
+    // CPI D-Day (월중 발표일 근사: 매월 둘째 주 화요일)
+    const curMonth = now.getUTCMonth();
+    const curYear = now.getUTCFullYear();
+    const findSecondTuesday = (y: number, m: number) => {
+      const d = new Date(Date.UTC(y, m, 1));
+      let tueCount = 0;
+      for (let day = 1; day <= 31; day++) {
+        const dt = new Date(Date.UTC(y, m, day));
+        if (dt.getUTCMonth() !== m) break;
+        if (dt.getUTCDay() === 2) { // 화요일
+          tueCount++;
+          if (tueCount === 2) return dt;
+        }
+      }
+      return null;
+    };
+    const thisMonthCpi = findSecondTuesday(curYear, curMonth);
+    const nextMonthCpi = findSecondTuesday(curYear, curMonth + 1);
+    const nextCpi = thisMonthCpi && thisMonthCpi.getTime() > now.getTime() ? thisMonthCpi : nextMonthCpi;
+    if (nextCpi) {
+      const dday = Math.ceil((nextCpi.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      d.CPI_DDAY = {
+        name: 'cpi_dday',
+        value: dday,
+        date: today(),
+        formula: `다음 CPI 발표 ${nextCpi.toISOString().slice(0,10)} (D-${dday}). 월중 둘째 화요일 근사.`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // === 16차 Phase 3 E1: NASDAQ_OBV_TREND ===
+  // On-Balance Volume 20D 추세 — 가격 올라가는데 OBV 약세 = 약한 상승.
+  // fetchYahooHistory 가 close 만 반환하므로 여기서는 근사 없음 → 관측 skip.
+  // TODO: OHLCV fetch 확장 시 재활성화.
+  // (derived 키 자체 생성 안함 — placeholder)
+
   // === Phase 3 B1: BITCOIN 지표 (수집만, allocation 제외) ===
   // 사용자 지침: "비트코인 지표는 사용하되 포트폴리오 비율에는 포함하지 말 것"
   // BTC-USD 수집 + 위험선호 proxy 로만 활용 (NASDAQ 과열 플래그 등).

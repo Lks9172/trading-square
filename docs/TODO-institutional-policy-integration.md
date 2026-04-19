@@ -139,3 +139,26 @@ RESEARCH_CONSENSUS_DIVERGENCE (value: -2 ~ +2)
 ### 테스트 전략
 - 2022-12 (추천 다수 BUY 인데 헤지펀드 12월 tech 대거 처분) 역사 데이터로 divergence=+2 재현되는지
 - 2023-06 (ChatGPT 붐 후 추천 갑자기 상향 + 기관 추종) divergence=0 재현
+
+---
+
+## 🆕 16차 Phase 3 추가 TODO (2026-04)
+
+### C2. 8-K / DART 중대 이벤트 수집 (장기)
+원문 notion: "8-K(미국) / 전자공시(한국): 기업의 중대 이벤트"
+- 범위: 합병/인수/CEO 교체/소송/리스트럭처링 등 종목별 이벤트
+- 난도: 🔴 높음 (SEC EDGAR 8-K XBRL 파싱 + 이벤트 분류 NLP)
+- 대체: 기존 earnings.ts 가 실적 발표 일정 커버. 8-K 는 종목 수준이라 포트폴리오
+  레짐 판단 영향 제한적 — **장기 로드맵**.
+
+### E1. OBV / VWAP (경미)
+- video2/3: 거래량 확인 강조
+- 현재: KOSPI_VOLUME_CONFIRM 있음. NASDAQ OBV 부재
+- 난도: 🟡 중 (fetchYahooHistory 를 OHLCV 확장 필요)
+- 대체: SECTOR 20D return + STRONGEST 로 모멘텀 반영 중
+
+### Phase 2 A2. horizon 기반 signal 가중 (중간 공수)
+- video1 §5부 "시계열 먼저 정해야"
+- 현재: allocation HORIZON_SHIFT 만 존재 (cash/nasdaq/gold ±5/3/2)
+- 확장 여지: signal 레벨 (예: short 투자자는 RSI 가중↑, long 은 월봉 아웃사이드 가중↑)
+- 미구현 이유: 구조 복잡도 높음, 현재 해설(interpretation) 레이어로 UX 일부 대체
