@@ -1,5 +1,6 @@
 import { collectAll } from '../collectors';
 import { computeDerived } from '../engines/derived';
+import { attachInterpretations } from '../services/interpretations';
 import { classifyRegime } from '../engines/regime';
 import { computeSignals } from '../engines/signals';
 import { computeAllocation } from '../engines/allocation';
@@ -162,6 +163,14 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
     s.setAttribute('regime.score', r.score);
     return Promise.resolve(r);
   });
+  // 16차 Phase 1 B1 (2026-04): 지표별 자동 해설 레이어 — 노션 "now-panel" 정합.
+  //   regime 결정 직후, signal/allocation 이전에 derived 엔트리에 interpretation 필드 첨가.
+  //   UI/텔레그램이 숫자와 함께 한 문장 해석을 바로 소비 가능.
+  attachInterpretations(
+    derived as unknown as Record<string, { value: number | null | undefined }>,
+    { regime: regime.regime, nasdaqDisparity: derived.NASDAQ_DISPARITY?.value ?? null, kospiDisparity: derived.KOSPI_DISPARITY?.value ?? null },
+  );
+
   const signals = await withSpan('macrosquare.engine.signals', (s) => {
     const r = computeSignals(raw, derived, regime, effectiveProfile);
     s.setAttribute('signals.count', r.length);
