@@ -57,6 +57,26 @@ function scoreHYSpread(hy: number | null): number {
   return 2;
 }
 
+// 14차 Phase A (2026-04): DGS10_TIER / UNRATE_TIER 의 regime 통합.
+//   - DGS10: 노션 "5%/4%/3%" 장기금리 부담 정도 (기존 regime 에 독립 score 없었음)
+//   - UNRATE: 실업률 4%/5%/6% (기존 scoreJoblessClaims 는 ICSA 주간 기반, UNRATE 월간은 독립)
+// 둘 다 가중치 0.5 (policy/geoRisk 와 동등, 보조 시그널 레벨)
+function scoreDGS10Level(dgs10: number | null): number {
+  if (dgs10 === null) return 0;
+  if (dgs10 >= 5) return -2; // 경계
+  if (dgs10 >= 4) return -1; // 부담
+  if (dgs10 >= 3) return 0;  // 중립
+  return 1;                   // 저금리 (위험자산 우호)
+}
+
+function scoreUnrateLevel(unrate: number | null): number {
+  if (unrate === null) return 0;
+  if (unrate < 4) return 2;   // 완전 고용
+  if (unrate < 5) return 1;   // 양호
+  if (unrate < 6) return -1;  // 주의
+  return -2;                   // 침체 우려
+}
+
 function scoreJoblessClaims(icsa: number | null): number {
   if (icsa === null) return 0;
   if (icsa > 350000) return -2;
@@ -150,6 +170,9 @@ const WEIGHTS: Record<string, number> = {
   sectorMomentum: 0.8,
   policy: 0.5,
   geoRisk: 0.5,
+  // 14차 Phase A (노션 정합): DGS10 장기금리 레벨 / UNRATE 실업률 절대 레벨
+  dgs10Level: 0.5,
+  unrateLevel: 0.5,
 };
 
 export function classifyRegime(
@@ -199,6 +222,9 @@ export function classifyRegime(
     })(),
     policy: clamp(manualInputs?.policyDirection ?? 0, -2, 2),
     geoRisk: clamp(2 - (manualInputs?.geoRisk ?? 2), -2, 2),
+    // 14차 Phase A: DGS10 / UNRATE 절대 레벨 통합
+    dgs10Level: scoreDGS10Level(v(raw, 'DGS10')),
+    unrateLevel: scoreUnrateLevel(v(raw, 'UNRATE')),
   };
 
   let weightedSum = 0;

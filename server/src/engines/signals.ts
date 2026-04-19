@@ -231,6 +231,13 @@ function nasdaqSignal(
   if (xlk !== null && xlk > 0) { reasons.push(`XLK 기술섹터 +${xlk.toFixed(1)}% → 성장주 랠리 질 양호 (보조조건)`); }
   else if (xlk !== null && xlk < 0) { unmetReasons.push(`XLK 기술섹터 ${xlk.toFixed(1)}% → 성장주 주도력 약함 (보조조건)`); }
 
+  // 14차 Phase B-2: W 반등 (video3 "W자 반등 저점 확인 후 진입")
+  const wBottom = dv(derived, 'NASDAQ_W_BOTTOM');
+  if (wBottom === 1) {
+    reasons.push('✓ NASDAQ_W_BOTTOM 감지 — 이중 저점 확인 후 반등 구조 (video3 분할매수 3차 타이밍)');
+    met += 1;
+  }
+
   // 13차 N8: DMA 수렴 (video3 §수렴 "폭발 직전")
   const dmaConv = dv(derived, 'DMA_CONVERGENCE_LEVEL');
   if (dmaConv !== null) {
@@ -1060,6 +1067,19 @@ function kospiSignal(
     const overrideReason = '추세전환 3조건 전부 미충족 → HOLD 상한 (보조조건)';
     overrides.push(overrideReason);
     reasons.push(overrideReason);
+  }
+
+  // 14차 Phase B-2: KOSPI W 반등 + 연봉 아래꼬리 지수 reason 노출
+  const kWBottom = dv(derived, 'KOSPI_W_BOTTOM');
+  if (kWBottom === 1) {
+    reasons.push('✓ KOSPI_W_BOTTOM 감지 — 이중 저점 확인 (video3 분할매수 3차)');
+    met += 1;
+  }
+  const kAreaLevel = dv(derived, 'KOSPI_YEARLY_AREA_LEVEL');
+  if (kAreaLevel === -1) {
+    unmetReasons.push('⚠️ KOSPI_YEARLY_AREA_INDEX <15% — 연봉 아래꼬리 부족, 누적 매수 포지션 미소화 (video5_analysis §1부)');
+  } else if (kAreaLevel === 1) {
+    reasons.push('✓ KOSPI_YEARLY_AREA_INDEX ≥15% — 연봉 한 번 눌림 흡수 (video5_analysis §1부, 보조조건)');
   }
 
   // 11차 신규 (2026-04): 지정학 급변 숏커버링 반등 가드 — stt_kospi §2부 정합.

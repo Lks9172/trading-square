@@ -447,6 +447,40 @@ export async function computeDerived(
       } else {
         d.KOSPI_OVERHEATED = { name: 'kospi_overheated', value: 0, date: dt, formula: '과열 미해당' };
       }
+
+      // === KOSPI_YEARLY_AREA_INDEX (14차 Phase B-1, 2026-04) — video5_analysis §1부 ===
+      // "연봉 아래꼬리 길이 ÷ 전체 높이 (%), <15% 위험 (매수 포지션 미소화)"
+      // closes 기반 근사 (OHLC 없이): body_bottom = min(yearFirst, yearLast)
+      //   아래꼬리 길이 ≈ body_bottom - yearLow, 전체 높이 = yearHigh - yearLow
+      //   +1 정상 (>=15%) / -1 위험 (<15%) / 0 중립 범위 없음 → 2단계.
+      if (closes.length >= 250) {
+        const yearSlice = closes.slice(0, 250); // 최신부터 역순 저장
+        const yearHigh = Math.max(...yearSlice);
+        const yearLow = Math.min(...yearSlice);
+        const yearFirst = yearSlice[yearSlice.length - 1]; // 1년 전 (내림차순 마지막)
+        const yearLast = yearSlice[0]; // 현재
+        const bodyBottom = Math.min(yearFirst, yearLast);
+        const lowerTail = Math.max(0, bodyBottom - yearLow);
+        const fullRange = yearHigh - yearLow;
+        if (fullRange > 0) {
+          const areaIndex = (lowerTail / fullRange) * 100;
+          const level = areaIndex >= 15 ? 1 : -1;
+          d.KOSPI_YEARLY_AREA_INDEX = {
+            name: 'kospi_yearly_area_index',
+            value: parseFloat(areaIndex.toFixed(2)),
+            date: dt,
+            formula:
+              `연봉 아래꼬리 ${lowerTail.toFixed(0)} / 전체 높이 ${fullRange.toFixed(0)} = ${areaIndex.toFixed(1)}%. ` +
+              `${level === 1 ? '정상(≥15%, 매수 포지션 한 번 흡수)' : '위험(<15%, 누적 매수 미소화)'}. video5_analysis §1부.`,
+          };
+          d.KOSPI_YEARLY_AREA_LEVEL = {
+            name: 'kospi_yearly_area_level',
+            value: level,
+            date: dt,
+            formula: `KOSPI_YEARLY_AREA_INDEX ${areaIndex.toFixed(1)}% → level ${level} (+1 정상 / -1 위험).`,
+          };
+        }
+      }
     }
   } catch {
     void 0;
@@ -2595,6 +2629,17 @@ export async function computeDerived(
   }
 
   // === 14차 Phase B-1 유동성 tier 5종 (노션 대시보드 정합) ===
+  // 14차 Phase A 재분류 (5차 감사 후, 2026-04):
+  //   아래 WALCL/TGA/MMF/SOFR_IORB/M2SL_LEVEL/DXY 6종 tier 는 **UI 대시보드 전용**.
+  //   기존 지표와 중복:
+  //     - WALCL_TIER ↔ LIQUIDITY_DIRECTION (WALCL 이미 반영)
+  //     - TGA_TIER ↔ TGA_DIRECTION
+  //     - MMF_TIER ↔ MMF_DIRECTION
+  //     - SOFR_IORB_TIER ↔ SOFR_IORB_SPREAD
+  //     - M2SL_LEVEL_TIER ↔ GLOBAL_M2_PROXY (YoY 기반, 보완적)
+  //     - DXY_TIER ↔ regime.scoreDXYDirection
+  //   signal/regime 통합은 DGS10_TIER + UNRATE_TIER 만 (regime score 컴포넌트 추가).
+  //   나머지 6종은 노션 대시보드 UI 정합을 위한 관측용으로만 노출.
 
   // WALCL_TIER — 연준 총자산 (millions 단위, 노션 8.5T/7T/6T 임계)
   try {
@@ -2744,6 +2789,31 @@ export async function computeDerived(
         value: level,
         date: today(),
         formula: `DXY ${dxy.toFixed(2)} → ${label}. 노션 105/100/95 기준.`,
+      };
+    }
+  } catch { /* skip */ }
+
+  // === 14차 Phase B-3 FEDERAL_DEBT_GDP_TIER (video4 §채권 자경단) ===
+  // video4: "미국 총 부채 38.8조 달러 / IMF 2031 GDP 140% 예측" — 부채 규모 감지.
+  // FRED GFDEGDQ188S (Federal Debt as % of GDP). 분기 발표, ~120%+ 는 역사적 고수준.
+  //   level +1: <100% (완화)
+  //   level  0: 100~120% (주의)
+  //   level -1: 120~140% (경계)
+  //   level -2: ≥140% (IMF 2031 예측 수준 도달)
+  try {
+    const debt = raw.FEDERAL_DEBT_GDP?.value ?? null;
+    if (debt !== null) {
+      let level: number;
+      let label: string;
+      if (debt < 100) { level = 1; label = '완화(<100% GDP)'; }
+      else if (debt < 120) { level = 0; label = '주의(100-120%)'; }
+      else if (debt < 140) { level = -1; label = '경계(120-140%)'; }
+      else { level = -2; label = '위험(≥140%, IMF 2031 예측)'; }
+      d.FEDERAL_DEBT_GDP_TIER = {
+        name: 'federal_debt_gdp_tier',
+        value: level,
+        date: today(),
+        formula: `연방 부채/GDP ${debt.toFixed(1)}% → ${label}. video4 §채권 자경단 + IMF 2031 예측.`,
       };
     }
   } catch { /* skip */ }

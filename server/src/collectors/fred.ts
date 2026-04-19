@@ -37,6 +37,9 @@ const FRED_SERIES: Record<string, string> = {
   EFFR: 'EFFR',
   IORB: 'IORB', // Interest on Reserve Balances — SOFR/IORB 스프레드 계산용
   INDPRO: 'INDPRO',
+  // 14차 Phase B-3 (2026-04): 미국 연방 부채 GDP 비율 — video4 §채권 자경단
+  //   "IMF 2031 미국 부채 GDP 140% 예측" 정합. 부채 규모 감지에 활용.
+  FEDERAL_DEBT_GDP: 'GFDEGDQ188S',
   // 13차 (2026-04): M3_EURO/M3_JAPAN 제거. FRED 상 OECD 공급 시리즈가 장기 정체
   // (960일+ staleness) 로 GLOBAL_M2_PROXY 가 실질적으로 미국 M2 단일 기여였음.
   // 영상 원문(video1/4) "유동성 방향" 논의도 주로 미국 유동성 중심이라 단순화.
@@ -71,6 +74,7 @@ const FRED_SERIES_CADENCE: Record<string, FredCadence> = {
   EFFR: 'daily',
   IORB: 'daily',
   INDPRO: 'monthly',
+  FEDERAL_DEBT_GDP: 'monthly', // 분기 발표 but monthly cadence 로 체크 충분
 };
 
 function ageDaysFromDate(date: string): number {
@@ -101,7 +105,7 @@ function getFredLiveCacheTtlMs(key: string): number {
   if (['WALCL', 'WRESBAL', 'RRPONTSYD', 'WTREGEN', 'WRMFNS', 'WM2NS', 'ICSA', 'STLFSI4'].includes(key)) {
     return 36 * 60 * 60 * 1000;
   }
-  if (['M2SL', 'UNRATE', 'INDPRO'].includes(key)) {
+  if (['M2SL', 'UNRATE', 'INDPRO', 'FEDERAL_DEBT_GDP'].includes(key)) {
     return 7 * 24 * 60 * 60 * 1000;
   }
   return 12 * 60 * 60 * 1000;
