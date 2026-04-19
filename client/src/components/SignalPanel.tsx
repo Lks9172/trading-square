@@ -48,7 +48,16 @@ interface Props {
 export function SignalPanel({ signals }: Props) {
   return (
     <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
-      <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">자산별 신호</h3>
+      <div className="flex items-center justify-between mb-3 sm:mb-4 gap-2 flex-wrap">
+        <h3 className="text-base sm:text-lg font-semibold">자산별 신호</h3>
+        <a
+          href="/plan"
+          className="text-[10px] sm:text-xs text-cyan-400 hover:text-cyan-300 underline decoration-dotted"
+          title="video1 §5부 — 시스템이 있어도 최종 판단은 본인"
+        >
+          🤔 내 기준은? →
+        </a>
+      </div>
       <div className="space-y-3">
         {signals.map((sig) => {
           const config = SIGNAL_CONFIG[sig.signal] || SIGNAL_CONFIG.HOLD;
