@@ -17,7 +17,10 @@ import apiRouter from './routes/api';
 import backtestRouter from './routes/backtest';
 import { DEFAULT_PROFILE, getSnapshot } from './state/cache';
 import { ensureBackfill, refreshComputedHistories, appendDailyData } from './state/history-store';
-import { checkAndNotify, sendStartupSnapshot } from './services/telegram';
+import { checkAndNotify, sendStartupSnapshot, sendWeeklyReportText } from './services/telegram';
+import { buildWeeklyReport, detectRuleViolations, formatWeeklyReportText } from './services/weekly-report';
+import { startTelegramCommandPoller } from './services/telegram-commands';
+import { logger, serializeError } from './services/logger';
 
 dotenv.config();
 
@@ -33,31 +36,37 @@ app.use('/api/backtest', backtestRouter);
 // 그 후에 snapshot → startup telegram. telegram 실패는 내부 5회 재시도로 복구 시도.
 setTimeout(async () => {
   try {
-    console.log('Starting initial snapshot...');
+    logger.info('starting initial snapshot');
     const snapshot = await getSnapshot(DEFAULT_PROFILE, true);
-    console.log('Snapshot ready, sending startup telegram...');
+    logger.info('initial snapshot ready, sending startup telegram');
     const ok = await sendStartupSnapshot(snapshot.signals, snapshot.regime, snapshot.allocation);
-    console.log('Startup telegram result:', ok);
+    logger.info({ ok }, 'startup telegram result');
   } catch (error) {
-    console.error('Initial refresh failed:', error);
+    logger.error({ error: serializeError(error) }, 'initial refresh failed');
   }
 }, 60000);
 
 void ensureBackfill(process.env.FRED_API_KEY || '').catch((error) => {
-  console.error('Initial backfill failed:', error);
+  logger.error({ error: serializeError(error) }, 'initial backfill failed');
 });
 
 void refreshComputedHistories().catch((error) => {
-  console.error('Initial computed history refresh failed:', error);
+  logger.error({ error: serializeError(error) }, 'initial computed history refresh failed');
 });
 
 // Fix #5(2차 감사): 모든 cron 에 timezone 명시. 5분 스냅샷은 TZ 영향 없지만 일관성 위해 동일 옵션 부여.
 cron.schedule('*/5 * * * *', async () => {
   try {
+    logger.info('scheduled snapshot refresh started');
     const snapshot = await getSnapshot(DEFAULT_PROFILE, true);
     await checkAndNotify(snapshot.signals, snapshot.regime, snapshot.allocation);
+    logger.info({
+      regime: snapshot.regime.regime,
+      regimeScore: snapshot.regime.score,
+      signals: snapshot.signals.length,
+    }, 'scheduled snapshot refresh completed');
   } catch (error) {
-    console.error('Scheduled snapshot refresh failed:', error);
+    logger.error({ error: serializeError(error) }, 'scheduled snapshot refresh failed');
   }
 }, { timezone: 'Asia/Seoul' });
 
@@ -68,12 +77,30 @@ cron.schedule('0 7 * * *', async () => {
     const apiKey = process.env.FRED_API_KEY || '';
     await appendDailyData(apiKey);
     await refreshComputedHistories();
-    console.log('Daily history append completed');
+    logger.info('daily history append completed');
   } catch (error) {
-    console.error('Daily history append failed:', error);
+    logger.error({ error: serializeError(error) }, 'daily history append failed');
   }
 }, { timezone: 'Asia/Seoul' });
 
+// 17차 Phase 2 D1: 매주 월요일 KST 08:00 Weekly report Telegram 전송
+cron.schedule('0 8 * * 1', async () => {
+  try {
+    const snapshot = await getSnapshot(DEFAULT_PROFILE, false);
+    const report = buildWeeklyReport(snapshot);
+    report.ruleViolations = await detectRuleViolations(snapshot);
+    const text = formatWeeklyReportText(report);
+    const ok = await sendWeeklyReportText(text);
+    logger.info({ ok, warnings: report.warnings.length, violations: report.ruleViolations.length }, 'weekly report dispatched');
+  } catch (error) {
+    logger.error({ error: serializeError(error) }, 'weekly report dispatch failed');
+  }
+}, { timezone: 'Asia/Seoul' });
+
+// 17차 Phase 3 D2: Telegram /status /signal /plan /weekly 커맨드 poller 기동.
+// 서버 부팅 직후 getUpdates 를 장시간 폴링하지 않도록 초기 startup 이후 지연 시작.
+setTimeout(() => startTelegramCommandPoller(30000), 75000);
+
 app.listen(PORT, () => {
-  console.log(`MacroSquare server running on port ${PORT}`);
+  logger.info({ port: PORT }, 'MacroSquare server running');
 });

@@ -15,6 +15,8 @@ import {
 } from '../services/trancheStore';
 import { DEFAULT_TRANCHE_WEIGHTS } from '../engines/execution_plan';
 import { readInvestmentPlan, writeInvestmentPlan, readRecentTradeLog, appendTradeLog, InvestmentPlan } from '../services/investment-plan';
+import { buildWeeklyReport, detectRuleViolations, formatWeeklyReportText } from '../services/weekly-report';
+import { fetchDomesticReportsLatest } from '../collectors/domestic-reports';
 
 const router = Router();
 
@@ -244,6 +246,34 @@ router.post('/trade-log', async (req: Request, res: Response) => {
   if (!kind) { res.status(400).json({ error: 'kind required' }); return; }
   await appendTradeLog({ kind, asset, from, to, notes, context });
   res.json({ ok: true });
+});
+
+// 17차 Phase 3 B2/B3/B4: 국내 증권사 리서치 최신 발행일
+router.get('/domestic-reports', async (_req: Request, res: Response) => {
+  try {
+    const data = await fetchDomesticReportsLatest();
+    res.json({ data });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+// 17차 Phase 2 D1 + E2: Weekly report + rule violations
+router.get('/weekly-report', async (req: Request, res: Response) => {
+  try {
+    const snapshot = await getSnapshot(DEFAULT_PROFILE);
+    const report = buildWeeklyReport(snapshot);
+    const violations = await detectRuleViolations(snapshot);
+    report.ruleViolations = violations;
+    const format = String(req.query.format || 'json');
+    if (format === 'text') {
+      res.type('text/plain').send(formatWeeklyReportText(report));
+      return;
+    }
+    res.json({ report, text: formatWeeklyReportText(report) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
 });
 
 router.get('/health', (_req: Request, res: Response) => {
