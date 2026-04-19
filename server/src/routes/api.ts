@@ -14,6 +14,7 @@ import {
   TrancheEntry,
 } from '../services/trancheStore';
 import { DEFAULT_TRANCHE_WEIGHTS } from '../engines/execution_plan';
+import { readInvestmentPlan, writeInvestmentPlan, readRecentTradeLog, appendTradeLog, InvestmentPlan } from '../services/investment-plan';
 
 const router = Router();
 
@@ -215,6 +216,34 @@ router.delete('/execution-plan/tranche/:asset', async (req: Request, res: Respon
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Internal server error' });
   }
+});
+
+// 16차 Phase 1 A1 + Phase 2 D1: Investment Plan + Trade Log
+router.get('/plan', async (_req: Request, res: Response) => {
+  const plan = await readInvestmentPlan();
+  res.json({ plan });
+});
+
+router.post('/plan', async (req: Request, res: Response) => {
+  const patch = (req.body || {}) as Partial<InvestmentPlan>;
+  const plan = await writeInvestmentPlan(patch);
+  res.json({ plan });
+});
+
+router.get('/trade-log', async (req: Request, res: Response) => {
+  const limit = parseInt((req.query.limit as string) || '200', 10);
+  const entries = await readRecentTradeLog(Number.isFinite(limit) ? limit : 200);
+  res.json({ entries });
+});
+
+router.post('/trade-log', async (req: Request, res: Response) => {
+  const { kind, asset, from, to, notes, context } = req.body as {
+    kind?: 'signal_change' | 'allocation_change' | 'user_action' | 'observation';
+    asset?: string; from?: string; to?: string; notes?: string; context?: Record<string, unknown>;
+  };
+  if (!kind) { res.status(400).json({ error: 'kind required' }); return; }
+  await appendTradeLog({ kind, asset, from, to, notes, context });
+  res.json({ ok: true });
 });
 
 router.get('/health', (_req: Request, res: Response) => {
