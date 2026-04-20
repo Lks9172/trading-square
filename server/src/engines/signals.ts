@@ -486,6 +486,12 @@ function goldSignal(
   derived: Record<string, DerivedIndicator>,
   profile: UserProfile
 ): AssetSignal {
+  // 18차 P2#8: 금·은·구리 우선순위 주석 (video2 §1부 "우선순위").
+  //   1) 실질금리 하락 (가중치 3.0) — 최상위 전제. video2: "실질금리 깨면 다른 지표 의미 약함".
+  //   2) DXY 약세 (가중치 2.0) — 2순위. 실질금리와 동조 시 강세 시너지.
+  //   3) 중앙은행 구조적 수요 (가중치 1.5) — 3순위 구조적 뒷받침.
+  //   4) 지정학 (보조조건만) — 4순위. video2: "전쟁=금 상승 단순공식은 깨짐" → 가중치 없이 보조.
+  // 총합 가중치 6.5 + seasonal/RSI 보조 ≒ maxScore 8 (+0.5) 로 3순위까지 정렬.
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
   let score = 0;

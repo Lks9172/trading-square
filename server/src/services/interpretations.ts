@@ -284,6 +284,75 @@ export function interpretDerived(
     return null;
   }
 
+  // 18차 Phase 1 + 2 신규
+  if (key === 'LEVERAGE_TRIGGER_3OF3') {
+    if (value === 1) return '🟢 착한 레버리지 3조건 동시 충족 — 최대 15%, 목표 +20~30% (video1 §3부)';
+    return null;
+  }
+  if (key === 'LEVERAGE_TRIGGER_COUNT') {
+    if (value === 2) return '🟡 레버리지 트리거 2/3 — 아직 대기 (3조건 모두 필요)';
+    if (value === 1) return '⚪ 레버리지 트리거 1/3 — 전혀 부족';
+    return null;
+  }
+  if (key === 'CONVICTION_SCORE_7AXIS') {
+    if (value >= 5) return '🟢 7축 중 5+ 강세 정합 — video1+4 §확신 최고조';
+    if (value >= 3) return '🟢 강 정합 — 공격적 진입 근거';
+    if (value <= -5) return '🔴 7축 중 5+ 약세 — 확신 있게 방어';
+    if (value <= -3) return '🟠 약세 정합 — 공격 자제';
+    return null;
+  }
+  if (key === 'GOLD_LONGTERM_CUP_HANDLE') {
+    if (value === 2) return '🟢 금 장기 컵앤핸들 완성 — video2 §4부 "역H&S 돌파"';
+    if (value === 1) return '🔵 cup rim 근접/재탈환 — handle 형성 대기';
+    if (value === -1) return '🟡 cup 미완성 — 장기 구조 약함';
+    return null;
+  }
+  if (key === 'M2_SP500_LEAD_ALIGNMENT') {
+    if (value === 1) return '🟢 M2→S&P 13주 리드 방향 일치 — 유동성 신호 유효';
+    if (value === -1) return '🟠 M2-S&P 방향 이탈 — 리드 상관 약화';
+    return null;
+  }
+  if (key === 'ANALYST_TARGET_UPSIDE_PCT') {
+    if (value >= 20) return '🟢 목표가 대비 +20%+ — 애널리스트 강한 강세';
+    if (value >= 5) return '🔵 목표가 대비 +5~20% — 보통 강세';
+    if (value <= -10) return '🟠 목표가 대비 -10%+ — 고평가 경고';
+    return null;
+  }
+  if (key === 'EARNINGS_SURPRISE_PCT') {
+    if (value >= 5) return '🟢 메가캡 EPS 서프라이즈 +5%+ — 실적 강세';
+    if (value <= -3) return '🔴 메가캡 EPS 미스 -3%+ — 실적 약세';
+    return null;
+  }
+  if (key === 'EARNINGS_DDAY_MEGACAP') {
+    if (value === 0) return '🟡 메가캡 실적 오늘 — 변동성 주의';
+    if (value <= 3) return '🟡 메가캡 실적 D-3 이내 — 대기';
+    return null;
+  }
+  if (key === 'KR_MATERIAL_DISCLOSURE_LEVEL') {
+    if (value >= 2) return '🔴 DART 주요공시 과다 — 한국 이벤트 집중';
+    if (value === 1) return '🟡 DART 주요공시 증가 — 경계';
+    return null;
+  }
+  if (key === 'SMART_MONEY_CLUSTER_BUY') {
+    if (value >= 5) return '🟢 클러스터 매수 5종+ — 노션 §Insider Screener 강한 기관 합의';
+    if (value >= 2) return '🔵 클러스터 매수 2-4종 — 내부자 관심 집중';
+    return null;
+  }
+  if (key === 'INSIDER_DIP_BUY') {
+    if (value === 1) return '🟢 Dip buy 확인 — 노션 "-5%+ 후 클러스터 매수"';
+    return null;
+  }
+  if (key === 'INSTITUTIONAL_CONSENSUS_STRONG_COUNT') {
+    if (value >= 5) return '🟢 3인+ 공유 종목 5개+ — Dataroma Big Bets 최강 합의';
+    if (value >= 3) return '🔵 3인+ 공유 종목 3-4개 — 기관 합의 형성';
+    return null;
+  }
+  if (key === 'BOND_SAFEHAVEN_BROKEN') {
+    if (value === 2) return '🔴 Safe-haven 붕괴 — 30Y↑+DXY↓ (탈달러 구조 전환, video4 §10:49)';
+    if (value === -1) return '🟢 글로벌 리스크오프 — 30Y↓+DXY↓';
+    return null;
+  }
+
   if (key === 'BTC_MOMENTUM') {
     if (value >= 20) return '🟠 BTC +20% — 위험선호 극대 (video4 proxy, allocation 제외)';
     if (value <= -20) return '🔴 BTC -20% — 위험회피 극대';

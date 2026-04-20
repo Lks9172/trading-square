@@ -761,7 +761,9 @@ export async function computeDerived(
         name: 'nasdaq_cross',
         value: crossState,
         date: dt,
-        formula: '1=골든크로스, -1=데드크로스, 0.5=50>200유지, -0.5=50<200유지',
+        // 18차 P1#1: video3 §2부 "골든크로스는 늦은 추격, 데드크로스가 분할매수 시작" 역발상 철학 명문화.
+        // signals.ts / interpretations.ts 에서 -1 = 매수 우호, +1 = 추격 주의 로 해석.
+        formula: '1=GC발생(역발상:추격주의), -1=DC발생(역발상:분할매수 시작), 0.5=50>200유지, -0.5=50<200유지',
       };
       d.NASDAQ_SMA50 = { name: 'nasdaq_sma50', value: parseFloat(sma50.toFixed(2)), date: dt, formula: 'SMA(NASDAQ,50)' };
     }
@@ -3022,6 +3024,7 @@ export async function computeDerived(
       computeNasdaqMegacapExposure,
       computeNasdaqMegacapFlow,
       computeSectorInstitutionalFlow,
+      computeConsensusBuys,
     } = await import('../collectors/institutional-13f');
     const quarterly = await fetchInstitutional13FQuarterly();
     const currentFunds = quarterly.map((q) => q.current);
@@ -3069,6 +3072,31 @@ export async function computeDerived(
         };
       }
     }
+    // 18차 P1#4: Dataroma-style Big Bets — 2인+ 슈퍼인베스터가 공유하는 종목 랭킹.
+    try {
+      const consensus = computeConsensusBuys(quarterly, { minFunds: 2, topN: 15 });
+      const strongConsensus = consensus.filter((c) => c.fundCount >= 3);
+      d.INSTITUTIONAL_CONSENSUS_TOP_COUNT = {
+        name: 'institutional_consensus_top_count',
+        value: consensus.length,
+        date: today(),
+        formula: `2인+ 공유 종목 ${consensus.length}개, 3인+ 공유 ${strongConsensus.length}개. Dataroma §Big Bets 정합. SmartMoneyPanel 하단 표.`,
+      };
+      d.INSTITUTIONAL_CONSENSUS_STRONG_COUNT = {
+        name: 'institutional_consensus_strong_count',
+        value: strongConsensus.length,
+        date: today(),
+        formula: `3인 이상 동시 보유 — 매우 강한 콘셉서스 신호. 5개+ = RISK_ON 가속 근거.`,
+      };
+      // 메타에 실제 랭킹 데이터도 노출 (UI 에서 cusip→ticker 매핑 후 표시)
+      (d as any).__meta = (d as any).__meta || {};
+      (d as any).__meta.institutionalConsensus = consensus.slice(0, 10).map((c) => ({
+        cusip: c.cusip,
+        fundCount: c.fundCount,
+        weightPct: c.totalWeightPct,
+        flow: c.quarterlyFlow,
+      }));
+    } catch { /* consensus 실패는 무시 */ }
   } catch {
     /* INSTITUTIONAL_* 실패는 파이프라인 막지 않음 */
   }
@@ -3595,6 +3623,15 @@ export async function computeDerived(
           `메가캡 ${analyst.tickerCount}종 애널리스트 평균 rating (${analyst.avgScore.toFixed(3)}, -2~+2 scale). ` +
           `종목별: ${JSON.stringify(analyst.perTicker)}. video4 §기관 "말" 측정.`,
       };
+      // 18차 P2#10: 목표가 대비 상승여력 평균 (Yahoo financialData.targetMeanPrice 기반)
+      if (typeof analyst.avgUpsidePct === 'number') {
+        d.ANALYST_TARGET_UPSIDE_PCT = {
+          name: 'analyst_target_upside_pct',
+          value: analyst.avgUpsidePct,
+          date: today(),
+          formula: `메가캡 목표가 대비 현재가 상승여력 평균 ${analyst.avgUpsidePct.toFixed(2)}%. 종목별: ${JSON.stringify(analyst.perTickerUpsidePct ?? {})}. 노션 §TipRanks target price 정합.`,
+        };
+      }
       // 13F flow 와 비교 (돈)
       const instFlow = d.INSTITUTIONAL_NASDAQ_FLOW?.value ?? null;
       if (instFlow !== null) {
@@ -3719,5 +3756,285 @@ export async function computeDerived(
     }
   } catch { /* skip */ }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // 18차 Phase 1 + Phase 2 블록
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // === P1#2: 착한 레버리지 3-of-3 트리거 플래그 ===
+  // video1 §3부 "이격도 -25% 이하 AND VIX 35 이상 AND 실업수당 30만 미만" 동시 충족 시에만 활성.
+  // 횡보·추세 시장에선 절대 켜지지 않음 → 레버리지 ETF 최대 15%, 목표 수익 +20~30% 룰과 결합.
+  try {
+    const disp = d.NASDAQ_DISPARITY?.value ?? null;
+    const vix = val(raw, 'VIX');
+    const icsaV = val(raw, 'ICSA');
+    const dispOk = disp !== null && disp <= -25;
+    const vixOk = vix !== null && vix >= 35;
+    const icsaOk = icsaV !== null && icsaV < 300000;
+    const triggered = dispOk && vixOk && icsaOk;
+    const count = [dispOk, vixOk, icsaOk].filter(Boolean).length;
+    d.LEVERAGE_TRIGGER_3OF3 = {
+      name: 'leverage_trigger_3of3',
+      value: triggered ? 1 : 0,
+      date: today(),
+      formula: `이격도≤-25%(${dispOk ? 'Y' : 'N'} ${disp ?? '-'}) AND VIX≥35(${vixOk ? 'Y' : 'N'} ${vix ?? '-'}) AND ICSA<30만(${icsaOk ? 'Y' : 'N'} ${icsaV ?? '-'}) → ${count}/3. video1 §3부 "착한 레버리지". 레버리지 ETF 최대 15% / 익절 +20~30% / 횡보 즉시 일반 ETF 복귀.`,
+    };
+    d.LEVERAGE_TRIGGER_COUNT = {
+      name: 'leverage_trigger_count',
+      value: count,
+      date: today(),
+      formula: `3가지 동시 충족 수 (이격도 + VIX + ICSA). 1~2개는 레버리지 금지.`,
+    };
+  } catch { void 0; }
+
+  // === P1#3: 5/7축 확신 정렬 스코어 (CONVICTION_SCORE_7AXIS) ===
+  // video1 §2부 "5가지가 같은 방향을 가리킬 때 가장 강하게". video4 §7축으로 확장.
+  // 7축: 차트 / 유동성 / 정책 / 지정학 / 모멘텀 / 기관리포트 / 매크로.
+  // 각 축 +1 (강세) / 0 (중립) / -1 (약세). 총합 -7 ~ +7.
+  try {
+    const axes: Record<string, number> = {};
+
+    // 1) 차트 — 멀티프레임 정합 스코어 (17차 C1)
+    const mf = d.NASDAQ_MULTIFRAME_ALIGNMENT?.value ?? null;
+    axes.chart = mf === null ? 0 : (mf >= 2 ? 1 : mf <= -2 ? -1 : 0);
+
+    // 2) 유동성 — GLOBAL_M2 추세
+    const m2 = d.GLOBAL_M2_PROXY?.value ?? null;
+    axes.liquidity = m2 === null ? 0 : (m2 > 3 ? 1 : m2 < 0 ? -1 : 0);
+
+    // 3) 정책 — regime inputs policy direction (manual policy score 대용)
+    const policyDir = raw.POLICY_DIRECTION?.value ?? null;
+    axes.policy = policyDir === null ? 0 : (policyDir > 0 ? 1 : policyDir < 0 ? -1 : 0);
+
+    // 4) 지정학 — HORMUZ_CHAIN_SCORE 역방향 (악화=axis down)
+    const geo = d.HORMUZ_CHAIN_SCORE?.value ?? null;
+    axes.geo = geo === null ? 0 : (geo <= 0 ? 1 : geo >= 2 ? -1 : 0);
+
+    // 5) 모멘텀 — NASDAQ_RSI_14 50 기준
+    const rsi = d.NASDAQ_RSI_14?.value ?? null;
+    axes.momentum = rsi === null ? 0 : (rsi >= 50 && rsi < 70 ? 1 : rsi < 40 ? -1 : 0);
+
+    // 6) 기관 리포트 — ANALYST_CONSENSUS_NASDAQ_MEGACAP rating (-2~+2 → -1/0/+1 양자화)
+    const an = d.ANALYST_CONSENSUS_NASDAQ_MEGACAP?.value ?? null;
+    axes.analyst = an === null ? 0 : (an >= 0.5 ? 1 : an <= -0.5 ? -1 : 0);
+
+    // 7) 매크로 — CPI YoY 범위 (2~3.5% 스위트스팟)
+    const cpi = d.CPI_YOY?.value ?? null;
+    axes.macro = cpi === null ? 0 : (cpi >= 2 && cpi <= 3.5 ? 1 : cpi > 5 || cpi < 0 ? -1 : 0);
+
+    const total = Object.values(axes).reduce((a, b) => a + b, 0);
+    const positives = Object.values(axes).filter((v) => v > 0).length;
+    const negatives = Object.values(axes).filter((v) => v < 0).length;
+    let label: string;
+    if (total >= 5) label = '🟢 극강 정합 (7축 중 5+ 강세)';
+    else if (total >= 3) label = '🟢 강 정합 (3-4축 강세)';
+    else if (total >= 1) label = '🔵 약 정합 (1-2축 강세 우세)';
+    else if (total <= -5) label = '🔴 극약 정합 (7축 중 5+ 약세)';
+    else if (total <= -3) label = '🟠 약세 정합 (3-4축 약세)';
+    else if (total <= -1) label = '🟡 혼조 약세 우세';
+    else label = '⚪ 중립 (정합 불명확)';
+
+    d.CONVICTION_SCORE_7AXIS = {
+      name: 'conviction_score_7axis',
+      value: total,
+      date: today(),
+      formula: `차트${axes.chart > 0 ? '+' : ''}${axes.chart}/유동성${axes.liquidity > 0 ? '+' : ''}${axes.liquidity}/정책${axes.policy > 0 ? '+' : ''}${axes.policy}/지정학${axes.geo > 0 ? '+' : ''}${axes.geo}/모멘텀${axes.momentum > 0 ? '+' : ''}${axes.momentum}/애널${axes.analyst > 0 ? '+' : ''}${axes.analyst}/매크로${axes.macro > 0 ? '+' : ''}${axes.macro} = ${total} (${positives}강↑/${negatives}약↓). ${label}. video1+4 §확신 5/7축.`,
+    };
+  } catch { void 0; }
+
+  // === P2#7: 금 장기 컵앤핸들 레벨 (월봉 근사, 10년) ===
+  // video2 §4부 "2000년 이후 컵앤핸들 / 2020년 이후 역H&S". 월봉 종가 기준 근사.
+  // cup: 10년 전 고점 영역 재탈환 여부. handle: 최근 6개월 pullback + breakout.
+  try {
+    const gHist = await fetchYahooHistory('GC=F', 2600);
+    if (gHist.length >= 2400) {
+      const closes = gHist.map((h) => h.close);
+      const n = closes.length;
+      const last = closes[n - 1];
+      // 10년 전 ~ 5년 전 기간의 최고가 (cup rim)
+      const rim = Math.max(...closes.slice(n - 2520, n - 1260));
+      // 핸들: 최근 126일(6개월) pullback 저점 → 최근 20일 종가가 pullback 저점보다 위 + rim 의 95% 이상
+      const handleLow = Math.min(...closes.slice(n - 126, n - 20));
+      const recentMa = closes.slice(n - 20).reduce((a, b) => a + b, 0) / 20;
+      const rimRecovered = last >= rim * 0.97;
+      const handleConfirmed = recentMa > handleLow * 1.02 && last > handleLow * 1.05;
+      let level: number;
+      let label: string;
+      if (rimRecovered && handleConfirmed) { level = 2; label = '🟢 컵앤핸들 완성 (rim 재탈환 + handle 돌파)'; }
+      else if (rimRecovered) { level = 1; label = '🔵 cup rim 근접/재탈환 — handle 형성 대기'; }
+      else if (last > rim * 0.85) { level = 0; label = '⚪ cup 진행 (rim 85%+)'; }
+      else { level = -1; label = '🟡 cup 미완성 (rim 85% 미만)'; }
+      d.GOLD_LONGTERM_CUP_HANDLE = {
+        name: 'gold_longterm_cup_handle',
+        value: level,
+        date: today(),
+        formula: `rim=${rim.toFixed(0)}, last=${last.toFixed(0)}, handleLow=${handleLow.toFixed(0)}. ${label}. video2 §4부 "장기 컵앤핸들/역H&S" 근사.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === P2#12: DART 한국 주요공시 24h 건수 ===
+  try {
+    const { fetchDartMajorDisclosures } = await import('../collectors/dart-major');
+    const dart = await fetchDartMajorDisclosures();
+    if (dart && dart.source === 'dart-api') {
+      let level: number;
+      let label: string;
+      if (dart.count >= 20) { level = 2; label = '🔴 주요공시 20건+ (24h) — 한국 시장 이벤트 과다'; }
+      else if (dart.count >= 10) { level = 1; label = '🟡 주요공시 10-19건 — 이벤트 경계'; }
+      else if (dart.count >= 3) { level = 0; label = '⚪ 정상 (3-9건)'; }
+      else { level = 0; label = '⚪ 조용 (<3건)'; }
+      d.KR_MATERIAL_DISCLOSURE_COUNT = {
+        name: 'kr_material_disclosure_count',
+        value: dart.count,
+        date: today(),
+        formula: `DART 최근 24h 주요사항보고서 ${dart.count}건. ${label}. 노션 §"기업의 중대 이벤트".`,
+      };
+      d.KR_MATERIAL_DISCLOSURE_LEVEL = {
+        name: 'kr_material_disclosure_level',
+        value: level,
+        date: today(),
+        formula: `건수 기반 레벨 (0=정상, 1=경계, 2=과다).`,
+      };
+    }
+  } catch { void 0; }
+
+  // === P2#11: Earnings Surprise 평균 + 메가캡 next earnings D-day ===
+  try {
+    const { fetchEarningsSurprises, fetchUpcomingEarnings } = await import('../collectors/earnings');
+    const [surprise, upcoming] = await Promise.all([fetchEarningsSurprises(), fetchUpcomingEarnings()]);
+    if (surprise) {
+      d.EARNINGS_SURPRISE_PCT = {
+        name: 'earnings_surprise_pct',
+        value: surprise.avgSurprisePct,
+        date: today(),
+        formula: `메가캡 ${surprise.totalCount}종 최근 분기 EPS 서프라이즈 평균 ${surprise.avgSurprisePct.toFixed(2)}%. beat ${surprise.beatCount}/miss ${surprise.missCount}. 노션 §실적 발표.`,
+      };
+      d.EARNINGS_BEAT_RATIO = {
+        name: 'earnings_beat_ratio',
+        value: parseFloat(((surprise.beatCount / surprise.totalCount) * 100).toFixed(1)),
+        date: today(),
+        formula: `메가캡 beat ratio ${surprise.beatCount}/${surprise.totalCount} = ${((surprise.beatCount / surprise.totalCount) * 100).toFixed(1)}%.`,
+      };
+    }
+    if (upcoming && upcoming.length > 0) {
+      const megacapUpcoming = upcoming.filter((e: any) => ['AAPL','MSFT','GOOGL','AMZN','NVDA','META','TSLA'].includes(e.ticker));
+      if (megacapUpcoming.length > 0) {
+        const nearest = megacapUpcoming.sort((a: any, b: any) => (a.date < b.date ? -1 : 1))[0];
+        const dday = Math.max(0, Math.floor((new Date(nearest.date).getTime() - Date.now()) / 86400000));
+        d.EARNINGS_DDAY_MEGACAP = {
+          name: 'earnings_dday_megacap',
+          value: dday,
+          date: today(),
+          formula: `다음 메가캡 실적: ${nearest.ticker} @ ${nearest.date} (D-${dday}). 노션 §기업 실적 캘린더.`,
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // === P1#6: M2 13주 선행 방향 alignment ===
+  // 노션 §"글로벌 M2 vs S&P 500 10~13주 선행". 이미 M2_LEAD_SHIFT_CORRELATION(17차)이 3개월 shift
+  // 상관을 계산 중. 여기에 "현재 M2 변화 방향 → 13주 후 S&P 기대 방향" 이진 alignment 를 추가.
+  try {
+    const m2Hist = await readHistory('fred', 'M2SL');
+    const spxHist = await fetchYahooHistory('^GSPC', 120);
+    if (m2Hist.length >= 14 && spxHist.length >= 65) {
+      // 최근 13주(=약 3개월) 전 M2 YoY vs 현재 S&P 13주 수익률 방향 대조.
+      const sortedM2 = [...m2Hist].sort((a, b) => (a.date < b.date ? -1 : 1));
+      const m2Now = sortedM2[sortedM2.length - 1]?.value;
+      const m2Then = sortedM2[sortedM2.length - 4]?.value; // 3개월 전 (월간 4포인트)
+      const spxNow = spxHist[spxHist.length - 1].close;
+      const spxThen = spxHist[Math.max(0, spxHist.length - 65)].close; // 약 65영업일 = 13주
+      if (
+        typeof m2Now === 'number' && typeof m2Then === 'number' &&
+        typeof spxNow === 'number' && typeof spxThen === 'number' &&
+        m2Then > 0 && spxThen > 0
+      ) {
+        const m2Dir = m2Now - m2Then;
+        const spxRet = ((spxNow - spxThen) / spxThen) * 100;
+        // alignment: 두 방향이 같으면 +1 (M2 리드 유효), 반대면 -1
+        let level: number;
+        let label: string;
+        if (m2Dir > 0 && spxRet > 0) { level = 1; label = '🟢 M2 상승 → S&P 상승 확인 (13주 리드 유효)'; }
+        else if (m2Dir < 0 && spxRet < 0) { level = 1; label = '🟡 M2 하락 → S&P 하락 확인 (리드 유효하지만 약세)'; }
+        else if (m2Dir > 0 && spxRet < 0) { level = -1; label = '🟠 M2 상승했지만 S&P 하락 — 리드 약화 가능성'; }
+        else if (m2Dir < 0 && spxRet > 0) { level = -1; label = '🟡 M2 하락했지만 S&P 상승 — 상관 이탈'; }
+        else { level = 0; label = '⚪ M2 정체'; }
+        d.M2_SP500_LEAD_ALIGNMENT = {
+          name: 'm2_sp500_lead_alignment',
+          value: level,
+          date: today(),
+          formula: `M2 Δ3M=${m2Dir.toFixed(0)} vs S&P 13W ret=${spxRet.toFixed(2)}%. ${label}. 노션 §M2 10-13주 선행.`,
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // === P1#5: Insider cluster buy + dip buy 플래그 ===
+  // 노션 "Insider Screener cluster buys / buying the dip(-5%+)" 정합.
+  // cluster: 같은 ticker 에 2명 이상 insider P(purchase) 트랜잭션.
+  // dip: cluster ≥ 2 AND VIX ≥ 30 (조정 중 cluster buy = 진짜 dip buy).
+  try {
+    const { fetchInsiderSummary } = await import('../collectors/smart-money');
+    const ins = await fetchInsiderSummary({ allowStale: true });
+    if (ins) {
+      const clusterCount = ins.clusterTickerCount ?? 0;
+      const maxSize = ins.maxClusterSize ?? 0;
+      d.SMART_MONEY_CLUSTER_BUY = {
+        name: 'smart_money_cluster_buy',
+        value: clusterCount,
+        date: today(),
+        formula: `2인+ 동일종목 매수 클러스터 = ${clusterCount}개, 최대 ${maxSize}인 클러스터. top: ${(ins.topClusters ?? []).slice(0, 3).map((c) => `${c.ticker}×${c.count}`).join(', ') || '-'}. 노션 Insider Screener §cluster buys.`,
+      };
+      const vix = val(raw, 'VIX');
+      const dipFlag = clusterCount >= 2 && vix !== null && vix >= 30;
+      d.INSIDER_DIP_BUY = {
+        name: 'insider_dip_buy',
+        value: dipFlag ? 1 : 0,
+        date: today(),
+        formula: `cluster≥2(${clusterCount}) AND VIX≥30(${vix?.toFixed(1) ?? '-'}) → ${dipFlag ? '🟢 Dip buy 확인' : '⚪ 조건 미충족'}. 노션 "buying the dip".`,
+      };
+    }
+  } catch { void 0; }
+
+  // === P2#9: 국채 safe-haven 붕괴 플래그 ===
+  // video4 §10:49 "미국이 불확실성의 근원". 30Y 금리 상승 AND DXY 하락 동시 = 탈달러 신호.
+  try {
+    const dgs30 = val(raw, 'DGS30');
+    const dxy = val(raw, 'DXY');
+    // 30일 전 값 (히스토리에서)
+    const dgs30Hist = await getHistorySeriesLocal('DGS30', 60);
+    const dxyHist = await getHistorySeriesLocal('DXY', 60);
+    if (dgs30 !== null && dxy !== null && dgs30Hist.length >= 30 && dxyHist.length >= 30) {
+      const dgs30Prev = dgs30Hist[dgs30Hist.length - 30].value;
+      const dxyPrev = dxyHist[dxyHist.length - 30].value;
+      const yield30Up = dgs30 - dgs30Prev;
+      const dxyChangePct = ((dxy - dxyPrev) / dxyPrev) * 100;
+      const broken = yield30Up >= 0.15 && dxyChangePct <= -1.0;
+      let level: number;
+      let label: string;
+      if (broken) { level = 2; label = '🔴 Safe-haven 붕괴 — 30Y↑ + DXY↓ 동시 (탈달러 구조)'; }
+      else if (yield30Up >= 0.15 && dxyChangePct > 0) { level = 0; label = '⚪ 정상 (30Y↑ + DXY↑ 동조)'; }
+      else if (yield30Up <= -0.15 && dxyChangePct <= -1.0) { level = -1; label = '🟢 Safe-haven 강화 (30Y↓ + DXY↓ = 글로벌 리스크오프)'; }
+      else { level = 0; label = '⚪ 중립'; }
+      d.BOND_SAFEHAVEN_BROKEN = {
+        name: 'bond_safehaven_broken',
+        value: level,
+        date: today(),
+        formula: `30Y Δ=${yield30Up.toFixed(2)}bp, DXY Δ=${dxyChangePct.toFixed(2)}%. ${label}. video4 §"미국이 불확실성의 근원" — 30Y↑+DXY↓ 동시 = 탈달러 구조 전환.`,
+      };
+    }
+  } catch { void 0; }
+
   return d;
+}
+
+// 18차 P2#9 헬퍼: history series 읽기 (derived 내부용, 실패 시 빈 배열)
+async function getHistorySeriesLocal(key: string, days: number): Promise<Array<{ date: string; value: number }>> {
+  try {
+    const { readHistory } = await import('../state/history-store');
+    const points = await readHistory('fred', key);
+    return points.slice(-days);
+  } catch {
+    return [];
+  }
 }
