@@ -23,14 +23,36 @@ const SURPRISE_FRESH_MS = 12 * 60 * 60 * 1000;
 const SURPRISE_STALE_MS = 14 * 24 * 60 * 60 * 1000;
 const MEGACAP_SURPRISE_TICKERS = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA'];
 
+// Yahoo crumb + cookie (2024+ 필수). earnings module 도 인증 대상.
+let cachedCrumb: { crumb: string; cookie: string; at: number } | null = null;
+const CRUMB_TTL_MS = 60 * 60 * 1000;
+async function getCrumb(): Promise<{ crumb: string; cookie: string } | null> {
+  if (cachedCrumb && Date.now() - cachedCrumb.at < CRUMB_TTL_MS) return { crumb: cachedCrumb.crumb, cookie: cachedCrumb.cookie };
+  try {
+    const step1 = await axios.get('https://fc.yahoo.com', {
+      headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000, validateStatus: () => true, maxRedirects: 5,
+    });
+    const setCookie = step1.headers['set-cookie'];
+    const cookie = Array.isArray(setCookie) ? setCookie.map((c) => c.split(';')[0]).join('; ') : '';
+    if (!cookie) return null;
+    const step2 = await axios.get('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+      headers: { 'User-Agent': 'Mozilla/5.0', Cookie: cookie }, timeout: 10000,
+    });
+    const crumb = typeof step2.data === 'string' ? step2.data.trim() : '';
+    if (!crumb) return null;
+    cachedCrumb = { crumb, cookie, at: Date.now() };
+    return { crumb, cookie };
+  } catch { return null; }
+}
+
 async function fetchYahooEarningsSurprise(ticker: string): Promise<EarningsSurprise | null> {
   try {
-    // Yahoo quoteSummary earnings module — earningsChart.quarterly: 최근 4분기
-    // crumb 인증은 analyst-consensus 의 헬퍼를 재사용하는 게 안전하나, 여기서는 독립 호출 시도.
+    const auth = await getCrumb();
+    if (!auth) return null;
     const { data } = await axios.get(
-      `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=earnings`,
+      `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=earnings&crumb=${encodeURIComponent(auth.crumb)}`,
       {
-        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json', Cookie: auth.cookie },
         timeout: 10000,
       },
     );
@@ -43,7 +65,8 @@ async function fetchYahooEarningsSurprise(ticker: string): Promise<EarningsSurpr
     if (typeof actual !== 'number' || typeof estimate !== 'number' || Math.abs(estimate) < 0.001) return null;
     const surprisePct = parseFloat((((actual - estimate) / Math.abs(estimate)) * 100).toFixed(2));
     return { ticker, quarter: String(quarter), actualEps: actual, estimateEps: estimate, surprisePct };
-  } catch {
+  } catch (err: any) {
+    if (err?.response?.status === 401) cachedCrumb = null;
     return null;
   }
 }

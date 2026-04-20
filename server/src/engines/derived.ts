@@ -3841,18 +3841,18 @@ export async function computeDerived(
     };
   } catch { void 0; }
 
-  // === P2#7: 금 장기 컵앤핸들 레벨 (월봉 근사, 10년) ===
-  // video2 §4부 "2000년 이후 컵앤핸들 / 2020년 이후 역H&S". 월봉 종가 기준 근사.
-  // cup: 10년 전 고점 영역 재탈환 여부. handle: 최근 6개월 pullback + breakout.
+  // === P2#7: 금 장기 컵앤핸들 레벨 (5년 근사) ===
+  // video2 §4부 "컵앤핸들/역H&S". 5년 창으로 근사 — Yahoo 1500일+ 제한 고려.
   try {
-    const gHist = await fetchYahooHistory('GC=F', 2600);
-    if (gHist.length >= 2400) {
+    const gHist = await fetchYahooHistory('GC=F', 1500);
+    if (gHist.length >= 1200) {
       const closes = gHist.map((h) => h.close);
       const n = closes.length;
       const last = closes[n - 1];
-      // 10년 전 ~ 5년 전 기간의 최고가 (cup rim)
-      const rim = Math.max(...closes.slice(n - 2520, n - 1260));
-      // 핸들: 최근 126일(6개월) pullback 저점 → 최근 20일 종가가 pullback 저점보다 위 + rim 의 95% 이상
+      // cup rim: 2~4년 전 구간 최고가 (~504~1008일 전)
+      const rimEnd = Math.max(0, n - 504);
+      const rimStart = Math.max(0, n - 1008);
+      const rim = Math.max(...closes.slice(rimStart, rimEnd));
       const handleLow = Math.min(...closes.slice(n - 126, n - 20));
       const recentMa = closes.slice(n - 20).reduce((a, b) => a + b, 0) / 20;
       const rimRecovered = last >= rim * 0.97;
@@ -3860,14 +3860,14 @@ export async function computeDerived(
       let level: number;
       let label: string;
       if (rimRecovered && handleConfirmed) { level = 2; label = '🟢 컵앤핸들 완성 (rim 재탈환 + handle 돌파)'; }
-      else if (rimRecovered) { level = 1; label = '🔵 cup rim 근접/재탈환 — handle 형성 대기'; }
+      else if (rimRecovered) { level = 1; label = '🔵 cup rim 재탈환 — handle 대기'; }
       else if (last > rim * 0.85) { level = 0; label = '⚪ cup 진행 (rim 85%+)'; }
-      else { level = -1; label = '🟡 cup 미완성 (rim 85% 미만)'; }
+      else { level = -1; label = '🟡 cup 미완성'; }
       d.GOLD_LONGTERM_CUP_HANDLE = {
         name: 'gold_longterm_cup_handle',
         value: level,
         date: today(),
-        formula: `rim=${rim.toFixed(0)}, last=${last.toFixed(0)}, handleLow=${handleLow.toFixed(0)}. ${label}. video2 §4부 "장기 컵앤핸들/역H&S" 근사.`,
+        formula: `rim=${rim.toFixed(0)}, last=${last.toFixed(0)}, handleLow=${handleLow.toFixed(0)}. ${label}. video2 §4부 근사 (5년).`,
       };
     }
   } catch { void 0; }
@@ -4001,9 +4001,17 @@ export async function computeDerived(
   try {
     const dgs30 = val(raw, 'DGS30');
     const dxy = val(raw, 'DXY');
-    // 30일 전 값 (히스토리에서)
+    // 30일 전 값 (히스토리에서 다양한 source 시도 — fred/yahoo/computed 순)
     const dgs30Hist = await getHistorySeriesLocal('DGS30', 60);
-    const dxyHist = await getHistorySeriesLocal('DXY', 60);
+    // DXY 는 Yahoo 수집이므로 yahoo source 우선
+    const { readHistory } = await import('../state/history-store');
+    let dxyHist: Array<{ date: string; value: number }> = [];
+    for (const src of ['yahoo', 'fred', 'computed']) {
+      try {
+        const pts = await readHistory(src, 'DXY');
+        if (pts.length > 0) { dxyHist = pts.slice(-60).map((p: any) => ({ date: p.date, value: p.value })); break; }
+      } catch { /* try next */ }
+    }
     if (dgs30 !== null && dxy !== null && dgs30Hist.length >= 30 && dxyHist.length >= 30) {
       const dgs30Prev = dgs30Hist[dgs30Hist.length - 30].value;
       const dxyPrev = dxyHist[dxyHist.length - 30].value;
