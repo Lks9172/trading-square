@@ -3842,18 +3842,20 @@ export async function computeDerived(
   } catch { void 0; }
 
   // === P2#7: 금 장기 컵앤핸들 레벨 (5년 근사) ===
-  // video2 §4부 "컵앤핸들/역H&S". 5년 창으로 근사 — Yahoo 1500일+ 제한 고려.
+  // video2 §4부 "컵앤핸들/역H&S". GLD ETF 우선 — GC=F 선물보다 히스토리 안정.
   try {
-    const gHist = await fetchYahooHistory('GC=F', 1500);
-    if (gHist.length >= 1200) {
+    let gHist = await fetchYahooHistory('GLD', 1500);
+    if (gHist.length < 800) gHist = await fetchYahooHistory('GC=F', 1500);
+    if (gHist.length >= 800) {
       const closes = gHist.map((h) => h.close);
       const n = closes.length;
       const last = closes[n - 1];
-      // cup rim: 2~4년 전 구간 최고가 (~504~1008일 전)
-      const rimEnd = Math.max(0, n - 504);
+      // cup rim: 과거 구간 최고가 (2~4년 또는 가능한 만큼)
+      const rimEnd = Math.max(120, n - 504);
       const rimStart = Math.max(0, n - 1008);
       const rim = Math.max(...closes.slice(rimStart, rimEnd));
-      const handleLow = Math.min(...closes.slice(n - 126, n - 20));
+      const hlStart = Math.max(20, n - 126);
+      const handleLow = Math.min(...closes.slice(hlStart, n - 20));
       const recentMa = closes.slice(n - 20).reduce((a, b) => a + b, 0) / 20;
       const rimRecovered = last >= rim * 0.97;
       const handleConfirmed = recentMa > handleLow * 1.02 && last > handleLow * 1.05;
