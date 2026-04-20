@@ -476,3 +476,61 @@ export function computeNasdaqMegacapFlow(
     fundCount: shares.length,
   };
 }
+
+// 18차 P1#4: Dataroma-style "Big Bets" — 2명 이상 슈퍼인베스터가 공유하는 종목 랭킹.
+// 출력: 최소 N 펀드 이상이 보유한 cusip 리스트, 공유 펀드 수 + 총 포지션 가중치 비율.
+// 활용: SmartMoneyPanel 하단 표 + derived.INSTITUTIONAL_CONSENSUS_TOP_COUNT 집계.
+export interface ConsensusHolding {
+  cusip: string;
+  fundCount: number;
+  fundNames: string[];
+  totalWeightPct: number;
+  quarterlyFlow: 'buy' | 'sell' | 'hold';
+}
+
+export function computeConsensusBuys(
+  quarterly: FundQuarterlyPositions[],
+  opts: { minFunds?: number; topN?: number } = {},
+): ConsensusHolding[] {
+  const minFunds = opts.minFunds ?? 2;
+  const topN = opts.topN ?? 15;
+  const holdMap = new Map<string, { funds: Map<string, { curWeight: number; prevWeight: number }> }>();
+  for (const q of quarterly) {
+    if (q.current.totalValue <= 0) continue;
+    const prevPositions = new Map((q.previous?.positions ?? []).map((p) => [p.cusip, p.value]));
+    for (const p of q.current.positions) {
+      const curWeight = p.value / q.current.totalValue;
+      const prevVal = prevPositions.get(p.cusip) ?? 0;
+      const prevWeight = q.previous && q.previous.totalValue > 0 ? prevVal / q.previous.totalValue : 0;
+      let entry = holdMap.get(p.cusip);
+      if (!entry) { entry = { funds: new Map() }; holdMap.set(p.cusip, entry); }
+      entry.funds.set(q.fundName, { curWeight, prevWeight });
+    }
+  }
+  const results: ConsensusHolding[] = [];
+  for (const [cusip, data] of holdMap.entries()) {
+    if (data.funds.size < minFunds) continue;
+    const fundNames: string[] = [];
+    let sumCur = 0;
+    let buyVotes = 0;
+    let sellVotes = 0;
+    for (const [name, w] of data.funds.entries()) {
+      fundNames.push(name);
+      sumCur += w.curWeight;
+      if (w.curWeight > w.prevWeight * 1.1) buyVotes++;
+      else if (w.curWeight < w.prevWeight * 0.9) sellVotes++;
+    }
+    const avgWeightPct = (sumCur / data.funds.size) * 100;
+    const flow: 'buy' | 'sell' | 'hold' =
+      buyVotes > sellVotes ? 'buy' : sellVotes > buyVotes ? 'sell' : 'hold';
+    results.push({
+      cusip,
+      fundCount: data.funds.size,
+      fundNames,
+      totalWeightPct: parseFloat(avgWeightPct.toFixed(3)),
+      quarterlyFlow: flow,
+    });
+  }
+  results.sort((a, b) => b.fundCount - a.fundCount || b.totalWeightPct - a.totalWeightPct);
+  return results.slice(0, topN);
+}
