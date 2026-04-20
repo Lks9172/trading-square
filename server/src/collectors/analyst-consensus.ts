@@ -70,11 +70,12 @@ async function getCrumb(): Promise<{ crumb: string; cookie: string } | null> {
   }
 }
 
-async function fetchOneTicker(ticker: string): Promise<{ ticker: string; score: number } | null> {
+async function fetchOneTicker(ticker: string): Promise<{ ticker: string; score: number; upsidePct?: number } | null> {
   try {
     const auth = await getCrumb();
     if (!auth) return null;
-    const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=recommendationTrend&crumb=${encodeURIComponent(auth.crumb)}`;
+    // 18차 P2#10: financialData 모듈 동시 요청하여 targetMean/current 획득 → upside % 계산.
+    const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=recommendationTrend,financialData&crumb=${encodeURIComponent(auth.crumb)}`;
     const { data } = await axios.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0',
@@ -86,9 +87,15 @@ async function fetchOneTicker(ticker: string): Promise<{ ticker: string; score: 
     const trends: Trend[] = data?.quoteSummary?.result?.[0]?.recommendationTrend?.trend || [];
     if (trends.length === 0) return null;
     const current = trends.find((t) => t.period === '0m') || trends[0];
-    return { ticker, score: scoreFromTrend(current) };
+    const fd = data?.quoteSummary?.result?.[0]?.financialData;
+    const targetMean = fd?.targetMeanPrice?.raw ?? fd?.targetMeanPrice;
+    const currentPrice = fd?.currentPrice?.raw ?? fd?.currentPrice;
+    let upsidePct: number | undefined;
+    if (typeof targetMean === 'number' && typeof currentPrice === 'number' && currentPrice > 0) {
+      upsidePct = parseFloat((((targetMean - currentPrice) / currentPrice) * 100).toFixed(2));
+    }
+    return { ticker, score: scoreFromTrend(current), upsidePct };
   } catch (error: any) {
-    // 401 반복 시 crumb 무효화 → 다음 호출에서 재취득
     if (error?.response?.status === 401) cachedCrumb = null;
     log.warn({ ticker, error: serializeError(error) }, 'analyst fetch failed');
     return null;
@@ -100,10 +107,13 @@ export interface AnalystConsensus {
   perTicker: Record<string, number>;
   tickerCount: number;
   fetchedAt: string;
+  // 18차 P2#10: 목표가 대비 상승여력
+  avgUpsidePct?: number;
+  perTickerUpsidePct?: Record<string, number>;
 }
 
 async function fetchLive(): Promise<AnalystConsensus | null> {
-  const results: Array<{ ticker: string; score: number }> = [];
+  const results: Array<{ ticker: string; score: number; upsidePct?: number }> = [];
   for (const t of MEGACAP) {
     const r = await fetchOneTicker(t);
     if (r) results.push(r);
@@ -113,11 +123,21 @@ async function fetchLive(): Promise<AnalystConsensus | null> {
   const avg = results.reduce((s, r) => s + r.score, 0) / results.length;
   const perTicker: Record<string, number> = {};
   for (const r of results) perTicker[r.ticker] = parseFloat(r.score.toFixed(3));
+  const upsideValues = results.filter((r) => typeof r.upsidePct === 'number').map((r) => r.upsidePct!);
+  const avgUpsidePct = upsideValues.length > 0
+    ? parseFloat((upsideValues.reduce((a, b) => a + b, 0) / upsideValues.length).toFixed(2))
+    : undefined;
+  const perTickerUpsidePct: Record<string, number> = {};
+  for (const r of results) {
+    if (typeof r.upsidePct === 'number') perTickerUpsidePct[r.ticker] = r.upsidePct;
+  }
   return {
     avgScore: parseFloat(avg.toFixed(3)),
     perTicker,
     tickerCount: results.length,
     fetchedAt: new Date().toISOString(),
+    avgUpsidePct,
+    perTickerUpsidePct: Object.keys(perTickerUpsidePct).length ? perTickerUpsidePct : undefined,
   };
 }
 
