@@ -3882,23 +3882,19 @@ export async function computeDerived(
 
   // === 19차 P1#4: FX_FOREIGN_DEVIATION_RATIO ===
   // stt_kospi §3부 "환율 10%↑ 시 외인 매도 5조 적정 vs 실제 60조 = 12배 ATM화" 절대 베이스라인.
-  // 직전 60영업일 환율 변화율 vs 외인 누적 순매도. baseline 5조/10% = 0.5조 per 1%.
+  // KRX history 단일 키 부재 → 기존 derived KOSPI_FOREIGN_NET20D (없으면 0) + KOSPI_FOREIGN_HISTORIC_EXTREME 활용.
   try {
     const krwHist = await readHistory('yahoo', 'USDKRW');
-    const krxHist = await readHistory('krx', 'KRX_FOREIGN_NET');
-    if (krwHist.length >= 60 && krxHist.length >= 20) {
+    const fgnNet20D = d.KOSPI_FOREIGN_NET20D?.value ?? null;
+    if (krwHist.length >= 60 && fgnNet20D !== null) {
       const krwLatest = krwHist[krwHist.length - 1].value;
       const krwPrev = krwHist[Math.max(0, krwHist.length - 60)].value;
       const krwChangePct = ((krwLatest - krwPrev) / krwPrev) * 100;
-      // 최근 20영업일 외인 누적 (단위: 억원, KRX_FOREIGN_NET 가 일별 net 일 가능성)
-      const recent = krxHist.slice(-20);
-      const cumForeign = recent.reduce((s, p) => s + (typeof p.value === 'number' ? p.value : 0), 0);
-      // 단위 변환 — KRX_FOREIGN_NET 이 억원 단위라면 cumForeign / 10000 = 조 단위
-      const cumTrillionKRW = cumForeign / 10000;
-      const expectedSellTrillion = krwChangePct > 0 ? krwChangePct * 0.5 : 0; // 환율 1%↑ → 외인 매도 0.5조 적정
+      // 단위 변환 — KOSPI_FOREIGN_NET20D 가 억원 → 조원
+      const cumTrillionKRW = fgnNet20D / 10000;
+      const expectedSellTrillion = krwChangePct > 0 ? krwChangePct * 0.5 : 0;
       let ratio = 0;
       if (expectedSellTrillion > 0.1 && cumTrillionKRW < 0) {
-        // 누적 매도(음수)를 양수로 변환 후 비율
         ratio = Math.abs(cumTrillionKRW) / expectedSellTrillion;
       }
       let level: number;
@@ -3925,11 +3921,11 @@ export async function computeDerived(
   // === 19차 P2#5: NEUTRAL_RATE_TEMPERATURE (골디락스 신호등 R/Y/G) ===
   // video4 §매크로 "고금리 빨간불 / 노란불 / 초록불". (FFR_target_mid - R*) 갭 기반.
   // R* (중립금리) 추정: NY Fed Holston-Laubach-Williams ≈ 0.7~1.1% 범위. 단순화로 1.0% 사용.
+  // DFEDTARU/L 미수집 환경에서는 EFFR (effective rate, FRED 기수집) 으로 fallback.
   try {
-    const upper = val(raw, 'DFEDTARU');
-    const lower = val(raw, 'DFEDTARL');
-    if (upper !== null && lower !== null) {
-      const targetMid = (upper + lower) / 2;
+    const effr = val(raw, 'EFFR');
+    if (effr !== null) {
+      const targetMid = effr;
       const RSTAR = 1.0; // NY Fed HLW 추정 평균
       const gap = targetMid - RSTAR;
       let level: number;
@@ -4133,14 +4129,10 @@ export async function computeDerived(
 
   // === 19차 P2#11: KOSPI_HISTORIC_OVERSHOOT_FLAG (75% YTD) ===
   // stt_kospi §1부 "75% 이상 후 조정 없이 직행 사례 거의 없음".
+  // 기존 derived KOSPI_YEAR_RETURN 재활용 (자체 fetch 불필요).
   try {
-    const ksHist = await fetchYahooHistory('^KS11', 280);
-    if (ksHist.length >= 250) {
-      const closes = ksHist.map((h) => h.close);
-      // 연초 대비 (최근 250영업일 ≈ 1년)
-      const yearStart = closes[0];
-      const last = closes[closes.length - 1];
-      const ytd = ((last - yearStart) / yearStart) * 100;
+    const ytd = d.KOSPI_YEAR_RETURN?.value ?? null;
+    if (ytd !== null) {
       const flag = ytd >= 75 ? 1 : 0;
       d.KOSPI_HISTORIC_OVERSHOOT_FLAG = {
         name: 'kospi_historic_overshoot_flag',
