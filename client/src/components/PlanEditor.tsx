@@ -57,16 +57,38 @@ interface Props {
   trancheUsedPct?: number;
 }
 
-// 19차 P3#15: 외부 PDF 리포트 링크 카드 — 노션 §주식·ETF·채권 정합
+// 19차 P3#15 + 20차 노션 정합 확장 — 25개 외부 링크 (URL 정정 포함)
 const EXTERNAL_LINKS = [
-  { label: '신한투자증권 리서치', url: 'https://open.shinhansec.com/v1/board/research/list.do' },
-  { label: '미래에셋자산운용', url: 'https://www.miraeasset.com/etf/etfData.do' },
-  { label: '우리자산운용', url: 'https://www.wooriam.com/research/list.do' },
-  { label: 'Fidelity Korea', url: 'https://www.fidelity.co.kr/insights/' },
+  // 노션 §리서치 / 리포트
+  { label: '신한투자증권 리서치', url: 'https://siw.shinhansec.com/siw/insights/research/list/view-popup.do' },
+  { label: '미래에셋자산운용 ETF', url: 'https://www.miraeasset.com/etf/etfData.do' },
+  { label: '미래에셋 미국증시(hkr1003)', url: 'https://securities.miraeasset.com/' },
+  { label: '우리자산운용 리서치', url: 'https://www.wooriam.com/research/list.do' },
+  { label: 'Fidelity Korea Insights', url: 'https://www.fidelity.co.kr/insights/' },
   { label: 'KCIF 국제금융센터', url: 'https://www.kcif.or.kr/finance/bondList' },
   { label: 'KIF 금융브리프', url: 'https://www.kif.re.kr/kif4/publication/pub_list?mid=20' },
+  { label: 'KDI 한국개발연구원', url: 'https://www.kdi.re.kr/research/economy_outlook' },
+  { label: '한국은행 경제전망', url: 'https://www.bok.or.kr/portal/bbs/B0000245/list.do?menuNo=200066' },
+  { label: 'IMF World Economic Outlook', url: 'https://www.imf.org/en/Publications/WEO' },
+  // 노션 §주식·ETF·채권 + 거시 분석
   { label: 'CME FedWatch Tool', url: 'https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html' },
-  { label: '마이핀플 ETF 순위', url: 'https://www.myfinpl.com/etf/' },
+  { label: 'CME Market Insights', url: 'https://www.cmegroup.com/ko/education/market-insights.html' },
+  { label: 'TipRanks (월가 컨센서스)', url: 'https://www.tipranks.com/' },
+  { label: 'TradingEconomics', url: 'https://tradingeconomics.com/' },
+  { label: 'Investing 캘린더', url: 'https://www.investing.com/economic-calendar/' },
+  // 노션 §스마트머니
+  { label: 'Dataroma 슈퍼인베스터', url: 'https://www.dataroma.com/m/home.php' },
+  { label: 'OpenInsider', url: 'http://openinsider.com/' },
+  { label: 'Insider Screener', url: 'https://www.insiderscreener.com/en/' },
+  { label: 'Fintel Institutional Ownership', url: 'https://fintel.io/so/us' },
+  { label: 'SEC EDGAR 8-K', url: 'https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K' },
+  // 노션 §자산제곱 자체 도구
+  { label: '자산제곱 유동성 대시보드', url: 'https://liquidity-dashboard-rho.vercel.app/' },
+  { label: '자산제곱 지정학 지도', url: 'https://assetx2-geomap.vercel.app/' },
+  { label: '마이핀플 ETF 순위', url: 'https://www.myfinpl.com/investment/etf' },
+  { label: 'Portfolio Visualizer', url: 'https://www.portfoliovisualizer.com/' },
+  // 노션 §실전 투자
+  { label: 'Threads @asset.x2', url: 'https://www.threads.net/@asset.x2' },
 ];
 
 const LENSES = [
@@ -74,7 +96,7 @@ const LENSES = [
   { key: 'liquidity', label: '② 유동성 (M2 / Fed / RRP)' },
   { key: 'psych', label: '③ 심리 (F&G / Put-Call / VIX)' },
   { key: 'flow', label: '④ 수급 (외인·기관 / 13F)' },
-  { key: 'value', label: '⑤ 밸류에이션 (PER / ERP / Buffett)' },
+  { key: 'value', label: '⑤ 밸류에이션 (PER / ERP)' },
   { key: 'disparity', label: '⑥ 이격도 (200MA / 연봉)' },
   { key: 'momentum', label: '⑦ 모멘텀 (MACD / 52W Hi / 멀티프레임)' },
 ];
@@ -137,6 +159,10 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
         <h1 className="text-2xl font-bold text-slate-100">🧭 나만의 투자 템플릿</h1>
         <p className="text-sm text-slate-400 mt-1">
           video1 §5부 — "시스템이 있으면 심리 싸움에서 이길 수 있다"
+        </p>
+        {/* 20차 노션 §전하는말 철학 인용 */}
+        <p className="text-xs text-slate-500 mt-1 italic">
+          "투자는 바둑 — 큰 흐름 먼저. 복기하고 공부하면서 실력을 쌓아야 한다." — 노션 §전하는 말
         </p>
         {/* 19차 P2#12: 확신 점수 표시 + 미달 시 게이트 경고 */}
         {typeof convictionScore === 'number' && (

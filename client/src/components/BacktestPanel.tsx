@@ -8,6 +8,11 @@ interface PeriodResult {
   max_drawdown: number;
   regime_changes: number;
   data_points: number;
+  // 20차 노션 A2: PortfolioVisualizer 정합 메트릭
+  sharpe?: number;
+  cagr_pct?: number;
+  calmar?: number;
+  annual_volatility_pct?: number;
 }
 
 interface BacktestData {
@@ -98,6 +103,15 @@ export function BacktestPanel() {
               <div className="mt-2 space-y-1 text-[10px] text-[var(--muted)]">
                 <div className="flex justify-between"><span>최대 낙폭</span><span className="text-red-400 font-mono">{p.max_drawdown}%</span></div>
                 <div className="flex justify-between"><span>국면 변동</span><span className="font-mono">{p.regime_changes}회</span></div>
+                {/* 20차 노션 A2: PortfolioVisualizer 정합 — Sharpe/CAGR/Calmar/Vol */}
+                {typeof p.sharpe === 'number' && (
+                  <>
+                    <div className="flex justify-between"><span>Sharpe</span><span className="font-mono">{p.sharpe}</span></div>
+                    <div className="flex justify-between"><span>CAGR</span><span className="font-mono">{p.cagr_pct}%</span></div>
+                    <div className="flex justify-between"><span>Calmar</span><span className="font-mono">{p.calmar}</span></div>
+                    <div className="flex justify-between"><span>연환산 변동성</span><span className="font-mono">{p.annual_volatility_pct}%</span></div>
+                  </>
+                )}
               </div>
             </div>
           ))}

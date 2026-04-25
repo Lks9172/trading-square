@@ -79,6 +79,19 @@ export function ConvictionPanel({ derived }: Props) {
   const earnBeat = derived.EARNINGS_BEAT_RATIO;
   const earnDday = derived.EARNINGS_DDAY_MEGACAP;
   const krDisc = derived.KR_MATERIAL_DISCLOSURE_LEVEL;
+  // 20차 신규
+  const ksQuarterWick = derived.KOSPI_QUARTERLY_UPPER_WICK_PCT;
+  const ksHalfWick = derived.KOSPI_HALFYEAR_UPPER_WICK_PCT;
+  const trumpPress = derived.TRUMP_AGENDA_PRESSURE;
+  const debtTraj = derived.US_DEBT_TRAJECTORY_LEVEL;
+  const liqRiskTrans = derived.LIQUIDITY_RISK_TRANSMISSION;
+  const dgs303w = derived.DGS30_3W_CHANGE_BPS;
+  const goldParadox = derived.GOLD_GEOPOLITICAL_PARADOX;
+  const retailInst = derived.RETAIL_INSTITUTION_DIVERGENCE;
+  const usDisc = derived.US_MATERIAL_DISCLOSURE_LEVEL;
+  const insiderLarge = derived.INSIDER_LARGE_SINGLE_BUY;
+  const naveEco = derived.NAVER_ECONOMY_REPORT_DAYS_AGO;
+  const ddCrisis = derived.NASDAQ_DRAWDOWN_CRISIS_LEVEL;
 
   const ddayKeys = [
     ['POWELL_SPEECH_DDAY', 'Powell 발언'],
@@ -87,7 +100,24 @@ export function ConvictionPanel({ derived }: Props) {
     ['KDI_FORECAST_DDAY', 'KDI 전망'],
     ['IMF_WEO_DDAY', 'IMF WEO'],
     ['KIF_BIWEEKLY_DDAY', 'KIF 격주'],
+    ['BOK_QUARTERLY_OUTLOOK_DDAY', 'BOK 분기'],
   ] as const;
+  // 20차 7축 mini 분해 — CONVICTION_SCORE_7AXIS 의 formula 에서 추출
+  const convFormula = conv?.formula || '';
+  const axesParse = (() => {
+    // formula 예시: "차트+1/유동성-1/정책0/지정학+1/모멘텀+1/애널+1/매크로+1 = 5"
+    const m = convFormula.match(/차트([+\-]?\d)\/유동성([+\-]?\d)\/정책([+\-]?\d)\/지정학([+\-]?\d)\/모멘텀([+\-]?\d)\/애널([+\-]?\d)\/매크로([+\-]?\d)/);
+    if (!m) return null;
+    return [
+      ['차트', parseInt(m[1])],
+      ['유동성', parseInt(m[2])],
+      ['정책', parseInt(m[3])],
+      ['지정학', parseInt(m[4])],
+      ['모멘텀', parseInt(m[5])],
+      ['애널', parseInt(m[6])],
+      ['매크로', parseInt(m[7])],
+    ] as Array<[string, number]>;
+  })();
 
   const convVal = typeof conv?.value === 'number' ? conv.value : 0;
   const convAccent = convVal >= 5 ? 'border-emerald-700 bg-emerald-950/30' : convVal >= 3 ? 'border-cyan-700 bg-cyan-950/30' : convVal <= -3 ? 'border-red-700 bg-red-950/30' : 'border-slate-700';
@@ -109,6 +139,20 @@ export function ConvictionPanel({ derived }: Props) {
             <span className="text-xs text-slate-400">/ 7</span>
           </div>
           <div className="text-[11px] text-slate-400 mt-1">{conv?.interpretation || '7축 차트·유동성·정책·지정학·모멘텀·애널·매크로'}</div>
+          {axesParse && (
+            <div className="mt-2 grid grid-cols-7 gap-1">
+              {axesParse.map(([name, v]) => {
+                const color = v > 0 ? 'bg-emerald-500' : v < 0 ? 'bg-red-500' : 'bg-slate-600';
+                return (
+                  <div key={name} className="text-center">
+                    <div className={`h-1.5 rounded ${color}`}></div>
+                    <div className="text-[8px] text-slate-400 mt-0.5">{name}</div>
+                    <div className="text-[9px] font-mono text-slate-300">{v > 0 ? '+' : ''}{v}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
 
         <Card title="🚀 착한 레버리지 트리거" accent={levAccent}>
@@ -186,6 +230,47 @@ export function ConvictionPanel({ derived }: Props) {
           <Stat label="평균 surprise" value={fmt(earnSurp, '%')} />
           <Stat label="beat ratio" value={fmt(earnBeat, '%')} />
           <Stat label="다음 D-day" value={fmt(earnDday, '일')} />
+        </Card>
+      </div>
+
+      {/* 20차 신규 — 분기/반기봉 + Trump + 부채 + 디커플링 + 트러스 + paradox + retail-inst */}
+      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card title="📈 KOSPI 분기봉 윗꼬리">
+          <div>{ksQuarterWick?.interpretation || (typeof ksQuarterWick?.value === 'number' ? `${ksQuarterWick.value}%` : '—')}</div>
+        </Card>
+        <Card title="📈 KOSPI 반기봉 윗꼬리">
+          <div>{ksHalfWick?.interpretation || (typeof ksHalfWick?.value === 'number' ? `${ksHalfWick.value}%` : '—')}</div>
+        </Card>
+        <Card title="🇺🇸 Trump 어젠다 압력">
+          <div>{trumpPress?.interpretation || `${fmt(trumpPress)}/4`}</div>
+        </Card>
+        <Card title="💰 미국 부채 trajectory">
+          <div>{debtTraj?.interpretation || fmt(debtTraj)}</div>
+        </Card>
+        <Card title="💸 유동성 ↔ 위험자산 전이">
+          <div>{liqRiskTrans?.interpretation || fmt(liqRiskTrans)}</div>
+        </Card>
+        <Card title="📊 30Y 3주 변화 (트러스)">
+          <div>{dgs303w?.interpretation || (typeof dgs303w?.value === 'number' ? `${dgs303w.value >= 0 ? '+' : ''}${dgs303w.value}bp` : '—')}</div>
+        </Card>
+        <Card title="🥇 Gold 지정학 paradox">
+          <div>{goldParadox?.interpretation || (goldParadox?.value === 1 ? '🟠 paradox 활성' : '⚪ 미발동')}</div>
+        </Card>
+        <Card title="👥 Retail vs Inst 디버전스">
+          <div>{retailInst?.interpretation || fmt(retailInst)}</div>
+        </Card>
+        <Card title="📰 SEC 8-K 미국 공시">
+          <div>{usDisc?.interpretation || fmt(usDisc)}</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">{derived.US_MATERIAL_DISCLOSURE_8K_24H?.value ?? '-'}건/24h</div>
+        </Card>
+        <Card title="🐳 내부자 ≥$500k 단건">
+          <div>{insiderLarge?.interpretation || (typeof insiderLarge?.value === 'number' ? `${insiderLarge.value}건` : '—')}</div>
+        </Card>
+        <Card title="📰 Naver 경제분석 D-day">
+          <div>{naveEco?.interpretation || (typeof naveEco?.value === 'number' ? `D-${naveEco.value}` : '—')}</div>
+        </Card>
+        <Card title="📉 NASDAQ DD 시스템 위기">
+          <div>{ddCrisis?.interpretation || fmt(ddCrisis)}</div>
         </Card>
       </div>
 
