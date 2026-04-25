@@ -107,6 +107,10 @@ export async function computeDerived(
     geoRisk?: number;
     policyDirection?: number;
     ismPmi?: number | null;
+    // 19차: horizon / DCA progress / ETF theme 통과
+    investmentHorizon?: 'short' | 'medium' | 'long';
+    trancheUsedPct?: number;
+    etfInflowTheme?: string;
   },
 ): Promise<Record<string, DerivedIndicator>> {
   const d: Record<string, DerivedIndicator> = {};
@@ -914,7 +918,7 @@ export async function computeDerived(
   const nasdaqAbove = d.NASDAQ_ABOVE_200DMA?.value;
   if (icsaVal !== null && nasdaqAbove !== undefined) {
     const highICSA = icsaVal >= 300000;
-    const lowICSA = icsaVal < 250000;
+    const lowICSA = icsaVal < 300000; // 19차 P2#11: 영상 §3부 "30만 미만" 정합 (250K → 300K)
     const above = nasdaqAbove === 1;
     let label = 'NEUTRAL';
     let score = 0;
@@ -2172,9 +2176,10 @@ export async function computeDerived(
       } else if (usdkrw >= 1480 && foreignSellStreak >= 3) {
         level = 1;
         label = 'SOFT — 환율 1480+ AND 외인 3일+ 연속 매도';
-      } else if (usdkrw <= 1400 && foreignSellStreak <= 0) {
+      } else if (usdkrw <= 1480 && foreignSellStreak <= 0) {
+        // 19차 P2#11: WATCH 컷 1400 → 1480. video5 §3-1 "1480 이하 = 외국인 복귀 컷" 정합.
         level = -1;
-        label = 'WATCH — 환율 1400- AND 외인 매도 streak 없음 (복귀 유리)';
+        label = 'WATCH — 환율 1480- AND 외인 매도 streak 없음 (복귀 유리)';
       }
       if (level !== null) {
         d.FX_FOREIGN_COMBO_ALERT = {
@@ -3809,9 +3814,10 @@ export async function computeDerived(
     const geo = d.HORMUZ_CHAIN_SCORE?.value ?? null;
     axes.geo = geo === null ? 0 : (geo <= 0 ? 1 : geo >= 2 ? -1 : 0);
 
-    // 5) 모멘텀 — NASDAQ_RSI_14 50 기준
+    // 5) 모멘텀 — NASDAQ_RSI_14. 19차 P2#11: RSI 70+ 도 +1 (video1 §확산 "더 오를 수 있음").
+    //    단 RSI ≥85 극과매수만 0 처리 (반전 위험).
     const rsi = d.NASDAQ_RSI_14?.value ?? null;
-    axes.momentum = rsi === null ? 0 : (rsi >= 50 && rsi < 70 ? 1 : rsi < 40 ? -1 : 0);
+    axes.momentum = rsi === null ? 0 : (rsi >= 50 && rsi < 85 ? 1 : rsi < 40 ? -1 : 0);
 
     // 6) 기관 리포트 — ANALYST_CONSENSUS_NASDAQ_MEGACAP rating (-2~+2 → -1/0/+1 양자화)
     const an = d.ANALYST_CONSENSUS_NASDAQ_MEGACAP?.value ?? null;
@@ -3870,6 +3876,384 @@ export async function computeDerived(
         value: level,
         date: today(),
         formula: `rim=${rim.toFixed(0)}, last=${last.toFixed(0)}, handleLow=${handleLow.toFixed(0)}. ${label}. video2 §4부 근사 (5년).`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 19차 P1#4: FX_FOREIGN_DEVIATION_RATIO ===
+  // stt_kospi §3부 "환율 10%↑ 시 외인 매도 5조 적정 vs 실제 60조 = 12배 ATM화" 절대 베이스라인.
+  // 직전 60영업일 환율 변화율 vs 외인 누적 순매도. baseline 5조/10% = 0.5조 per 1%.
+  try {
+    const krwHist = await readHistory('yahoo', 'USDKRW');
+    const krxHist = await readHistory('krx', 'KRX_FOREIGN_NET');
+    if (krwHist.length >= 60 && krxHist.length >= 20) {
+      const krwLatest = krwHist[krwHist.length - 1].value;
+      const krwPrev = krwHist[Math.max(0, krwHist.length - 60)].value;
+      const krwChangePct = ((krwLatest - krwPrev) / krwPrev) * 100;
+      // 최근 20영업일 외인 누적 (단위: 억원, KRX_FOREIGN_NET 가 일별 net 일 가능성)
+      const recent = krxHist.slice(-20);
+      const cumForeign = recent.reduce((s, p) => s + (typeof p.value === 'number' ? p.value : 0), 0);
+      // 단위 변환 — KRX_FOREIGN_NET 이 억원 단위라면 cumForeign / 10000 = 조 단위
+      const cumTrillionKRW = cumForeign / 10000;
+      const expectedSellTrillion = krwChangePct > 0 ? krwChangePct * 0.5 : 0; // 환율 1%↑ → 외인 매도 0.5조 적정
+      let ratio = 0;
+      if (expectedSellTrillion > 0.1 && cumTrillionKRW < 0) {
+        // 누적 매도(음수)를 양수로 변환 후 비율
+        ratio = Math.abs(cumTrillionKRW) / expectedSellTrillion;
+      }
+      let level: number;
+      let label: string;
+      if (ratio >= 6) { level = 3; label = `🔴 ATM화 극단 (${ratio.toFixed(1)}배 — stt_kospi §3부 "12배 같은 비정상")`; }
+      else if (ratio >= 3) { level = 2; label = `🟠 ATM화 경계 (${ratio.toFixed(1)}배 — 기준 대비 3배 초과)`; }
+      else if (ratio >= 1.5) { level = 1; label = `🟡 적정 초과 (${ratio.toFixed(1)}배)`; }
+      else { level = 0; label = `⚪ 적정 (${ratio.toFixed(1)}배)`; }
+      d.FX_FOREIGN_DEVIATION_RATIO = {
+        name: 'fx_foreign_deviation_ratio',
+        value: parseFloat(ratio.toFixed(2)),
+        date: today(),
+        formula: `환율 60D ${krwChangePct.toFixed(2)}% → 적정 매도 ${expectedSellTrillion.toFixed(1)}조, 실제 ${Math.abs(cumTrillionKRW).toFixed(1)}조 매도 = ${ratio.toFixed(1)}배. ${label}. stt_kospi §3부 "환율 10%↑ → 5조 = 1배 baseline".`,
+      };
+      d.FX_FOREIGN_DEVIATION_LEVEL = {
+        name: 'fx_foreign_deviation_level',
+        value: level,
+        date: today(),
+        formula: `0=적정, 1=초과, 2=경계, 3=극단(ATM화).`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 19차 P2#5: NEUTRAL_RATE_TEMPERATURE (골디락스 신호등 R/Y/G) ===
+  // video4 §매크로 "고금리 빨간불 / 노란불 / 초록불". (FFR_target_mid - R*) 갭 기반.
+  // R* (중립금리) 추정: NY Fed Holston-Laubach-Williams ≈ 0.7~1.1% 범위. 단순화로 1.0% 사용.
+  try {
+    const upper = val(raw, 'DFEDTARU');
+    const lower = val(raw, 'DFEDTARL');
+    if (upper !== null && lower !== null) {
+      const targetMid = (upper + lower) / 2;
+      const RSTAR = 1.0; // NY Fed HLW 추정 평균
+      const gap = targetMid - RSTAR;
+      let level: number;
+      let label: string;
+      if (gap >= 3) { level = 2; label = '🔴 빨간불 — 고긴축 (FFR-R* ≥ 3%p)'; }
+      else if (gap >= 1.5) { level = 1; label = '🟡 노란불 — 긴축 (FFR-R* 1.5~3%p)'; }
+      else if (gap >= 0) { level = 0; label = '🟢 초록불 — 중립~약긴축 (FFR-R* 0~1.5%p)'; }
+      else { level = -1; label = '🟢🟢 초완화 (FFR < R*) — 부양 적극'; }
+      d.NEUTRAL_RATE_TEMPERATURE = {
+        name: 'neutral_rate_temperature',
+        value: level,
+        date: today(),
+        formula: `FFR target mid ${targetMid.toFixed(2)}% - R* ${RSTAR}% = ${gap.toFixed(2)}%p. ${label}. video4 §매크로 신호등.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 19차 P2#7: RANGE_BREAK_FAKEOUT ===
+  // video3 §174 "위로 돌파한다고 롱 잡은 사람들 물려있는 상태".
+  // 일봉 최근 20일 고점 갱신 후 5일 내 그 고점의 -3% 이상 재이탈 시 페이크아웃.
+  try {
+    const nHist = await fetchYahooHistory('^IXIC', 60);
+    if (nHist.length >= 30) {
+      const closes = nHist.map((h) => h.close);
+      const n = closes.length;
+      // 최근 25~5일 사이 20일 고점 갱신 후 → 최근 5일 종가 검사
+      let breakoutIdx = -1;
+      for (let i = n - 5; i >= n - 25; i--) {
+        const window = closes.slice(Math.max(0, i - 20), i);
+        const winMax = Math.max(...window);
+        if (closes[i] > winMax * 1.005) { breakoutIdx = i; break; }
+      }
+      let fakeout = 0;
+      let label = '⚪ 페이크아웃 없음';
+      if (breakoutIdx > 0) {
+        const breakoutHigh = closes[breakoutIdx];
+        const recent = closes.slice(breakoutIdx + 1);
+        const minAfter = recent.length > 0 ? Math.min(...recent) : breakoutHigh;
+        if (minAfter < breakoutHigh * 0.97) {
+          fakeout = 1;
+          label = `🟠 페이크아웃 의심 — ${breakoutHigh.toFixed(0)} 돌파 후 ${minAfter.toFixed(0)} (-${(((breakoutHigh - minAfter) / breakoutHigh) * 100).toFixed(1)}%)`;
+        }
+      }
+      d.NASDAQ_RANGE_BREAK_FAKEOUT = {
+        name: 'nasdaq_range_break_fakeout',
+        value: fakeout,
+        date: today(),
+        formula: `${label}. video3 §174 "돌파 척하다 회귀 = 단기 급락 가속".`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 19차 P2#8: HELIUM_AI_BOTTLENECK (간이 proxy) ===
+  // video5 §2부 "전 세계 헬륨 상당 부분이 카타르… AI 칩 생산 병목".
+  // 정량 헬륨 가격 데이터 없음 → SOXX(반도체 광역) 30D 변화 + Hormuz 점수 결합 proxy.
+  try {
+    const soxxHist = await fetchYahooHistory('SOXX', 35);
+    const hormuz = d.HORMUZ_CHAIN_SCORE?.value ?? 0;
+    if (soxxHist.length >= 30) {
+      const closes = soxxHist.map((h) => h.close);
+      const ret30 = ((closes[closes.length - 1] - closes[0]) / closes[0]) * 100;
+      // 호르무즈 점수 ≥1 (악화) AND SOXX -5%↓ → 헬륨/원료 공급 우려
+      let level = 0;
+      let label = '⚪ 정상';
+      if (hormuz >= 2 && ret30 < -5) { level = 2; label = '🔴 카타르 LNG 차단 가설 + SOXX 약세 = 헬륨 공급 우려'; }
+      else if (hormuz >= 1 && ret30 < -3) { level = 1; label = '🟡 헬륨 공급 경계'; }
+      else if (hormuz <= 0 && ret30 > 5) { level = -1; label = '🟢 카타르 정상 + SOXX 강세 = 공급 안정'; }
+      d.HELIUM_AI_BOTTLENECK = {
+        name: 'helium_ai_bottleneck',
+        value: level,
+        date: today(),
+        formula: `Hormuz=${hormuz}, SOXX 30D=${ret30.toFixed(1)}%. ${label}. video5 §2부 "헬륨 = AI 칩 병목" proxy.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 19차 P2#9: UPPER_WICK_IMPULSE (윗꼬리 거래량 가중) ===
+  // video2 §4부 "추세 통틀어 가장 강한 매도세". 윗꼬리/몸통 비율 × 거래량 임팩트.
+  try {
+    const nHist = await fetchYahooHistory('^IXIC', 70);
+    if (nHist.length >= 60) {
+      const last = nHist[nHist.length - 1] as any;
+      const o = last.open ?? last.close;
+      const h = last.high ?? last.close;
+      const l = last.low ?? last.close;
+      const c = last.close;
+      const v = last.volume ?? 0;
+      const upperWick = h - Math.max(o, c);
+      const body = Math.abs(c - o) || 0.0001;
+      const wickRatio = upperWick / body;
+      const avgVol = nHist.slice(-60).reduce((s, p: any) => s + (p.volume ?? 0), 0) / 60;
+      const volImpact = avgVol > 0 ? v / avgVol : 1;
+      const impulse = wickRatio * volImpact;
+      let level: number;
+      let label: string;
+      if (impulse >= 3 && wickRatio >= 1) { level = 2; label = `🔴 강한 윗꼬리 매도세 (wick/body=${wickRatio.toFixed(1)}, vol×${volImpact.toFixed(1)})`; }
+      else if (impulse >= 1.5 && wickRatio >= 0.6) { level = 1; label = '🟡 윗꼬리 매도 압력'; }
+      else { level = 0; label = '⚪ 정상'; }
+      d.NASDAQ_UPPER_WICK_IMPULSE = {
+        name: 'nasdaq_upper_wick_impulse',
+        value: parseFloat(impulse.toFixed(2)),
+        date: today(),
+        formula: `윗꼬리/몸통 ${wickRatio.toFixed(2)} × 거래량 비율 ${volImpact.toFixed(2)} = ${impulse.toFixed(2)}. ${label}. video2 §4부 "강한 매도세".`,
+      };
+      d.NASDAQ_UPPER_WICK_LEVEL = {
+        name: 'nasdaq_upper_wick_level',
+        value: level,
+        date: today(),
+        formula: `0=정상, 1=경계, 2=강한 매도세.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 19차 P2#6: USER_HORIZON_ALIGNMENT ===
+  // video1 §5부 "본인 시계열 먼저 정해야". horizon 기준 만족 자산 신호 정렬도.
+  try {
+    const horizon = manualInputs?.investmentHorizon ?? 'medium';
+    // short: 단기 모멘텀 (NASDAQ_RSI > 50, multiframe ≥1, fakeout 없음)
+    // medium: regime + drawdown 적정 + conviction
+    // long: drawdown 깊을수록 좋음 + cup&handle + cb_gold
+    const conv = d.CONVICTION_SCORE_7AXIS?.value ?? 0;
+    const mf = d.NASDAQ_MULTIFRAME_ALIGNMENT?.value ?? 0;
+    const dd = d.NASDAQ_DRAWDOWN_ATH?.value ?? 0;
+    const fake = d.NASDAQ_RANGE_BREAK_FAKEOUT?.value ?? 0;
+    let aligned: number;
+    let label: string;
+    if (horizon === 'short') {
+      aligned = mf >= 1 && fake === 0 && conv >= 1 ? 1 : (fake === 1 || conv <= -2 ? -1 : 0);
+      label = `단기(${horizon}) — multiframe=${mf}, fakeout=${fake}, conv=${conv}`;
+    } else if (horizon === 'long') {
+      aligned = (dd <= -15 || conv >= 2) ? 1 : (conv <= -2 ? -1 : 0);
+      label = `장기(${horizon}) — DD=${dd.toFixed(1)}%, conv=${conv}, 깊은 조정 우호`;
+    } else {
+      aligned = conv >= 2 && dd > -25 ? 1 : (conv <= -2 ? -1 : 0);
+      label = `중기(${horizon}) — conv=${conv}, DD=${dd.toFixed(1)}%`;
+    }
+    d.USER_HORIZON_ALIGNMENT = {
+      name: 'user_horizon_alignment',
+      value: aligned,
+      date: today(),
+      formula: `${label}. video1 §5부 "본인 시계열 먼저". 1=정합, 0=관망, -1=불일치.`,
+    };
+  } catch { void 0; }
+
+  // === 19차 P3#14: DCA_TRANCHE_PROGRESS ===
+  // video1+3 "3회 이상 분할". 사용자가 manualInputs.trancheUsedPct 로 입력 — 잔여 buffer 표시.
+  try {
+    const used = manualInputs?.trancheUsedPct;
+    if (typeof used === 'number' && used >= 0 && used <= 100) {
+      let level: number;
+      let label: string;
+      if (used >= 100) { level = 2; label = '🟠 분할매수 100% — 추가 진입 없음'; }
+      else if (used >= 70) { level = 1; label = '🟡 분할매수 70%+ — 잔여 buffer 적음'; }
+      else if (used >= 30) { level = 0; label = '⚪ 진행 중 (30~70%)'; }
+      else { level = -1; label = '🟢 buffer 충분 (<30%)'; }
+      d.DCA_TRANCHE_PROGRESS = {
+        name: 'dca_tranche_progress',
+        value: used,
+        date: today(),
+        formula: `사용자 분할매수 사용률 ${used}%. ${label}. video1+3 "3회 이상 분할".`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 19차 P2#10: ETF_INFLOW_THEME (마이핀플 manual) ===
+  // 노션 §"마이핀플 미국 ETF 순위" — 정량화 어려워 사용자 manual input 으로 노출.
+  try {
+    const theme = manualInputs?.etfInflowTheme;
+    if (typeof theme === 'string' && theme.trim().length > 0) {
+      d.ETF_INFLOW_THEME = {
+        name: 'etf_inflow_theme',
+        value: 1,
+        date: today(),
+        formula: `주간 ETF 자금 유입 테마: "${theme.trim()}" (manual input). 노션 §마이핀플.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 19차 P3#13: SCENARIO_GATE_A_B (A=추세재개, B=박스 하방이탈, W=관망) ===
+  // stt_kospi §4부 "두 가지 그림 동시에". 환율 1480 컷 + 외인 흐름 + 코스피 200DMA 결합.
+  try {
+    const krw = val(raw, 'USDKRW');
+    const kospiAbove200 = d.KOSPI_DISPARITY?.value ?? null;
+    const fgnFlow = d.KOSPI_FOREIGN_FLOW_LEVEL?.value ?? d.KOSPI_FOREIGN_HISTORIC_EXTREME?.value ?? null;
+    let scenario: number;
+    let label: string;
+    if (krw !== null && krw <= 1480 && kospiAbove200 !== null && kospiAbove200 > 0 && (fgnFlow === null || fgnFlow >= 0)) {
+      scenario = 1; label = '🟢 시나리오 A — 추세 재개 (환율<1480 + 200DMA 상회 + 외인 정상)';
+    } else if (krw !== null && krw >= 1500 && kospiAbove200 !== null && kospiAbove200 < -3) {
+      scenario = -1; label = '🔴 시나리오 B — 박스 하방 이탈 (환율>1500 + 200DMA -3%↓)';
+    } else {
+      scenario = 0; label = '🟡 관망 — 시나리오 분기점';
+    }
+    d.SCENARIO_GATE_A_B = {
+      name: 'scenario_gate_a_b',
+      value: scenario,
+      date: today(),
+      formula: `KRW=${krw?.toFixed(1) ?? '-'}, KOSPI 200DMA disp=${kospiAbove200?.toFixed(2) ?? '-'}%, fgn=${fgnFlow ?? '-'}. ${label}. stt_kospi §4부 "두 그림".`,
+    };
+  } catch { void 0; }
+
+  // === 19차 P2#11: KOSPI_HISTORIC_OVERSHOOT_FLAG (75% YTD) ===
+  // stt_kospi §1부 "75% 이상 후 조정 없이 직행 사례 거의 없음".
+  try {
+    const ksHist = await fetchYahooHistory('^KS11', 280);
+    if (ksHist.length >= 250) {
+      const closes = ksHist.map((h) => h.close);
+      // 연초 대비 (최근 250영업일 ≈ 1년)
+      const yearStart = closes[0];
+      const last = closes[closes.length - 1];
+      const ytd = ((last - yearStart) / yearStart) * 100;
+      const flag = ytd >= 75 ? 1 : 0;
+      d.KOSPI_HISTORIC_OVERSHOOT_FLAG = {
+        name: 'kospi_historic_overshoot_flag',
+        value: flag,
+        date: today(),
+        formula: `KOSPI 1년 ${ytd.toFixed(1)}% ${flag ? '≥75% — 역사적 과열 (조정 직전)' : '<75%'}. stt_kospi §1부.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 19차 P3#18: 18차 ★ 잔여 정리 — 호르무즈 정상화 + 금은비 130 극단 + 인물 캘린더 ===
+  // 호르무즈 정상화 후 D+60~90 동안 반도체 양의 연쇄 (HORMUZ_UNWIND_SEMI_TAILWIND)
+  try {
+    const hormuzScore = d.HORMUZ_CHAIN_SCORE?.value ?? null;
+    const hormuzLabel = d.HORMUZ_CHAIN_LABEL?.value ?? null;
+    // hormuz score ≤0 (정상) AND label 이 unwind/normal 표기 시 활성. 단순화: hormuz≤0 + SOXX 90D 강세
+    const soxxHist90 = await fetchYahooHistory('SOXX', 95);
+    if (hormuzScore !== null && hormuzScore <= 0 && soxxHist90.length >= 90) {
+      const closes = soxxHist90.map((h) => h.close);
+      const ret90 = ((closes[closes.length - 1] - closes[0]) / closes[0]) * 100;
+      const tailwind = ret90 > 8 ? 1 : 0;
+      d.HORMUZ_UNWIND_SEMI_TAILWIND = {
+        name: 'hormuz_unwind_semi_tailwind',
+        value: tailwind,
+        date: today(),
+        formula: `Hormuz score=${hormuzScore} (정상) + SOXX 90D=${ret90.toFixed(1)}% ${tailwind ? '→ 반도체 양의 연쇄 활성' : '(연쇄 약함)'}. video5 §"호르무즈 정상화 후 반도체 병목 완화".`,
+      };
+    }
+  } catch { void 0; }
+
+  // 금은비 130+ 극단 플래그 (video2 §2부 "코로나 130 → 4개월 150%")
+  try {
+    const goldSilverRatio = d.GOLD_SILVER_RATIO?.value ?? null;
+    if (goldSilverRatio !== null) {
+      let extremeLevel = 0;
+      let label = '⚪ 정상';
+      if (goldSilverRatio >= 130) { extremeLevel = 2; label = '🔴 금은비 130+ 극단 — video2 §"코로나 130→은 150%" 사례 구간'; }
+      else if (goldSilverRatio >= 100) { extremeLevel = 1; label = '🟠 금은비 100+ 과열 — 은 매수 우호 진행 중'; }
+      else if (goldSilverRatio >= 80) { extremeLevel = 0; label = '🟡 금은비 80+ 경계'; }
+      else { extremeLevel = -1; label = '🟢 금은비 정상 (<80)'; }
+      d.GOLD_SILVER_RATIO_EXTREME = {
+        name: 'gold_silver_ratio_extreme',
+        value: extremeLevel,
+        date: today(),
+        formula: `GSR=${goldSilverRatio.toFixed(1)}. ${label}. video2 §2부.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 19차 P3#16: KCIF 최신 토픽 라벨 ===
+  try {
+    const { fetchKcifLatestTopic } = await import('../collectors/kcif-topic');
+    const k = await fetchKcifLatestTopic();
+    if (k) {
+      d.KCIF_LATEST_TOPIC_DAYS_AGO = {
+        name: 'kcif_latest_topic_days_ago',
+        value: k.daysAgo,
+        date: today(),
+        formula: `KCIF 최신 보고서 "${k.title}" (${k.publishedDate}, D-${k.daysAgo}). 노션 §KCIF.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 19차 P3#18: 인물 / 기관 발언 D-day 정적 캘린더 ===
+  // FOMC/BOK 외 주요 발언자(Powell/Bessent/Warsh)와 기관 보고서(KDI/IMF/KIF) 정적 일정.
+  // 사용자 manual update 시 재배포 — collectors/calendar.ts 와 별개로 derived 단순 키.
+  try {
+    const todayMs = Date.now();
+    const events: Array<{ key: string; date: string; label: string }> = [
+      // 2026 정기 (예시 — 실제 일정 사용자 확정 후 갱신)
+      { key: 'POWELL_SPEECH_DDAY', date: '2026-05-08', label: 'Powell 의장 발언 (FOMC 직후)' },
+      { key: 'BESSENT_TESTIMONY_DDAY', date: '2026-05-15', label: 'Bessent 재무장관 의회 증언' },
+      { key: 'WARSH_KEYNOTE_DDAY', date: '2026-06-12', label: 'Warsh 전이사 매크로 강연' },
+      { key: 'KDI_FORECAST_DDAY', date: '2026-05-22', label: 'KDI 경제전망' },
+      { key: 'IMF_WEO_DDAY', date: '2026-07-22', label: 'IMF World Economic Outlook' },
+      { key: 'KIF_BIWEEKLY_DDAY', date: '2026-05-09', label: 'KIF 금융브리프 격주' },
+    ];
+    for (const e of events) {
+      const dt0 = new Date(e.date).getTime();
+      if (Number.isNaN(dt0)) continue;
+      const dday = Math.ceil((dt0 - todayMs) / 86400000);
+      if (dday < -7) continue; // 7일 지난 이벤트는 표시 안 함
+      d[e.key] = {
+        name: e.key.toLowerCase(),
+        value: Math.max(0, dday),
+        date: today(),
+        formula: `${e.label} @ ${e.date} (${dday >= 0 ? `D-${dday}` : `D+${-dday}`}).`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 19차 P1#3: CME FedWatch 확률 (ZQ Fed Funds futures 기반 근사) ===
+  try {
+    const { fetchFedWatchProbabilities } = await import('../collectors/cme-fedwatch');
+    const fw = await fetchFedWatchProbabilities();
+    if (fw) {
+      d.FOMC_RATE_CUT_PROB_25BP = {
+        name: 'fomc_rate_cut_prob_25bp',
+        value: fw.cutProb25bp,
+        date: today(),
+        formula: `ZQ=F implied ${fw.impliedRatePct.toFixed(2)}% vs target mid ${fw.currentTargetMidPct.toFixed(2)}% → gap ${fw.gapBp.toFixed(1)}bp. cut${fw.cutProb25bp}% / hold${fw.holdProb}% / hike${fw.hikeProb25bp}%. 노션 §CME FedWatch 정합.`,
+      };
+      d.FOMC_RATE_HIKE_PROB_25BP = {
+        name: 'fomc_rate_hike_prob_25bp',
+        value: fw.hikeProb25bp,
+        date: today(),
+        formula: `ZQ implied gap ${fw.gapBp.toFixed(1)}bp 양수 시 인상 베팅.`,
+      };
+      d.FOMC_RATE_HOLD_PROB = {
+        name: 'fomc_rate_hold_prob',
+        value: fw.holdProb,
+        date: today(),
+        formula: `잔여 = 동결 베팅.`,
       };
     }
   } catch { void 0; }

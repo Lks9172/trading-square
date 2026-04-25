@@ -307,6 +307,74 @@ export function interpretDerived(
     if (value === -1) return '🟡 cup 미완성 — 장기 구조 약함';
     return null;
   }
+  // 19차 신규
+  if (key === 'FX_FOREIGN_DEVIATION_RATIO') {
+    if (value >= 6) return '🔴 외인 매도 ATM화 극단 — stt_kospi §3부 "12배 같은 비정상"';
+    if (value >= 3) return '🟠 외인 매도 적정 대비 3배 초과 — ATM화 경계';
+    if (value >= 1.5) return '🟡 외인 매도 적정 초과';
+    return null;
+  }
+  if (key === 'FX_FOREIGN_DEVIATION_LEVEL') {
+    if (value >= 3) return '🔴 ATM화 극단';
+    if (value === 2) return '🟠 ATM화 경계';
+    if (value === 1) return '🟡 적정 초과';
+    return null;
+  }
+  if (key === 'NEUTRAL_RATE_TEMPERATURE') {
+    if (value === 2) return '🔴 빨간불 — FFR-R* ≥3%p 고긴축 (video4 §매크로)';
+    if (value === 1) return '🟡 노란불 — 긴축 진행';
+    if (value === 0) return '🟢 초록불 — 중립~약긴축';
+    if (value === -1) return '🟢🟢 초완화 (FFR < R*)';
+    return null;
+  }
+  if (key === 'NASDAQ_RANGE_BREAK_FAKEOUT') {
+    if (value === 1) return '🟠 페이크아웃 의심 — video3 §174 "단기 급락 가속 트리거"';
+    return null;
+  }
+  if (key === 'HELIUM_AI_BOTTLENECK') {
+    if (value === 2) return '🔴 헬륨/AI 반도체 공급 우려 — video5 §"카타르 LNG 차단 가설"';
+    if (value === 1) return '🟡 헬륨 공급 경계';
+    if (value === -1) return '🟢 카타르 정상 + SOXX 강세';
+    return null;
+  }
+  if (key === 'NASDAQ_UPPER_WICK_IMPULSE') {
+    if (value >= 3) return '🔴 강한 윗꼬리 매도세 — video2 §4부 "추세 통틀어 가장 강한"';
+    if (value >= 1.5) return '🟡 윗꼬리 매도 압력';
+    return null;
+  }
+  if (key === 'NASDAQ_UPPER_WICK_LEVEL') {
+    if (value === 2) return '🔴 강한 매도세 (거래량 폭증 동반)';
+    if (value === 1) return '🟡 매도 압력 경계';
+    return null;
+  }
+  if (key === 'SCENARIO_GATE_A_B') {
+    if (value === 1) return '🟢 시나리오 A — 추세 재개 (stt_kospi §4부)';
+    if (value === -1) return '🔴 시나리오 B — 박스 하방 이탈';
+    return '🟡 관망 — 시나리오 분기점';
+  }
+  if (key === 'KOSPI_HISTORIC_OVERSHOOT_FLAG') {
+    if (value === 1) return '🔴 KOSPI 75%+ 1년 — stt_kospi §1부 "조정 없이 직행 사례 거의 없음"';
+    return null;
+  }
+  if (key === 'HORMUZ_UNWIND_SEMI_TAILWIND') {
+    if (value === 1) return '🟢 호르무즈 정상화 → 반도체 양의 연쇄 (video5)';
+    return null;
+  }
+  if (key === 'GOLD_SILVER_RATIO_EXTREME') {
+    if (value === 2) return '🔴 금은비 130+ — video2 §"코로나 130→은 150%" 사례 구간';
+    if (value === 1) return '🟠 금은비 100+ 과열 — 은 매수 우호';
+    if (value === -1) return '🟢 금은비 정상';
+    return null;
+  }
+  if (key === 'FOMC_RATE_CUT_PROB_25BP') {
+    if (value >= 70) return '🟢 25bp 인하 우세 (시장 베팅 70%+)';
+    if (value >= 40) return '🟡 25bp 인하 분분 (40~70%)';
+    return null;
+  }
+  if (key === 'FOMC_RATE_HIKE_PROB_25BP') {
+    if (value >= 50) return '🔴 25bp 인상 우세 — 매파 베팅';
+    return null;
+  }
   if (key === 'M2_SP500_LEAD_ALIGNMENT') {
     if (value === 1) return '🟢 M2→S&P 13주 리드 방향 일치 — 유동성 신호 유효';
     if (value === -1) return '🟠 M2-S&P 방향 이탈 — 리드 상관 약화';

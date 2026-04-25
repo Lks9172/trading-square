@@ -342,17 +342,17 @@ function nasdaqSignal(
     }, 'SELL');
   }
 
-  // Fix #3(2차 감사): thresholds 를 total 상대값으로 복원.
-  //   base(total=7) 기준 {strongBuy:5, buy:4, hold:3, reduce:2} 는 기존과 동일한 수치.
-  //   PSYCH 보너스로 total=8 이 되면 모든 임계가 +1 shift → 보너스가 임계를 붕괴시키지 않음.
-  //   수식: strongBuy = total-2, buy = total-3, hold = total-4, reduce = total-5, sell = 0.
+  // 19차: NASDAQ STRONG_BUY 임계 1단 상향 — BUY 영역 1 met → 2 met 확보.
+  //   기존 {strongBuy: total-2, buy: total-3} 는 BUY 영역이 1 met 폭만 차지해 HOLD→STRONG_BUY 직행 자주 발생.
+  //   변경 {strongBuy: total-1, buy: total-3} → base(total=7) 기준 BUY=4~5 (2 met), STRONG_BUY=6~7 (만점 근접).
+  //   PSYCH 보너스로 total=8 이 되면 +1 shift 동일.
   const overrides: string[] = [];
   const baseSignal = signalFromScore(met, total, {
     sell: 0,
     reduce: Math.max(0, total - 5),
     hold: Math.max(0, total - 4),
     buy: Math.max(0, total - 3),
-    strongBuy: Math.max(0, total - 2),
+    strongBuy: Math.max(1, total - 1),
   });
   let signal = baseSignal;
 

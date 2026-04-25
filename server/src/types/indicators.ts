@@ -129,6 +129,10 @@ export interface UserProfile {
     geoRisk: number;
     cbBuying: boolean;
     ismPmi: number | null | undefined;
+    // 19차 P3#14: 분할매수 진척도 (0~100%)
+    trancheUsedPct?: number;
+    // 19차 P2#10: 주간 마이핀플 ETF inflow 테마 (수동 입력)
+    etfInflowTheme?: string;
   };
 }
 

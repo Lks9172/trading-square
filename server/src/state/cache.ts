@@ -94,7 +94,13 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
     }),
   );
   const derived = await withSpan('macrosquare.engine.derived', (s) =>
-    computeDerived(raw, effectiveInputs).then((d) => {
+    computeDerived(raw, {
+      ...effectiveInputs,
+      // 19차: profile 의 horizon + manual DCA / ETF theme 통과
+      investmentHorizon: profile.investmentHorizon,
+      trancheUsedPct: effectiveInputs.trancheUsedPct,
+      etfInflowTheme: effectiveInputs.etfInflowTheme,
+    }).then((d) => {
       s.setAttribute('derived.keys', Object.keys(d).length);
       return d;
     }),
