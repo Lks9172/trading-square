@@ -4264,25 +4264,27 @@ export async function computeDerived(
 
   // === 20차 A5: LIQUIDITY_RISK_TRANSMISSION (M2 ↑ but 위험자산 약세 디커플링) ===
   // stt_video4 §7:31 "돈이 위험자산까지 흘러오질 못하고 있어요".
+  // SECTOR_SOXX (30D 광역 반도체) 와 GLOBAL_M2_PROXY 결합 — 별도 fetch 없이.
   try {
     const m2 = d.GLOBAL_M2_PROXY?.value ?? null;
-    const iwmHist = await fetchYahooHistory('IWM', 25);
-    const hygHist = await fetchYahooHistory('HYG', 25);
-    if (m2 !== null && iwmHist.length >= 22 && hygHist.length >= 22) {
-      const iwmRet = ((iwmHist[iwmHist.length - 1].close - iwmHist[0].close) / iwmHist[0].close) * 100;
-      const hygRet = ((hygHist[hygHist.length - 1].close - hygHist[0].close) / hygHist[0].close) * 100;
-      const decoupled = m2 > 2 && (iwmRet < -2 || hygRet < -1);
+    const sectorIwm = d.SECTOR_XLK?.value ?? null; // 기술 섹터 30D 변화 (IWM 대용)
+    const sectorXlf = d.SECTOR_XLF?.value ?? null; // 금융 (HYG 대용)
+    if (m2 !== null) {
+      const riskAvg = sectorIwm !== null && sectorXlf !== null
+        ? (sectorIwm + sectorXlf) / 2
+        : sectorIwm ?? sectorXlf ?? 0;
+      const decoupled = m2 > 2 && riskAvg < -2;
       let level: number;
       let label: string;
-      if (decoupled && iwmRet < -5) { level = 2; label = '🔴 강한 디커플링 — M2 양수인데 IWM/HYG 동반 약세'; }
+      if (decoupled && riskAvg < -5) { level = 2; label = '🔴 강한 디커플링 — M2 양수인데 위험자산 약세'; }
       else if (decoupled) { level = 1; label = '🟡 디커플링 진행'; }
-      else if (m2 > 0 && iwmRet > 2) { level = -1; label = '🟢 정상 — 유동성 → 위험자산 전이'; }
+      else if (m2 > 0 && riskAvg > 2) { level = -1; label = '🟢 정상 — 유동성 → 위험자산 전이'; }
       else { level = 0; label = '⚪ 중립'; }
       d.LIQUIDITY_RISK_TRANSMISSION = {
         name: 'liquidity_risk_transmission',
         value: level,
         date: today(),
-        formula: `M2 YoY=${m2.toFixed(1)}%, IWM 25D=${iwmRet.toFixed(1)}%, HYG 25D=${hygRet.toFixed(1)}%. ${label}. video4 §7:31.`,
+        formula: `M2 YoY=${m2.toFixed(1)}%, 위험섹터 30D=${riskAvg.toFixed(1)}% (XLK/XLF 평균). ${label}. video4 §7:31.`,
       };
     }
   } catch { void 0; }
@@ -4305,26 +4307,30 @@ export async function computeDerived(
   } catch { void 0; }
 
   // === 20차 A8: GOLD_GEOPOLITICAL_PARADOX ===
-  // video2 §10:01 "전쟁 → 유가 → 인플레 → 금 하락" 분기.
+  // video2 §10:01 "전쟁 → 유가 → 인플레 → 금 하락" 분기. 조건 미충족도 0 으로 노출.
   try {
     const geoRisk = manualInputs?.geoRisk ?? 0;
     const wti = val(raw, 'WTI');
     const wtiHist = (await readHistory('fred', 'DCOILWTICO')).slice(-60);
     const cpiYoY = d.CPI_YOY?.value ?? null;
-    if (geoRisk >= 3 && wti !== null && wtiHist.length >= 60 && cpiYoY !== null) {
-      const wti60D = ((wti - wtiHist[0].value) / wtiHist[0].value) * 100;
-      const paradox = wti60D > 15 && cpiYoY > 3;
-      const level = paradox ? 1 : 0;
-      const label = paradox
-        ? '🟠 Gold paradox — geoRisk + WTI ↑ + CPI 가속 → 단기 금 하락 가능'
-        : '⚪ paradox 미발동';
-      d.GOLD_GEOPOLITICAL_PARADOX = {
-        name: 'gold_geopolitical_paradox',
-        value: level,
-        date: today(),
-        formula: `geoRisk=${geoRisk}, WTI 60D=${wti60D.toFixed(1)}%, CPI YoY=${cpiYoY.toFixed(2)}%. ${label}. video2 §10:01.`,
-      };
+    let paradox = false;
+    let wti60D = 0;
+    if (wti !== null && wtiHist.length >= 60) {
+      wti60D = ((wti - wtiHist[0].value) / wtiHist[0].value) * 100;
     }
+    if (geoRisk >= 3 && cpiYoY !== null) {
+      paradox = wti60D > 15 && cpiYoY > 3;
+    }
+    const level = paradox ? 1 : 0;
+    const label = paradox
+      ? '🟠 Gold paradox — geoRisk + WTI ↑ + CPI 가속 → 단기 금 하락 가능'
+      : '⚪ paradox 미발동';
+    d.GOLD_GEOPOLITICAL_PARADOX = {
+      name: 'gold_geopolitical_paradox',
+      value: level,
+      date: today(),
+      formula: `geoRisk=${geoRisk}, WTI 60D=${wti60D.toFixed(1)}%, CPI YoY=${cpiYoY?.toFixed(2) ?? '-'}%. ${label}. video2 §10:01.`,
+    };
   } catch { void 0; }
 
   // === 20차 A9: RETAIL_INSTITUTION_DIVERGENCE ===
@@ -4441,15 +4447,13 @@ export async function computeDerived(
   try {
     const { fetchInsiderSummary } = await import('../collectors/smart-money');
     const ins = await fetchInsiderSummary({ allowStale: true });
-    if (ins?.largeBuyCount !== undefined) {
-      const lb = ins.largeBuyCount;
-      d.INSIDER_LARGE_SINGLE_BUY = {
-        name: 'insider_large_single_buy',
-        value: lb,
-        date: today(),
-        formula: `≥$500k 단일 매수 ${lb}건 24h. top amounts: $${(ins.largeBuyTopAmounts ?? []).slice(0, 3).map((a) => Math.round(a / 1000) + 'k').join(', ')}. 노션 §OpenInsider.`,
-      };
-    }
+    const lb = ins?.largeBuyCount ?? 0;
+    d.INSIDER_LARGE_SINGLE_BUY = {
+      name: 'insider_large_single_buy',
+      value: lb,
+      date: today(),
+      formula: `≥$500k 단일 매수 ${lb}건 24h. top amounts: $${(ins?.largeBuyTopAmounts ?? []).slice(0, 3).map((a) => Math.round(a / 1000) + 'k').join(', ') || '-'}. 노션 §OpenInsider.`,
+    };
   } catch { void 0; }
 
   // === 19차 P3#16: KCIF 최신 토픽 라벨 ===
