@@ -3885,7 +3885,7 @@ export async function computeDerived(
   // KRX history 단일 키 부재 → 기존 derived KOSPI_FOREIGN_NET20D (없으면 0) + KOSPI_FOREIGN_HISTORIC_EXTREME 활용.
   try {
     const krwHist = await readHistory('yahoo', 'USDKRW');
-    const fgnNet20D = d.KOSPI_FOREIGN_NET20D?.value ?? null;
+    const fgnNet20D = d.KOSPI_FOREIGN_NET_20D?.value ?? null;
     if (krwHist.length >= 60 && fgnNet20D !== null) {
       const krwLatest = krwHist[krwHist.length - 1].value;
       const krwPrev = krwHist[Math.max(0, krwHist.length - 60)].value;
@@ -3980,55 +3980,47 @@ export async function computeDerived(
 
   // === 19차 P2#8: HELIUM_AI_BOTTLENECK (간이 proxy) ===
   // video5 §2부 "전 세계 헬륨 상당 부분이 카타르… AI 칩 생산 병목".
-  // 정량 헬륨 가격 데이터 없음 → SOXX(반도체 광역) 30D 변화 + Hormuz 점수 결합 proxy.
+  // SOXX 30D return 은 d.SECTOR_SOXX 로 이미 산출됨 (자체 fetch 불필요).
   try {
-    const soxxHist = await fetchYahooHistory('SOXX', 35);
+    const ret30 = d.SECTOR_SOXX?.value ?? null;
     const hormuz = d.HORMUZ_CHAIN_SCORE?.value ?? 0;
-    if (soxxHist.length >= 30) {
-      const closes = soxxHist.map((h) => h.close);
-      const ret30 = ((closes[closes.length - 1] - closes[0]) / closes[0]) * 100;
-      // 호르무즈 점수 ≥1 (악화) AND SOXX -5%↓ → 헬륨/원료 공급 우려
+    if (ret30 !== null) {
       let level = 0;
       let label = '⚪ 정상';
-      if (hormuz >= 2 && ret30 < -5) { level = 2; label = '🔴 카타르 LNG 차단 가설 + SOXX 약세 = 헬륨 공급 우려'; }
+      if (hormuz >= 2 && ret30 < -5) { level = 2; label = '🔴 카타르 LNG 차단 가설 + SOXX 약세'; }
       else if (hormuz >= 1 && ret30 < -3) { level = 1; label = '🟡 헬륨 공급 경계'; }
-      else if (hormuz <= 0 && ret30 > 5) { level = -1; label = '🟢 카타르 정상 + SOXX 강세 = 공급 안정'; }
+      else if (hormuz <= 0 && ret30 > 5) { level = -1; label = '🟢 카타르 정상 + SOXX 강세'; }
       d.HELIUM_AI_BOTTLENECK = {
         name: 'helium_ai_bottleneck',
         value: level,
         date: today(),
-        formula: `Hormuz=${hormuz}, SOXX 30D=${ret30.toFixed(1)}%. ${label}. video5 §2부 "헬륨 = AI 칩 병목" proxy.`,
+        formula: `Hormuz=${hormuz}, SOXX 30D=${ret30.toFixed(1)}%. ${label}. video5 §2부 proxy.`,
       };
     }
   } catch { void 0; }
 
-  // === 19차 P2#9: UPPER_WICK_IMPULSE (윗꼬리 거래량 가중) ===
-  // video2 §4부 "추세 통틀어 가장 강한 매도세". 윗꼬리/몸통 비율 × 거래량 임팩트.
+  // === 19차 P2#9: UPPER_WICK_IMPULSE (close 변동 + 거래량 가중 단순화) ===
+  // video2 §4부 "추세 통틀어 가장 강한 매도세". OHLC 미수집 환경에서는 close 일변동 + 거래량으로 근사.
   try {
     const nHist = await fetchYahooHistory('^IXIC', 70);
     if (nHist.length >= 60) {
       const last = nHist[nHist.length - 1] as any;
-      const o = last.open ?? last.close;
-      const h = last.high ?? last.close;
-      const l = last.low ?? last.close;
-      const c = last.close;
+      const prev = nHist[nHist.length - 2] as any;
+      const dropPct = prev?.close > 0 ? Math.max(0, ((prev.close - last.close) / prev.close) * 100) : 0;
       const v = last.volume ?? 0;
-      const upperWick = h - Math.max(o, c);
-      const body = Math.abs(c - o) || 0.0001;
-      const wickRatio = upperWick / body;
       const avgVol = nHist.slice(-60).reduce((s, p: any) => s + (p.volume ?? 0), 0) / 60;
       const volImpact = avgVol > 0 ? v / avgVol : 1;
-      const impulse = wickRatio * volImpact;
+      const impulse = dropPct * volImpact;
       let level: number;
       let label: string;
-      if (impulse >= 3 && wickRatio >= 1) { level = 2; label = `🔴 강한 윗꼬리 매도세 (wick/body=${wickRatio.toFixed(1)}, vol×${volImpact.toFixed(1)})`; }
-      else if (impulse >= 1.5 && wickRatio >= 0.6) { level = 1; label = '🟡 윗꼬리 매도 압력'; }
+      if (impulse >= 3 && dropPct >= 1.5) { level = 2; label = `🔴 강한 매도세 (drop ${dropPct.toFixed(2)}%, vol×${volImpact.toFixed(2)})`; }
+      else if (impulse >= 1.5 && dropPct >= 1) { level = 1; label = '🟡 매도 압력'; }
       else { level = 0; label = '⚪ 정상'; }
       d.NASDAQ_UPPER_WICK_IMPULSE = {
         name: 'nasdaq_upper_wick_impulse',
         value: parseFloat(impulse.toFixed(2)),
         date: today(),
-        formula: `윗꼬리/몸통 ${wickRatio.toFixed(2)} × 거래량 비율 ${volImpact.toFixed(2)} = ${impulse.toFixed(2)}. ${label}. video2 §4부 "강한 매도세".`,
+        formula: `일변동 -${dropPct.toFixed(2)}% × 거래량 비율 ${volImpact.toFixed(2)} = ${impulse.toFixed(2)}. ${label}. video2 §4부.`,
       };
       d.NASDAQ_UPPER_WICK_LEVEL = {
         name: 'nasdaq_upper_wick_level',
@@ -4143,22 +4135,18 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
-  // === 19차 P3#18: 18차 ★ 잔여 정리 — 호르무즈 정상화 + 금은비 130 극단 + 인물 캘린더 ===
-  // 호르무즈 정상화 후 D+60~90 동안 반도체 양의 연쇄 (HORMUZ_UNWIND_SEMI_TAILWIND)
+  // === 19차 P3#18: 18차 ★ 잔여 정리 — 호르무즈 정상화 + 금은비 130 극단 ===
+  // SOXX 90D 별도 fetch 어려움 → 30D return 으로 단순화.
   try {
     const hormuzScore = d.HORMUZ_CHAIN_SCORE?.value ?? null;
-    const hormuzLabel = d.HORMUZ_CHAIN_LABEL?.value ?? null;
-    // hormuz score ≤0 (정상) AND label 이 unwind/normal 표기 시 활성. 단순화: hormuz≤0 + SOXX 90D 강세
-    const soxxHist90 = await fetchYahooHistory('SOXX', 95);
-    if (hormuzScore !== null && hormuzScore <= 0 && soxxHist90.length >= 90) {
-      const closes = soxxHist90.map((h) => h.close);
-      const ret90 = ((closes[closes.length - 1] - closes[0]) / closes[0]) * 100;
-      const tailwind = ret90 > 8 ? 1 : 0;
+    const ret30 = d.SECTOR_SOXX?.value ?? null;
+    if (hormuzScore !== null && hormuzScore <= 0 && ret30 !== null) {
+      const tailwind = ret30 > 8 ? 1 : 0;
       d.HORMUZ_UNWIND_SEMI_TAILWIND = {
         name: 'hormuz_unwind_semi_tailwind',
         value: tailwind,
         date: today(),
-        formula: `Hormuz score=${hormuzScore} (정상) + SOXX 90D=${ret90.toFixed(1)}% ${tailwind ? '→ 반도체 양의 연쇄 활성' : '(연쇄 약함)'}. video5 §"호르무즈 정상화 후 반도체 병목 완화".`,
+        formula: `Hormuz=${hormuzScore} (정상) + SOXX 30D=${ret30.toFixed(1)}% ${tailwind ? '→ 반도체 양의 연쇄' : '(연쇄 약함)'}. video5 §정상화 후 병목 완화.`,
       };
     }
   } catch { void 0; }
