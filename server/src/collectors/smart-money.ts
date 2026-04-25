@@ -37,6 +37,9 @@ interface InsiderSourceResult extends SmartMoneySnapshot {
   clusterTickerCount?: number;
   maxClusterSize?: number;
   topClusters?: Array<{ ticker: string; count: number }>;
+  // 20차 노션 A3: 단일 큰거래 (≥$500k) 24h 카운트
+  largeBuyCount?: number;
+  largeBuyTopAmounts?: number[];
 }
 
 interface SmartMoneySources {
@@ -70,6 +73,9 @@ export interface SmartMoneyData extends SmartMoneySnapshot {
   clusterTickerCount?: number;
   maxClusterSize?: number;
   topClusters?: Array<{ ticker: string; count: number }>;
+  // 20차 노션 A3: 단일 큰거래
+  largeBuyCount?: number;
+  largeBuyTopAmounts?: number[];
 }
 
 export function scoreSmartMoney(insiderBuyRatio: number): number {
@@ -176,6 +182,23 @@ function parseOpenInsiderSummary(html: string): SmartMoneySnapshot | null {
   };
 }
 
+// 20차 노션 A3: 단일 큰거래 (≥$500k) 24h 카운트 — cluster 와 보완.
+export function parseOpenInsiderLargeSingleBuys(html: string): { largeBuyCount: number; topAmounts: number[] } {
+  const rowRe = /<tr[\s\S]*?<\/tr>/gi;
+  const rows = html.match(rowRe) || [];
+  const amounts: number[] = [];
+  for (const row of rows) {
+    if (!/P - Purchase/i.test(row)) continue;
+    // 거래액 추출 — $1,234,567 형식
+    const m = row.match(/\$([\d,]+(?:\.\d+)?)/);
+    if (!m) continue;
+    const v = parseFloat(m[1].replace(/,/g, ''));
+    if (Number.isFinite(v) && v >= 500000) amounts.push(v);
+  }
+  amounts.sort((a, b) => b - a);
+  return { largeBuyCount: amounts.length, topAmounts: amounts.slice(0, 5) };
+}
+
 // 18차 P1#5: cluster buy 파싱 — openinsider 테이블에서 ticker 별 buy row 카운트.
 // 같은 ticker 가 N 행 이상 나오면 cluster. buy row 인지 판단은 "P - Purchase" 키워드로.
 export function parseOpenInsiderClusters(html: string): { clusterTickerCount: number; maxClusterSize: number; topClusters: Array<{ ticker: string; count: number }> } {
@@ -211,6 +234,7 @@ async function fetchOpenInsiderLatestSummary(): Promise<InsiderSourceResult> {
     throw new Error('openinsider latest returned no purchase/sale rows');
   }
   const clusters = parseOpenInsiderClusters(html);
+  const large = parseOpenInsiderLargeSingleBuys(html);
   return {
     ...parsed,
     primarySource: 'openinsider-latest',
@@ -218,6 +242,8 @@ async function fetchOpenInsiderLatestSummary(): Promise<InsiderSourceResult> {
     clusterTickerCount: clusters.clusterTickerCount,
     maxClusterSize: clusters.maxClusterSize,
     topClusters: clusters.topClusters,
+    largeBuyCount: large.largeBuyCount,
+    largeBuyTopAmounts: large.topAmounts,
   };
 }
 
@@ -409,6 +435,8 @@ async function fetchInsiderSummaryFresh(): Promise<SmartMoneyData | null> {
       clusterTickerCount: insider?.clusterTickerCount,
       maxClusterSize: insider?.maxClusterSize,
       topClusters: insider?.topClusters,
+      largeBuyCount: insider?.largeBuyCount,
+      largeBuyTopAmounts: insider?.largeBuyTopAmounts,
     };
     cachedSmartMoney = { value: result, fetchedAt: Date.now() };
     await writeSourceCache(SMART_MONEY_CACHE_KEY, result, {

@@ -4170,6 +4170,288 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // 20차 신규 derived
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // === 20차 A1: KOSPI 분기봉 / 반기봉 윗꼬리 ===
+  // stt_kospi §1부 "3개월봉에서 위로 찔렀다 내려온 윗꼬리".
+  // 일봉 기반 — 최근 63영업일(~3개월) max - close, 최근 126영업일(~6개월) max - close.
+  try {
+    const ksHist = await fetchYahooHistory('^KS11', 200);
+    if (ksHist.length >= 130) {
+      const closes = ksHist.map((h) => h.close);
+      const n = closes.length;
+      const last = closes[n - 1];
+      const q63 = closes.slice(n - 63);
+      const h63 = closes.slice(n - 126, n - 63);
+      const qMax = Math.max(...q63);
+      const qStart = q63[0];
+      const qBody = Math.max(0.01, Math.abs(last - qStart));
+      const qWick = Math.max(0, qMax - last);
+      const qWickPct = (qWick / qBody) * 100;
+      d.KOSPI_QUARTERLY_UPPER_WICK_PCT = {
+        name: 'kospi_quarterly_upper_wick_pct',
+        value: parseFloat(qWickPct.toFixed(1)),
+        date: today(),
+        formula: `최근 63일 max ${qMax.toFixed(0)} - close ${last.toFixed(0)} = wick ${qWick.toFixed(0)} / body ${qBody.toFixed(0)} = ${qWickPct.toFixed(1)}%. stt_kospi §1부 "분기봉 윗꼬리".`,
+      };
+      // 반기봉 (126일)
+      const h126 = closes.slice(n - 126);
+      const halfMax = Math.max(...h126);
+      const halfStart = h126[0];
+      const halfBody = Math.max(0.01, Math.abs(last - halfStart));
+      const halfWick = Math.max(0, halfMax - last);
+      const halfWickPct = (halfWick / halfBody) * 100;
+      d.KOSPI_HALFYEAR_UPPER_WICK_PCT = {
+        name: 'kospi_halfyear_upper_wick_pct',
+        value: parseFloat(halfWickPct.toFixed(1)),
+        date: today(),
+        formula: `최근 126일 max ${halfMax.toFixed(0)} - close ${last.toFixed(0)} = ${halfWickPct.toFixed(1)}% wick/body. stt_kospi §"반기봉".`,
+      };
+      void h63;
+    }
+  } catch { void 0; }
+
+  // === 20차 A3: TRUMP_AGENDA_PRESSURE (관세 + 지정학 + WTI + 선거 D-day 통합) ===
+  // stt_video4 §5:51 "관세 막기 싫으면 미국에 투자해라". 4축 압력.
+  try {
+    const wti = val(raw, 'WTI');
+    const wtiPrev = (await readHistory('fred', 'DCOILWTICO')).slice(-30).map((p) => p.value);
+    const wti30D = wti !== null && wtiPrev.length > 0 ? ((wti - wtiPrev[0]) / wtiPrev[0]) * 100 : 0;
+    const electionD = d.ELECTION_DDAY_LEVEL?.value ?? 0;
+    const geoRisk = manualInputs?.geoRisk ?? 0;
+    const dxy = val(raw, 'DXY') ?? 100;
+    let pressure = 0;
+    if (geoRisk >= 3) pressure += 1;
+    if (wti30D > 10) pressure += 1;
+    if (electionD === 2) pressure += 1; // 선거 임박
+    if (dxy > 105) pressure += 1; // 강달러 → 관세 효과 증폭
+    let label: string;
+    if (pressure >= 3) label = '🔴 트럼프 어젠다 압력 극대';
+    else if (pressure >= 2) label = '🟠 트럼프 어젠다 압력 진행';
+    else if (pressure >= 1) label = '🟡 단일 축 활성';
+    else label = '⚪ 압력 약함';
+    d.TRUMP_AGENDA_PRESSURE = {
+      name: 'trump_agenda_pressure',
+      value: pressure,
+      date: today(),
+      formula: `관세 압력(geoRisk=${geoRisk}) + WTI 30D=${wti30D.toFixed(1)}% + 선거 D-day=${electionD} + DXY=${dxy.toFixed(1)} → ${pressure}/4. ${label}. stt_video4 §5:51.`,
+    };
+  } catch { void 0; }
+
+  // === 20차 A4: US_DEBT_TRAJECTORY_LEVEL (현재 부채 + 재정 적자 결합) ===
+  // stt_video4 §10:23 "IMF 2031 GDP 140%" + §10:11 "10년 추가 3.3조".
+  try {
+    const debtTier = d.FEDERAL_DEBT_GDP_TIER?.value ?? null;
+    const deficitTier = d.FEDERAL_DEFICIT_GDP_TIER?.value ?? null;
+    if (debtTier !== null && deficitTier !== null) {
+      const sum = (debtTier as number) + (deficitTier as number);
+      let level: number;
+      let label: string;
+      if (sum >= 4) { level = 3; label = '🔴 부채 + 적자 모두 극단 — 채권자경단 임박'; }
+      else if (sum >= 3) { level = 2; label = '🟠 부채 + 적자 동시 경계 — IMF 2031 시나리오'; }
+      else if (sum >= 2) { level = 1; label = '🟡 부채 누적 진행'; }
+      else { level = 0; label = '⚪ 부채 안정'; }
+      d.US_DEBT_TRAJECTORY_LEVEL = {
+        name: 'us_debt_trajectory_level',
+        value: level,
+        date: today(),
+        formula: `debt tier=${debtTier} + deficit tier=${deficitTier} = ${sum}. ${label}. stt_video4 §10:11~10:23.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 20차 A5: LIQUIDITY_RISK_TRANSMISSION (M2 ↑ but 위험자산 약세 디커플링) ===
+  // stt_video4 §7:31 "돈이 위험자산까지 흘러오질 못하고 있어요".
+  try {
+    const m2 = d.GLOBAL_M2_PROXY?.value ?? null;
+    const iwmHist = await fetchYahooHistory('IWM', 25);
+    const hygHist = await fetchYahooHistory('HYG', 25);
+    if (m2 !== null && iwmHist.length >= 22 && hygHist.length >= 22) {
+      const iwmRet = ((iwmHist[iwmHist.length - 1].close - iwmHist[0].close) / iwmHist[0].close) * 100;
+      const hygRet = ((hygHist[hygHist.length - 1].close - hygHist[0].close) / hygHist[0].close) * 100;
+      const decoupled = m2 > 2 && (iwmRet < -2 || hygRet < -1);
+      let level: number;
+      let label: string;
+      if (decoupled && iwmRet < -5) { level = 2; label = '🔴 강한 디커플링 — M2 양수인데 IWM/HYG 동반 약세'; }
+      else if (decoupled) { level = 1; label = '🟡 디커플링 진행'; }
+      else if (m2 > 0 && iwmRet > 2) { level = -1; label = '🟢 정상 — 유동성 → 위험자산 전이'; }
+      else { level = 0; label = '⚪ 중립'; }
+      d.LIQUIDITY_RISK_TRANSMISSION = {
+        name: 'liquidity_risk_transmission',
+        value: level,
+        date: today(),
+        formula: `M2 YoY=${m2.toFixed(1)}%, IWM 25D=${iwmRet.toFixed(1)}%, HYG 25D=${hygRet.toFixed(1)}%. ${label}. video4 §7:31.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 20차 A7: DGS30_3W_CHANGE_BPS (트러스 패턴 — 3주 30Y 변화) ===
+  // stt_video4 §9:46-10:03 "영국 트러스 사례 강도".
+  try {
+    const dgs30Hist = await readHistory('fred', 'DGS30');
+    if (dgs30Hist.length >= 22) {
+      const last = dgs30Hist[dgs30Hist.length - 1].value;
+      const prev3w = dgs30Hist[dgs30Hist.length - 22].value;
+      const changeBp = (last - prev3w) * 100;
+      d.DGS30_3W_CHANGE_BPS = {
+        name: 'dgs30_3w_change_bps',
+        value: parseFloat(changeBp.toFixed(1)),
+        date: today(),
+        formula: `30Y ${prev3w.toFixed(2)}% → ${last.toFixed(2)}% = ${changeBp >= 0 ? '+' : ''}${changeBp.toFixed(1)}bp (3주). 트러스 사례 임계 ≥+30bp. video4 §9:46.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 20차 A8: GOLD_GEOPOLITICAL_PARADOX ===
+  // video2 §10:01 "전쟁 → 유가 → 인플레 → 금 하락" 분기.
+  try {
+    const geoRisk = manualInputs?.geoRisk ?? 0;
+    const wti = val(raw, 'WTI');
+    const wtiHist = (await readHistory('fred', 'DCOILWTICO')).slice(-60);
+    const cpiYoY = d.CPI_YOY?.value ?? null;
+    if (geoRisk >= 3 && wti !== null && wtiHist.length >= 60 && cpiYoY !== null) {
+      const wti60D = ((wti - wtiHist[0].value) / wtiHist[0].value) * 100;
+      const paradox = wti60D > 15 && cpiYoY > 3;
+      const level = paradox ? 1 : 0;
+      const label = paradox
+        ? '🟠 Gold paradox — geoRisk + WTI ↑ + CPI 가속 → 단기 금 하락 가능'
+        : '⚪ paradox 미발동';
+      d.GOLD_GEOPOLITICAL_PARADOX = {
+        name: 'gold_geopolitical_paradox',
+        value: level,
+        date: today(),
+        formula: `geoRisk=${geoRisk}, WTI 60D=${wti60D.toFixed(1)}%, CPI YoY=${cpiYoY.toFixed(2)}%. ${label}. video2 §10:01.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 20차 A9: RETAIL_INSTITUTION_DIVERGENCE ===
+  // video4 §1:34 "축제 한복판 비 올 수 있다" — 개인 낙관 vs 기관 감축.
+  try {
+    const naaim = val(raw, 'NAAIM_EXPOSURE');
+    const aaii = val(raw, 'AAII_BULL_BEAR_SPREAD');
+    const instFlow = d.INSTITUTIONAL_NASDAQ_FLOW?.value ?? null;
+    if (naaim !== null && aaii !== null && instFlow !== null) {
+      const retailBullish = (naaim >= 75) || (aaii >= 15);
+      const instBearish = instFlow <= -1;
+      const divergence = retailBullish && instBearish;
+      let level: number;
+      let label: string;
+      if (divergence) { level = -2; label = '🔴 개인 낙관 + 기관 감축 — 축제 끝물 경고'; }
+      else if (naaim <= 30 && instFlow >= 1) { level = 2; label = '🟢 개인 비관 + 기관 매집 — 역발상 매수'; }
+      else { level = 0; label = '⚪ 정합'; }
+      d.RETAIL_INSTITUTION_DIVERGENCE = {
+        name: 'retail_institution_divergence',
+        value: level,
+        date: today(),
+        formula: `NAAIM=${naaim}, AAII=${aaii}, instFlow=${instFlow}. ${label}. video4 §1:34.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 20차 노션 A6: BOK_QUARTERLY_OUTLOOK_DDAY ===
+  try {
+    const bokDates = ['2026-05-29', '2026-08-28', '2026-11-27']; // BOK 분기 경제전망 통상 일정
+    const todayMs = Date.now();
+    for (const date of bokDates) {
+      const dt0 = new Date(date).getTime();
+      const dday = Math.ceil((dt0 - todayMs) / 86400000);
+      if (dday >= 0 && dday < 100) {
+        d.BOK_QUARTERLY_OUTLOOK_DDAY = {
+          name: 'bok_quarterly_outlook_dday',
+          value: dday,
+          date: today(),
+          formula: `한국은행 분기 경제전망 ${date} (D-${dday}). 노션 §"3개월마다 발행".`,
+        };
+        break;
+      }
+    }
+  } catch { void 0; }
+
+  // === 20차 노션 A7: NAVER_ECONOMY_REPORT_DAYS_AGO (domestic-reports 출력 활용) ===
+  try {
+    const { fetchDomesticReportsLatest } = await import('../collectors/domestic-reports');
+    const dom = await fetchDomesticReportsLatest();
+    if (dom?.economy) {
+      d.NAVER_ECONOMY_REPORT_DAYS_AGO = {
+        name: 'naver_economy_report_days_ago',
+        value: dom.economy.daysAgo,
+        date: today(),
+        formula: `네이버금융 경제분석 최신 "${dom.economy.title ?? '-'}" (${dom.economy.latestDate}, D-${dom.economy.daysAgo}).`,
+      };
+    }
+    if (dom?.marketInfo) {
+      d.NAVER_MARKET_REPORT_DAYS_AGO = {
+        name: 'naver_market_report_days_ago',
+        value: dom.marketInfo.daysAgo,
+        date: today(),
+        formula: `네이버금융 시황속보 최신 "${dom.marketInfo.title ?? '-'}" (D-${dom.marketInfo.daysAgo}).`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 20차 P3#18 잔여: NASDAQ_DRAWDOWN_ATH < -55% 시스템 위기 level ===
+  // video1 §3부 "55% 이상 시스템 위기".
+  try {
+    const dd = d.NASDAQ_DRAWDOWN_ATH?.value ?? null;
+    if (dd !== null) {
+      let crisis: number;
+      let label: string;
+      if (dd <= -55) { crisis = -2; label = '🔴 시스템 위기 (-55%↓) — video1 §3부'; }
+      else if (dd <= -30) { crisis = -1; label = '🟠 큰 조정 (-30~-55%)'; }
+      else if (dd <= -15) { crisis = 0; label = '🟡 조정 진행'; }
+      else { crisis = 1; label = '⚪ 정상'; }
+      d.NASDAQ_DRAWDOWN_CRISIS_LEVEL = {
+        name: 'nasdaq_drawdown_crisis_level',
+        value: crisis,
+        date: today(),
+        formula: `NASDAQ DD ${dd.toFixed(1)}% → ${label}.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 20차 노션 A4: SEC 8-K 미국 중대 이벤트 24h 카운트 ===
+  try {
+    const { fetchSec8KCount } = await import('../collectors/sec-8k');
+    const sec = await fetchSec8KCount();
+    if (sec) {
+      let level: number;
+      let label: string;
+      if (sec.count24h >= 50) { level = 2; label = `🔴 SEC 8-K ${sec.count24h}건 24h — 미국 중대 이벤트 폭증`; }
+      else if (sec.count24h >= 20) { level = 1; label = `🟡 SEC 8-K ${sec.count24h}건`; }
+      else { level = 0; label = `⚪ ${sec.count24h}건 정상`; }
+      d.US_MATERIAL_DISCLOSURE_8K_24H = {
+        name: 'us_material_disclosure_8k_24h',
+        value: sec.count24h,
+        date: today(),
+        formula: `${label}. 노션 §"8-K 미국 중대 이벤트". top: ${sec.topItems.slice(0, 3).join(' / ')}`,
+      };
+      d.US_MATERIAL_DISCLOSURE_LEVEL = {
+        name: 'us_material_disclosure_level',
+        value: level,
+        date: today(),
+        formula: `0=정상, 1=경계, 2=폭증. SEC EDGAR 8-K RSS 24h.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 20차 노션 A3: INSIDER_LARGE_SINGLE_BUY (≥$500k 단건 24h) ===
+  try {
+    const { fetchInsiderSummary } = await import('../collectors/smart-money');
+    const ins = await fetchInsiderSummary({ allowStale: true });
+    if (ins?.largeBuyCount !== undefined) {
+      const lb = ins.largeBuyCount;
+      d.INSIDER_LARGE_SINGLE_BUY = {
+        name: 'insider_large_single_buy',
+        value: lb,
+        date: today(),
+        formula: `≥$500k 단일 매수 ${lb}건 24h. top amounts: $${(ins.largeBuyTopAmounts ?? []).slice(0, 3).map((a) => Math.round(a / 1000) + 'k').join(', ')}. 노션 §OpenInsider.`,
+      };
+    }
+  } catch { void 0; }
+
   // === 19차 P3#16: KCIF 최신 토픽 라벨 ===
   try {
     const { fetchKcifLatestTopic } = await import('../collectors/kcif-topic');

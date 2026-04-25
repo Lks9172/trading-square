@@ -308,6 +308,103 @@ export function interpretDerived(
     return null;
   }
   // 19차 신규
+  // 20차 신규
+  if (key === 'KOSPI_QUARTERLY_UPPER_WICK_PCT') {
+    if (value >= 80) return '🔴 분기봉 윗꼬리 80%+ — stt_kospi §1부 "위로 찔렀다 내려옴" 강한 매도 흔적';
+    if (value >= 40) return '🟠 분기봉 윗꼬리 40%+ — 매도 우세 흔적';
+    return null;
+  }
+  if (key === 'KOSPI_HALFYEAR_UPPER_WICK_PCT') {
+    if (value >= 80) return '🔴 반기봉 윗꼬리 80%+ — 중기 매도 우세';
+    if (value >= 40) return '🟡 반기봉 윗꼬리 40%+ — 중기 약세 압력';
+    return null;
+  }
+  if (key === 'TRUMP_AGENDA_PRESSURE') {
+    if (value >= 3) return '🔴 트럼프 어젠다 4축 압력 극대 — video4 §5:51 "관세 압력"';
+    if (value >= 2) return '🟠 트럼프 어젠다 압력 진행';
+    return null;
+  }
+  if (key === 'US_DEBT_TRAJECTORY_LEVEL') {
+    if (value >= 3) return '🔴 부채 + 적자 극단 — 채권자경단 임박 (video4 §10:11)';
+    if (value === 2) return '🟠 부채 + 적자 동시 경계 — IMF 2031 시나리오';
+    if (value === 1) return '🟡 부채 누적 진행';
+    return null;
+  }
+  if (key === 'LIQUIDITY_RISK_TRANSMISSION') {
+    if (value === 2) return '🔴 강한 디커플링 — M2 ↑ 인데 IWM/HYG 약세 (video4 §7:31)';
+    if (value === 1) return '🟡 디커플링 진행';
+    if (value === -1) return '🟢 정상 — 유동성 → 위험자산 전이';
+    return null;
+  }
+  if (key === 'DGS30_3W_CHANGE_BPS') {
+    if (value >= 30) return '🔴 30Y 3주 +30bp+ — 트러스 패턴 (video4 §9:46)';
+    if (value >= 15) return '🟠 30Y 3주 +15bp+ — 채권자경단 활성화 조짐';
+    if (value <= -20) return '🟢 30Y 3주 -20bp+ — 안전자산 회귀';
+    return null;
+  }
+  if (key === 'GOLD_GEOPOLITICAL_PARADOX') {
+    if (value === 1) return '🟠 Gold paradox — geoRisk + WTI ↑ + CPI 가속 → 단기 금 하락 가능 (video2 §10:01)';
+    return null;
+  }
+  if (key === 'RETAIL_INSTITUTION_DIVERGENCE') {
+    if (value <= -2) return '🔴 개인 낙관 + 기관 감축 — 축제 끝물 (video4 §1:34)';
+    if (value >= 2) return '🟢 개인 비관 + 기관 매집 — 역발상 매수';
+    return null;
+  }
+  if (key === 'BOK_QUARTERLY_OUTLOOK_DDAY') {
+    if (value === 0) return '🟡 BOK 분기 경제전망 오늘 발표';
+    if (value <= 7) return '🟡 BOK 분기 경제전망 D-7 이내';
+    return null;
+  }
+  if (key === 'NAVER_ECONOMY_REPORT_DAYS_AGO') {
+    if (value <= 1) return '🟢 네이버 경제분석 최신 (1일 이내)';
+    if (value >= 7) return '🟡 네이버 경제분석 7일+ 공백';
+    return null;
+  }
+  if (key === 'NASDAQ_DRAWDOWN_CRISIS_LEVEL') {
+    if (value <= -2) return '🔴 시스템 위기 (-55%↓) — video1 §3부';
+    if (value <= -1) return '🟠 큰 조정 (-30~-55%)';
+    if (value === 0) return '🟡 조정 진행 (-15~-30%)';
+    return null;
+  }
+
+  // 20차 누락 보강 — 7건
+  if (key === 'BOND_VIGILANTE_SCORE') {
+    if (value >= 4) return '🔴 채권 자경단 4축+ 충족 — video4 §137-147 정책 신뢰 이탈';
+    if (value >= 3) return '🟠 채권 자경단 3축 — 프리커서 활성';
+    if (value >= 2) return '🟡 채권 자경단 2축 — 경계';
+    return null;
+  }
+  if (key === 'STAGFLATION_VERIFIED') {
+    if (value === 1) return '🔴 스태그플레이션 verified — video4 §145';
+    return null;
+  }
+  if (key === 'KOSPI_FX_FOREIGN_DIVERGENCE') {
+    if (value <= -0.5) return '🟠 외인 매도 적정 대비 큰 괴리 — ATM화 진행';
+    if (value >= 0.5) return '🟢 외인 매도 적정 이내';
+    return null;
+  }
+  if (key === 'GOLD_PRIORITY_SCORE') {
+    if (value >= 0.7) return '🟢 금 우선순위 4축 정합 강함 (video2 §1부)';
+    if (value <= 0.3) return '🟠 금 우선순위 미충족';
+    return null;
+  }
+  if (key === 'M2_YOY_CROSS_DAYS') {
+    if (value >= 60) return '🟢 M2 YoY 양수 60일+ 지속 — 유동성 확장 정착';
+    if (value >= 0) return '🟡 M2 YoY 양수 진입';
+    return null;
+  }
+  if (key === 'GEOPOLITICAL_UNWIND_EVENT') {
+    if (value === 2) return '🟢 지정학 unwind 강 — 휴전·완화 이벤트';
+    if (value === 1) return '🟡 지정학 unwind 약';
+    return null;
+  }
+  if (key === 'USDKRW_WEEKLY_CHANNEL_POSITION') {
+    if (value >= 0.9) return '🔴 주봉 채널 상단 90%+ — 환율 과열';
+    if (value <= 0.1) return '🟢 주봉 채널 하단 10% — 환율 우호';
+    return null;
+  }
+
   if (key === 'FX_FOREIGN_DEVIATION_RATIO') {
     if (value >= 6) return '🔴 외인 매도 ATM화 극단 — stt_kospi §3부 "12배 같은 비정상"';
     if (value >= 3) return '🟠 외인 매도 적정 대비 3배 초과 — ATM화 경계';

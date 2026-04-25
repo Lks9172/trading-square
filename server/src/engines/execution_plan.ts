@@ -34,6 +34,10 @@ function round(n: number, digits = 2): number {
   return parseFloat(n.toFixed(digits));
 }
 
+function defaultTrancheWeight(stage: 1 | 2 | 3): number {
+  return DEFAULT_TRANCHE_WEIGHTS[stage - 1];
+}
+
 // Fix #8(2차 감사): allocation.ts 와 키 매핑을 engines/asset-keys.ts 로 통일.
 // execution_plan 은 LEVERAGE 도 allocationPct 참조 대상이므로 포함된 채로 사용.
 const ASSET_ALLOC_KEY = ASSET_TO_ALLOC_KEY;
@@ -78,11 +82,11 @@ function nasdaqPlan(
   if (signal.signal === 'STRONG_BUY') {
     action = 'BUY_NOW';
     reason = `STRONG_BUY (${signal.conditionsMet}/${signal.conditionsTotal}) — 즉시 1차 진입 후 분할`;
-    stages.push({ stage: 1, weightPct: 40, triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: 30, triggerCondition: '-5% 추가 하락 시', triggerPrice: price ? round(price * 0.95) : undefined, status: 'pending' });
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: '-5% 추가 하락 시', triggerPrice: price ? round(price * 0.95) : undefined, status: 'pending' });
     stages.push({
       stage: 3,
-      weightPct: 30,
+      weightPct: defaultTrancheWeight(3),
       triggerCondition: wBottom === 1 ? 'W 반등 저점 (이미 확인)' : 'W 반등 저점 또는 -10% 추가 하락',
       triggerPrice: price ? round(price * 0.9) : undefined,
       status: wBottom === 1 ? 'ready' : 'pending',
@@ -92,9 +96,9 @@ function nasdaqPlan(
   } else if (signal.signal === 'BUY') {
     action = 'SCALE_IN';
     reason = `BUY (${signal.conditionsMet}/${signal.conditionsTotal}) — 1차만 즉시, 2·3차 조건 대기`;
-    stages.push({ stage: 1, weightPct: 50, triggerCondition: '현재가에서 1차 진입', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: 30, triggerCondition: '이격도 -20% 도달 시', status: 'pending' });
-    stages.push({ stage: 3, weightPct: 20, triggerCondition: 'W 반등 저점 확인 시', status: 'pending' });
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가에서 1차 진입', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: '이격도 -20% 도달 시', status: 'pending' });
+    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: 'W 반등 저점 확인 시', status: 'pending' });
     if (sma200) { stopPrice = round(sma200 * 0.9); stopCond = '200DMA × 0.90 이탈'; }
   } else if (signal.signal === 'REDUCE') {
     action = 'TAKE_PROFIT';
@@ -154,15 +158,16 @@ function goldPlan(
   if (signal.signal === 'STRONG_BUY') {
     action = 'BUY_NOW';
     reason = `STRONG_BUY — 실질금리/DXY/CB매수 3축 이상 충족`;
-    stages.push({ stage: 1, weightPct: 40, triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: 30, triggerCondition: 'FIB 0.382 되돌림 시', triggerPrice: fib382 ?? undefined, status: 'pending' });
-    stages.push({ stage: 3, weightPct: 30, triggerCondition: 'FIB 0.5 or 0.618 도달 시', triggerPrice: fib500 ?? undefined, status: 'pending' });
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: 'FIB 0.382 되돌림 시', triggerPrice: fib382 ?? undefined, status: 'pending' });
+    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: 'FIB 0.5 or 0.618 도달 시', triggerPrice: fib500 ?? undefined, status: 'pending' });
     if (sma200) { stopPrice = round(sma200 * 0.9); stopCond = '200DMA × 0.90 이탈 (실질금리 급등 시)'; }
   } else if (signal.signal === 'BUY') {
     action = 'SCALE_IN';
     reason = `BUY — 실질금리 하락 또는 DXY 약세 확인`;
-    stages.push({ stage: 1, weightPct: 60, triggerCondition: '현재가 또는 FIB 0.382', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: 40, triggerCondition: 'FIB 0.5 도달 + DXY 약세', triggerPrice: fib500 ?? undefined, status: 'pending' });
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가 또는 FIB 0.382', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: 'FIB 0.5 도달 + DXY 약세', triggerPrice: fib500 ?? undefined, status: 'pending' });
+    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: 'FIB 0.618 도달 또는 실질금리 추가 하락 확인', triggerPrice: fib618 ?? undefined, status: 'pending' });
     if (sma200) { stopPrice = round(sma200 * 0.92); stopCond = '200DMA × 0.92 이탈'; }
   } else if (signal.signal === 'REDUCE') {
     action = 'TAKE_PROFIT';
@@ -171,8 +176,9 @@ function goldPlan(
   } else if (goldZone === 3) {
     action = 'BUY_NOW';
     reason = 'FIB 0.618 하회 강한 바닥권 — 분할매수 적기';
-    stages.push({ stage: 1, weightPct: 50, triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: 50, triggerCondition: '추가 하락 -3% 시', status: 'pending' });
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: '추가 하락 -3% 시', status: 'pending' });
+    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: '추가 하락 -6% 또는 FIB 0.618 재확인', triggerPrice: fib618 ?? undefined, status: 'pending' });
   } else {
     action = 'HOLD';
     reason = 'HOLD — 진입 조건 미형성';
@@ -221,18 +227,19 @@ function kospiPlan(
   } else if (signal.signal === 'STRONG_BUY' || (signal.signal === 'BUY' && wBottom === 1)) {
     action = 'BUY_NOW';
     reason = wBottom === 1 ? 'W 반등 확정 — 영상5 3차 매수 트리거' : 'STRONG_BUY 조건 충족';
-    stages.push({ stage: 1, weightPct: 50, triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: 30, triggerCondition: '환율 1470 하단 + 외국인 매수 지속', status: fxGreen === 1 ? 'ready' : 'pending' });
-    stages.push({ stage: 3, weightPct: 20, triggerCondition: 'W 반등 저점 또는 거래량 확인', status: wBottom === 1 ? 'triggered' : 'pending' });
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: '환율 1470 하단 + 외국인 매수 지속', status: fxGreen === 1 ? 'ready' : 'pending' });
+    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: 'W 반등 저점 또는 거래량 확인', status: wBottom === 1 ? 'triggered' : 'pending' });
     if (sma200) { stopPrice = round(sma200 * 0.92); stopCond = '200DMA × 0.92 이탈 또는 환율 1500+ 재진입'; }
     takeCond = '추세선 이탈 또는 월봉 소진 경고';
   } else if (signal.signal === 'BUY') {
     action = 'SCALE_IN';
     reason = 'BUY — 환율·외국인 수급 우호, 분할 진입';
-    stages.push({ stage: 1, weightPct: 50, triggerCondition: '현재가에서 1차', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: 30, triggerCondition: '환율 1470 이하 + 외국인 5일 연속 매수', status: fxGreen === 1 && foreignStreak !== null && foreignStreak >= 5 ? 'ready' : 'pending' });
-    stages.push({ stage: 3, weightPct: 20, triggerCondition: 'W 반등 또는 강한 하락', status: 'pending' });
-    if (sma200) { stopPrice = round(sma200 * 0.95); stopCond = '200DMA × 0.95 이탈'; }
+    // 20차 E5: stt_kospi §4부 명시 절대 레벨 (5150 1차 지지 / 4080 2차 지지) 사용.
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가 또는 5150 1차 지지', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: '5150 이탈 후 4080 2차 지지 (stt_kospi §4부) + 환율 1480 이하', triggerPrice: 4080, status: fxGreen === 1 && foreignStreak !== null && foreignStreak >= 5 ? 'ready' : 'pending' });
+    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: 'W 반등 또는 강한 하락 + 외국인 매수 streak 3+', status: 'pending' });
+    if (sma200) { stopPrice = round(sma200 * 0.95); stopCond = '200DMA × 0.95 이탈 또는 4080 하단 이탈'; }
   } else if (signal.signal === 'REDUCE' || signal.signal === 'SELL') {
     action = signal.signal === 'SELL' ? 'EXIT' : 'TAKE_PROFIT';
     reason = signal.signal === 'SELL' ? 'SELL — 환율 1500+ AND 200DMA 하회 극단' : 'REDUCE — 부분 익절';
@@ -327,16 +334,17 @@ function emergingPlan(
   if (signal.signal === 'STRONG_BUY') {
     action = 'BUY_NOW';
     reason = 'DXY 약세 + M2 확장 + 정책 완화 3축 동시 충족 (영상2 §30 달러약세 수혜)';
-    stages.push({ stage: 1, weightPct: 40, triggerCondition: '현재가에서 즉시 진입', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: 30, triggerCondition: 'EWZ -5% 추가 하락 시', status: 'pending' });
-    stages.push({ stage: 3, weightPct: 30, triggerCondition: 'DXY 추가 약세 (DXY < 100) 확인', status: 'pending' });
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가에서 즉시 진입', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: 'EWZ -5% 추가 하락 시', status: 'pending' });
+    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: 'DXY 추가 약세 (DXY < 100) 확인', status: 'pending' });
     stopCond = 'DXY > 110 급등 또는 정책 긴축 전환';
     takeCond = 'DXY < 95 구조적 약세 완료 또는 +25% 수익';
   } else if (signal.signal === 'BUY') {
     action = 'SCALE_IN';
     reason = '신흥국 2/3 조건 충족 — 분할 진입';
-    stages.push({ stage: 1, weightPct: 60, triggerCondition: '현재가에서 1차 진입', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: 40, triggerCondition: '나머지 조건 확정 시', status: 'pending' });
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가에서 1차 진입', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: '나머지 조건 확정 시', status: 'pending' });
+    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: 'DXY 추가 약세 (DXY < 100) 또는 M2 확장 강화', status: 'pending' });
     stopCond = 'DXY > 107 또는 M2 YoY 마이너스 전환';
   } else if (signal.signal === 'REDUCE') {
     action = 'TAKE_PROFIT';
@@ -379,14 +387,15 @@ function genericAssetPlan(
 
   if (signal.signal === 'STRONG_BUY') {
     action = 'BUY_NOW';
-    stages.push({ stage: 1, weightPct: 50, triggerCondition: '현재가에서 1차', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: 30, triggerCondition: '-3% 추가 하락 시', status: 'pending' });
-    stages.push({ stage: 3, weightPct: 20, triggerCondition: '-7% 추가 하락 또는 W반등 저점', status: 'pending' });
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가에서 1차', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: '-3% 추가 하락 시', status: 'pending' });
+    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: '-7% 추가 하락 또는 W반등 저점', status: 'pending' });
     reason = `STRONG_BUY — 메인조건 전부 충족`;
   } else if (signal.signal === 'BUY') {
     action = 'SCALE_IN';
-    stages.push({ stage: 1, weightPct: 60, triggerCondition: '현재가에서 1차', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: 40, triggerCondition: '-5% 추가 하락 시', status: 'pending' });
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가에서 1차', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: '-5% 추가 하락 시', status: 'pending' });
+    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: '-8% 추가 하락 또는 추세 재확인 시', status: 'pending' });
   } else if (signal.signal === 'REDUCE') {
     action = 'TAKE_PROFIT';
     stages.push({ stage: 1, weightPct: 30, triggerCondition: '부분 익절', status: 'ready' });

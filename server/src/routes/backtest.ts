@@ -74,12 +74,38 @@ router.get('/summary', async (_req: Request, res: Response) => {
         if (current !== prev) regimeChanges++;
       }
 
+      // 20차 노션 A2: Sharpe/CAGR/Calmar 메트릭 추가 (PortfolioVisualizer 정합).
+      const dailyReturns: number[] = [];
+      for (let i = 1; i < slice.length; i++) {
+        const prev = slice[i - 1].value;
+        const curr = slice[i].value;
+        if (prev > 0) dailyReturns.push((curr - prev) / prev);
+      }
+      const meanRet = dailyReturns.length > 0 ? dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length : 0;
+      const variance = dailyReturns.length > 0
+        ? dailyReturns.reduce((s, r) => s + Math.pow(r - meanRet, 2), 0) / dailyReturns.length
+        : 0;
+      const std = Math.sqrt(variance);
+      const annualized = meanRet * 252;
+      const annualStd = std * Math.sqrt(252);
+      const sharpe = annualStd > 0 ? annualized / annualStd : 0;
+      const yearsForCagr = slice.length / 252;
+      const cagr = yearsForCagr > 0
+        ? (Math.pow(1 + returnPct / 100, 1 / yearsForCagr) - 1) * 100
+        : returnPct;
+      const calmar = maxDrawdown < 0 ? cagr / Math.abs(maxDrawdown) : 0;
+
       return {
         label,
         return_pct: parseFloat(returnPct.toFixed(2)),
         max_drawdown: parseFloat(maxDrawdown.toFixed(2)),
         regime_changes: regimeChanges,
         data_points: slice.length,
+        // 20차: PortfolioVisualizer 정합 메트릭
+        sharpe: parseFloat(sharpe.toFixed(2)),
+        cagr_pct: parseFloat(cagr.toFixed(2)),
+        calmar: parseFloat(calmar.toFixed(2)),
+        annual_volatility_pct: parseFloat((annualStd * 100).toFixed(2)),
       };
     });
 
