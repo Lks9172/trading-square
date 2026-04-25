@@ -52,7 +52,22 @@ interface Props {
   initialLog: TradeLogEntry[];
   weeklyReport: WeeklyReport | null;
   weeklyText: string;
+  // 19차 신규
+  convictionScore?: number | null;          // CONVICTION_SCORE_7AXIS (-7~+7)
+  trancheUsedPct?: number;
 }
+
+// 19차 P3#15: 외부 PDF 리포트 링크 카드 — 노션 §주식·ETF·채권 정합
+const EXTERNAL_LINKS = [
+  { label: '신한투자증권 리서치', url: 'https://open.shinhansec.com/v1/board/research/list.do' },
+  { label: '미래에셋자산운용', url: 'https://www.miraeasset.com/etf/etfData.do' },
+  { label: '우리자산운용', url: 'https://www.wooriam.com/research/list.do' },
+  { label: 'Fidelity Korea', url: 'https://www.fidelity.co.kr/insights/' },
+  { label: 'KCIF 국제금융센터', url: 'https://www.kcif.or.kr/finance/bondList' },
+  { label: 'KIF 금융브리프', url: 'https://www.kif.re.kr/kif4/publication/pub_list?mid=20' },
+  { label: 'CME FedWatch Tool', url: 'https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html' },
+  { label: '마이핀플 ETF 순위', url: 'https://www.myfinpl.com/etf/' },
+];
 
 const LENSES = [
   { key: 'economy', label: '① 경제 (GDP / 고용 / 소비)' },
@@ -64,7 +79,7 @@ const LENSES = [
   { key: 'momentum', label: '⑦ 모멘텀 (MACD / 52W Hi / 멀티프레임)' },
 ];
 
-export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText }: Props) {
+export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, convictionScore, trancheUsedPct }: Props) {
   const [plan, setPlan] = useState<InvestmentPlan | null>(initialPlan);
   const [log, setLog] = useState<TradeLogEntry[]>(initialLog);
   const [savingPlan, setSavingPlan] = useState(false);
@@ -112,6 +127,9 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText }
   }
 
   const checkedCount = Object.values(checks).filter(Boolean).length;
+  // 19차 P2#12: 확신 점수 미달(<3) 시 액션 잠금 권고
+  const lowConviction = typeof convictionScore === 'number' && convictionScore < 3;
+  const dcaPct = typeof trancheUsedPct === 'number' ? trancheUsedPct : 0;
 
   return (
     <div className="space-y-6">
@@ -120,6 +138,28 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText }
         <p className="text-sm text-slate-400 mt-1">
           video1 §5부 — "시스템이 있으면 심리 싸움에서 이길 수 있다"
         </p>
+        {/* 19차 P2#12: 확신 점수 표시 + 미달 시 게이트 경고 */}
+        {typeof convictionScore === 'number' && (
+          <div className={`mt-3 rounded-lg p-3 text-sm ${lowConviction ? 'border border-amber-700 bg-amber-950/40 text-amber-200' : 'border border-emerald-800 bg-emerald-950/30 text-emerald-200'}`}>
+            <span className="font-semibold">7축 확신 점수: {convictionScore >= 0 ? '+' : ''}{convictionScore}/7</span>
+            {lowConviction
+              ? ' — ⚠️ 확신 미달(3 미만). 새 매수 액션 자제 권고 (video1 §"확신 없으면 판단하지 마라").'
+              : ' — 🟢 확신 충족 (3 이상). 계획대로 실행 가능.'}
+          </div>
+        )}
+        {/* 19차 P3#14: DCA 진척도 */}
+        <div className="mt-2">
+          <div className="flex justify-between text-xs text-slate-400 mb-1">
+            <span>분할매수 진척도 ({dcaPct.toFixed(0)}%)</span>
+            <span>{dcaPct >= 70 ? '잔여 buffer 적음' : dcaPct >= 30 ? '진행 중' : 'buffer 충분'}</span>
+          </div>
+          <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+            <div
+              className={`h-2 rounded-full transition-all ${dcaPct >= 100 ? 'bg-orange-500' : dcaPct >= 70 ? 'bg-yellow-500' : 'bg-cyan-500'}`}
+              style={{ width: `${Math.min(100, dcaPct)}%` }}
+            />
+          </div>
+        </div>
       </header>
 
       {/* Plan Form */}
@@ -263,6 +303,27 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText }
           </pre>
         </section>
       )}
+
+      {/* 19차 P3#15: 외부 PDF 리포트 링크 카드 */}
+      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 md:p-6">
+        <h2 className="text-lg font-semibold text-slate-100 mb-3">🔗 외부 리서치 / 노션 정합 링크</h2>
+        <p className="text-xs text-slate-400 mb-3">
+          노션 §주식·ETF·채권 + §경제 캘린더 정합. 데이터는 자동 수집되지 않으며 클릭 동선만 제공.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+          {EXTERNAL_LINKS.map((l) => (
+            <a
+              key={l.url}
+              href={l.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block rounded border border-slate-700 bg-slate-950/40 p-2 text-xs text-slate-200 hover:border-cyan-600 hover:bg-cyan-950/20 transition"
+            >
+              ↗ {l.label}
+            </a>
+          ))}
+        </div>
+      </section>
 
       {/* Trade Log */}
       <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 md:p-6">

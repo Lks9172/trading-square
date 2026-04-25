@@ -19,6 +19,7 @@ import { ExecutionPlanPanel } from "./ExecutionPlanPanel";
 import { LensPanel } from "./LensPanel";
 import { OptionsVolatilityPanel } from "./OptionsVolatilityPanel";
 import { SentimentPanel } from "./SentimentPanel";
+import { ConvictionPanel } from "./ConvictionPanel";
 import { formatKstDateTime } from "@/lib/format";
 
 interface Props {
@@ -77,6 +78,9 @@ export function Dashboard({ snapshot }: Props) {
       </header>
 
       <RegimeHeader regime={currentSnapshot.regime} />
+
+      {/* 19차 P1#1: 18·19차 신규 derived 통합 노출 */}
+      <ConvictionPanel derived={currentSnapshot.derived} />
 
       <LensPanel raw={currentSnapshot.raw} derived={currentSnapshot.derived} meta={currentSnapshot.meta} />
 

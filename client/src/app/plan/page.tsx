@@ -34,12 +34,26 @@ async function fetchWeeklyReport() {
   }
 }
 
+async function fetchSnapshot() {
+  try {
+    const res = await fetch(`${SSR_API_URL}/api/snapshot`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
 export default async function PlanPage() {
-  const [planData, logData, weeklyData] = await Promise.all([
+  const [planData, logData, weeklyData, snapshot] = await Promise.all([
     fetchPlan(),
     fetchTradeLog(),
     fetchWeeklyReport(),
+    fetchSnapshot(),
   ]);
+
+  const conviction = snapshot?.derived?.CONVICTION_SCORE_7AXIS?.value ?? null;
+  const trancheUsed = snapshot?.meta?.profile?.manualInputs?.trancheUsedPct;
 
   return (
     <main className="flex-1 p-4 md:p-6 max-w-6xl mx-auto w-full">
@@ -48,6 +62,8 @@ export default async function PlanPage() {
         initialLog={logData?.entries || []}
         weeklyReport={weeklyData?.report || null}
         weeklyText={weeklyData?.text || ''}
+        convictionScore={conviction}
+        trancheUsedPct={trancheUsed}
       />
     </main>
   );
