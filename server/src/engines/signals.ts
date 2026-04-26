@@ -427,6 +427,17 @@ function nasdaqSignal(
   const chaseWarning = dv(derived, 'NASDAQ_CHASE_WARNING');
   if (chaseWarning === 1) overheatFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
 
+  // ★ === 29차 P1-E #15: TIMEFRAME_DECISION_SPLIT — daily/weekly axis 정합 ===
+  // video2 §22:45 + video6 — horizon 별 daily/weekly 정합 평가.
+  const timeframeSplit = dv(derived, 'TIMEFRAME_DECISION_SPLIT');
+  if (timeframeSplit === 1) {
+    reasons.push('✓ TIMEFRAME_DECISION_SPLIT=+1 (horizon 정합, video2 §22:45)');
+    met += 1;
+  } else if (timeframeSplit === -1) {
+    unmetReasons.push('⚠️ TIMEFRAME_DECISION_SPLIT=-1 (horizon 미정합, video2 §22:45)');
+    met = Math.max(0, met - 1);
+  }
+
   // ★ === 29차 P1-D #11: NASDAQ_FORWARD_PER overheat / met 가산 ===
   // video6 §05:54 "PER 25+ 멀티플 과열 / 12 이하 매수 우호".
   const fwdPER = dv(derived, 'NASDAQ_FORWARD_PER');

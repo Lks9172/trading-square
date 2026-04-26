@@ -260,6 +260,14 @@ export function classifyRegime(
     score = Math.max(0, score - 5);
   }
 
+  // ★ 29차 P1-E #16: REGIME_SECTOR_LEADERSHIP_MATCH 보조 가산 (sectorMomentum 보조 입력, video6 §03:25).
+  const sectorMatch = dv(derived, 'REGIME_SECTOR_LEADERSHIP_MATCH');
+  if (sectorMatch === 1) {
+    score = Math.min(100, score + 2);
+  } else if (sectorMatch === -1) {
+    score = Math.max(0, score - 2);
+  }
+
   const icsa = v(raw, 'ICSA');
   const overheated = dv(derived, 'OVERHEATED');
   const creditStress = dv(derived, 'CREDIT_STRESS_FLAG');

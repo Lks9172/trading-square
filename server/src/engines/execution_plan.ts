@@ -115,17 +115,31 @@ function nasdaqPlan(
   let takePrice: number | null = null;
   let takeCond = '';
 
+  // ★ === 29차 P1-E #17: STAGE_FIB_ZONE_MAP — NASDAQ FIB 단계 unlock ===
+  // video2 §23:27 "분할매수 단계는 fib zone 도달 시점 매핑".
+  // stage1 = FIB_382 (±1% 내) / stage2 = FIB_500 / stage3 = FIB_618 + W_BOTTOM
+  const fib382 = vDer(derived, 'NASDAQ_FIB_382');
+  const fib500 = vDer(derived, 'NASDAQ_FIB_500');
+  const fib618 = vDer(derived, 'NASDAQ_FIB_618');
+  const inZone = (target: number | null, p: number | null, pct = 1): boolean => {
+    if (target === null || p === null) return false;
+    return Math.abs(p - target) / target * 100 <= pct;
+  };
+
   if (signal.signal === 'STRONG_BUY') {
     action = 'BUY_NOW';
     reason = `STRONG_BUY (${signal.conditionsMet}/${signal.conditionsTotal}) — 즉시 1차 진입 후 분할`;
-    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: '-5% 추가 하락 시', triggerPrice: price ? round(price * 0.95) : undefined, status: 'pending' });
+    const stage1Hit = inZone(fib382, price);
+    const stage2Hit = inZone(fib500, price);
+    const stage3Hit = inZone(fib618, price) && wBottom === 1;
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: stage1Hit ? `FIB 0.382 zone ($${fib382?.toFixed(0)}) 도달 — 현재가 즉시 (video2 §23:27)` : '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: `FIB 0.500 zone ($${fib500?.toFixed(0) ?? '?'}) 도달 또는 -5% 추가 하락`, triggerPrice: fib500 ?? (price ? round(price * 0.95) : undefined), status: stage2Hit ? 'ready' : 'pending' });
     stages.push({
       stage: 3,
       weightPct: defaultTrancheWeight(3),
-      triggerCondition: wBottom === 1 ? 'W 반등 저점 (이미 확인)' : 'W 반등 저점 또는 -10% 추가 하락',
-      triggerPrice: price ? round(price * 0.9) : undefined,
-      status: wBottom === 1 ? 'ready' : 'pending',
+      triggerCondition: wBottom === 1 ? `FIB 0.618 zone ($${fib618?.toFixed(0) ?? '?'}) + W 반등 저점 (이미 확인, video2 §23:27)` : `FIB 0.618 zone ($${fib618?.toFixed(0) ?? '?'}) + W 반등 저점`,
+      triggerPrice: fib618 ?? (price ? round(price * 0.9) : undefined),
+      status: stage3Hit ? 'ready' : 'pending',
     });
     if (sma200) { stopPrice = round(sma200 * 0.85); stopCond = '200DMA × 0.85 이탈'; }
     if (price) { takePrice = round(price * 1.2); takeCond = '+20% 수익 또는 15년 채널 상단 터치'; }
@@ -191,12 +205,23 @@ function goldPlan(
   let takePrice: number | null = null;
   let takeCond = '';
 
+  // ★ === 29차 P1-E #17: STAGE_FIB_ZONE_MAP — GOLD FIB 단계 unlock ===
+  // video2 §23:27 — stage1=FIB_382, stage2=FIB_500, stage3=FIB_618 + W_BOTTOM.
+  const goldWBottom = vDer(derived, 'GOLD_W_BOTTOM');
+  const inZoneGold = (target: number | null, p: number | null, pct = 1): boolean => {
+    if (target === null || p === null) return false;
+    return Math.abs(p - target) / target * 100 <= pct;
+  };
+
   if (signal.signal === 'STRONG_BUY') {
     action = 'BUY_NOW';
     reason = `STRONG_BUY — 실질금리/DXY/CB매수 3축 이상 충족`;
-    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: 'FIB 0.382 되돌림 시', triggerPrice: fib382 ?? undefined, status: 'pending' });
-    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: 'FIB 0.5 or 0.618 도달 시', triggerPrice: fib500 ?? undefined, status: 'pending' });
+    const stage1Hit = inZoneGold(fib382, price);
+    const stage2Hit = inZoneGold(fib500, price);
+    const stage3Hit = inZoneGold(fib618, price) && goldWBottom === 1;
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: stage1Hit ? `FIB 0.382 zone ($${fib382?.toFixed(0)}) 도달 — 즉시 (video2 §23:27)` : '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: `FIB 0.500 zone ($${fib500?.toFixed(0) ?? '?'}) 도달 시 (video2 §23:27)`, triggerPrice: fib500 ?? undefined, status: stage2Hit ? 'ready' : 'pending' });
+    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: `FIB 0.618 zone ($${fib618?.toFixed(0) ?? '?'}) + W 반등 저점 (video2 §23:27)`, triggerPrice: fib618 ?? undefined, status: stage3Hit ? 'ready' : 'pending' });
     if (sma200) { stopPrice = round(sma200 * 0.9); stopCond = '200DMA × 0.90 이탈 (실질금리 급등 시)'; }
   } else if (signal.signal === 'BUY') {
     action = 'SCALE_IN';

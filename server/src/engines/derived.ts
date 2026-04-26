@@ -6395,6 +6395,119 @@ export async function computeDerived(
     };
   } catch { void 0; }
 
+  // ★ === 29차 P1-E #15: TIMEFRAME_DECISION_SPLIT ===
+  //   video2 §22:45 + video6 — daily/weekly 축 분리, USER_HORIZON_ALIGNMENT 의 horizon 사용.
+  //   short → daily 만 / long → weekly 만 / medium → AND.
+  try {
+    // daily axis: 가격 > SMA20(직접 계산) AND RSI_14 ≥ 50
+    const dailyHistTF = await fetchYahooHistory('^IXIC', 60);
+    let dailyOk: number | null = null;
+    let dailyDetail = '';
+    if (dailyHistTF.length >= 25) {
+      const closes = dailyHistTF.map((p) => p.close);
+      const last = closes[closes.length - 1];
+      const sma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+      const rsi14 = d.NASDAQ_RSI_14?.value ?? null;
+      const aboveSma20 = last > sma20;
+      const rsi50 = rsi14 !== null && rsi14 >= 50;
+      dailyOk = aboveSma20 && rsi50 ? 1 : 0;
+      dailyDetail = `last ${last.toFixed(0)} > SMA20 ${sma20.toFixed(0)} = ${aboveSma20}, RSI14 ${rsi14?.toFixed(1) ?? 'n/a'} ≥ 50 = ${rsi50} → ${dailyOk}`;
+    }
+    // weekly axis: 주봉 close > NASDAQ_WEEKLY_20MA AND 14주 RSI ≥ 50
+    const weeklyHistTF = await fetchYahooOHLC('^IXIC', 365 * 2, '1wk');
+    let weeklyOk: number | null = null;
+    let weeklyDetail = '';
+    if (weeklyHistTF.length >= 20) {
+      const wclose = weeklyHistTF[weeklyHistTF.length - 1].close;
+      const w20MA = d.NASDAQ_WEEKLY_20MA?.value ?? null;
+      const wkRsi = computeRSI(weeklyHistTF.map((c) => c.close), 14);
+      const aboveW20 = w20MA !== null && wclose > w20MA;
+      const wRsi50 = wkRsi !== null && wkRsi >= 50;
+      weeklyOk = aboveW20 && wRsi50 ? 1 : 0;
+      weeklyDetail = `주봉 close ${wclose.toFixed(0)} > 주봉 20MA ${w20MA?.toFixed(0) ?? 'n/a'} = ${aboveW20}, 14주 RSI ${wkRsi?.toFixed(1) ?? 'n/a'} ≥ 50 = ${wRsi50} → ${weeklyOk}`;
+    }
+    const horizon = manualInputs?.investmentHorizon ?? 'medium';
+    let result: number = 0;
+    let resultLabel: string;
+    if (horizon === 'short') {
+      result = dailyOk === 1 ? 1 : 0;
+      resultLabel = `short — daily 만 평가 (${dailyOk}) → ${result}`;
+    } else if (horizon === 'long') {
+      result = weeklyOk === 1 ? 1 : 0;
+      resultLabel = `long — weekly 만 평가 (${weeklyOk}) → ${result}`;
+    } else {
+      // medium AND
+      if (dailyOk === 1 && weeklyOk === 1) result = 1;
+      else if (dailyOk === 0 && weeklyOk === 0) result = -1;
+      else result = 0;
+      resultLabel = `medium AND (daily=${dailyOk}, weekly=${weeklyOk}) → ${result}`;
+    }
+    d.TIMEFRAME_DECISION_SPLIT = {
+      name: 'timeframe_decision_split',
+      value: result,
+      date: today(),
+      formula: `daily(${dailyDetail}) / weekly(${weeklyDetail}) / horizon=${horizon}: ${resultLabel}. video2 §22:45 + video6 "본인 시계열".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P1-E #16: REGIME_SECTOR_LEADERSHIP_MATCH ===
+  //   video6 §03:25 "regime 별 expected leading 섹터 정합 — 일치 ≥0.66 → +1 (정합) / ≤0.33 → -1 (분기 경고)".
+  try {
+    let regimeStr: string | null = null;
+    try {
+      const regimeHist = await readHistory('signal', 'REGIME').catch(() => [] as Array<{date:string; value:number; meta?:any}>);
+      if (regimeHist.length > 0) {
+        const last = regimeHist[regimeHist.length - 1] as any;
+        regimeStr = (last.meta?.regime ?? last.regime ?? null) as string | null;
+      }
+    } catch { void 0; }
+    const expected: Record<string, string[]> = {
+      RISK_ON: ['XLK', 'XLY', 'XLC'],
+      NEUTRAL: ['XLK', 'XLF', 'XLI'],
+      PANIC_BUT_OK: ['XLK', 'XLY'],
+      CAUTION: ['XLV', 'XLU', 'XLP'],
+      CORRECTION: ['XLU', 'XLP'],
+      RECESSION_RISK: ['XLU', 'XLP', 'XLV'],
+      BOND_VIGILANTE: ['XLE', 'XLF'],
+      STAGFLATION: ['XLE', 'GLD'],
+      STAGFLATION_BOND_VIGILANTE: ['XLE'],
+    };
+    if (regimeStr !== null && expected[regimeStr]) {
+      const expSet = expected[regimeStr];
+      // 실제 sector 30D returns top 3 (XLP 는 sectorEtfs 에 없음 — 모듈 보강 필요. 기존 9 sector 사용).
+      const actualReturns: Array<{ key: string; ret: number }> = [];
+      const sectorKeysToCheck = ['XLK','XLY','XLC','XLF','XLI','XLV','XLU','XLE','GLD'];
+      for (const k of sectorKeysToCheck) {
+        const sv = d[`SECTOR_${k}`]?.value ?? null;
+        if (sv !== null) actualReturns.push({ key: k, ret: sv });
+      }
+      // GLD 는 sector 가 아님 — raw 또는 derived 에서 별도 가격으로 계산. 단순화: GOLD 20D 수익률.
+      try {
+        const gHist20 = await fetchYahooHistory('GLD', 30);
+        if (gHist20.length >= 20) {
+          const c0 = gHist20[gHist20.length - 20].close;
+          const c1 = gHist20[gHist20.length - 1].close;
+          if (c0 > 0) actualReturns.push({ key: 'GLD', ret: ((c1 - c0) / c0) * 100 });
+        }
+      } catch { void 0; }
+      // top3 by return
+      const top3 = actualReturns.sort((a, b) => b.ret - a.ret).slice(0, 3).map((x) => x.key);
+      const matchCount = expSet.filter((k) => top3.includes(k)).length;
+      const matchRatio = expSet.length > 0 ? matchCount / expSet.length : 0;
+      let level: number;
+      let label: string;
+      if (matchRatio >= 0.66) { level = 1; label = `🟢 정합 (${matchCount}/${expSet.length})`; }
+      else if (matchRatio <= 0.33) { level = -1; label = `🔴 분기 경고 (${matchCount}/${expSet.length})`; }
+      else { level = 0; label = `🟡 부분 정합 (${matchCount}/${expSet.length})`; }
+      d.REGIME_SECTOR_LEADERSHIP_MATCH = {
+        name: 'regime_sector_leadership_match',
+        value: level,
+        date: today(),
+        formula: `regime=${regimeStr}, expected=[${expSet.join(',')}], top3 actual=[${top3.join(',')}]. ${label}. video6 §03:25 "regime별 leading 섹터".`,
+      };
+    }
+  } catch { void 0; }
+
   return d;
 }
 
