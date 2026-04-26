@@ -342,6 +342,16 @@ function nasdaqSignal(
     reasons.push('✓ 회복 2축 (video2 §13:42 보조)');
   }
 
+  // ★ === 29차 P1-C #9: NASDAQ_HEALTHY_PULLBACK — 정배열 분할매수 가산 ===
+  // video3 §05:12-05:25 "정배열에서 50DMA -3~-8% pullback".
+  const healthyPullback = dv(derived, 'NASDAQ_HEALTHY_PULLBACK');
+  if (healthyPullback === 1) {
+    reasons.push('✓ 정배열 healthy pullback (video3 §05:12)');
+    met += 1;
+  } else if (healthyPullback === -1) {
+    unmetReasons.push('⚠️ 역배열 + 50DMA pullback — 대기 (video3 §05:25)');
+  }
+
   if (icsa !== null && icsa >= 300000 && above200 === 0) {
     return withSignalExplanation({
       asset: 'NASDAQ',
@@ -416,6 +426,22 @@ function nasdaqSignal(
   }
   const chaseWarning = dv(derived, 'NASDAQ_CHASE_WARNING');
   if (chaseWarning === 1) overheatFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
+
+  // ★ === 29차 P1-C #7+#8+#10: NASDAQ 차트 패턴 overheat 가산 ===
+  const wkBearAtSupport = dv(derived, 'NASDAQ_WEEKLY_BEAR_STREAK_AT_SUPPORT');
+  if (wkBearAtSupport !== null && wkBearAtSupport >= 2) {
+    overheatFlags.push(`주봉 음봉 streak + 지지 근접 (video3 §11:31, level=${wkBearAtSupport})`);
+  }
+  const rangeTrap = dv(derived, 'NASDAQ_RANGE_TRAP');
+  if (rangeTrap !== null && rangeTrap >= 2) {
+    overheatFlags.push(`RANGE_TRAP 감지 (60D high 돌파 후 5일 내 60D low 이탈, video3 §12:54, level=${rangeTrap})`);
+  }
+  const doubleTop = dv(derived, 'NASDAQ_DOUBLE_TOP');
+  if (doubleTop !== null && doubleTop >= 2) {
+    overheatFlags.push(`이중천정 + 주봉 20MA 이탈 (video3 §13:38)`);
+  } else if (doubleTop === 1) {
+    overheatFlags.push(`이중천정 패턴 감지 (video3 §13:38)`);
+  }
 
   // --- 조정-확인 플래그 (기관/거시) — 저점 구간에서는 관찰만 ---
   const confirmFlags: string[] = [];

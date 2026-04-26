@@ -6101,6 +6101,183 @@ export async function computeDerived(
     };
   } catch { void 0; }
 
+  // ★ === 29차 P1-C #7: NASDAQ_WEEKLY_BEAR_STREAK_AT_SUPPORT ===
+  //   video3 §11:31-12:11 "주봉 음봉 연속 + 지지 근접" — 단발 회복 베팅 위험.
+  //   100일 일봉 → 주봉 변환 (close=마지막일, open=첫날), 최근 음봉 streak.
+  //   이격도 ≤ -2% AND 종가 < 3개월 저점 +3% 추가 게이트.
+  try {
+    const dailyHist = await fetchYahooHistory('^IXIC', 130);
+    if (dailyHist.length >= 60) {
+      // 주봉 변환 — ISO week 단위로 그룹 (월~금).
+      const weeks: Array<{ open: number; close: number }> = [];
+      let curWeekIdx: number | null = null;
+      let curOpen: number | null = null;
+      let curClose: number | null = null;
+      for (const d0 of dailyHist) {
+        const dt2 = new Date(d0.date);
+        // ISO week: 일=0, 월=1, ..., 토=6. weekIdx = floor((day - dt0)/7) 단순화 사용.
+        // 안정적 그룹화: weekIdx = Math.floor(dt2.getTime() / (7*86400000))
+        const wIdx = Math.floor(dt2.getTime() / (7 * 86400000));
+        if (curWeekIdx === null || wIdx !== curWeekIdx) {
+          if (curOpen !== null && curClose !== null) weeks.push({ open: curOpen, close: curClose });
+          curWeekIdx = wIdx;
+          curOpen = d0.close;
+        }
+        curClose = d0.close;
+      }
+      if (curOpen !== null && curClose !== null) weeks.push({ open: curOpen, close: curClose });
+      // streak: 가장 최근 주부터 음봉 연속.
+      let streak = 0;
+      for (let i = weeks.length - 1; i >= 0 && i >= weeks.length - 8; i -= 1) {
+        if (weeks[i].close < weeks[i].open) streak += 1;
+        else break;
+      }
+      // 지지 근접 게이트
+      const disparity = d.NASDAQ_DISPARITY?.value ?? null;
+      const recent60d = dailyHist.slice(-60);
+      const low3M = Math.min(...recent60d.map((p) => p.close));
+      const lastClose = dailyHist[dailyHist.length - 1].close;
+      const nearSupport = disparity !== null && disparity <= -2 && lastClose < low3M * 1.03;
+      let level: number;
+      let label: string;
+      if (streak >= 3 && nearSupport) { level = 2; label = `🔴 주봉 ${streak}연속 음봉 + 지지 근접 (video3 §11:31)`; }
+      else if (streak >= 2) { level = 1; label = `🟡 주봉 ${streak}연속 음봉 — 회복 미확인`; }
+      else { level = 0; label = `⚪ streak ${streak}`; }
+      d.NASDAQ_WEEKLY_BEAR_STREAK_AT_SUPPORT = {
+        name: 'nasdaq_weekly_bear_streak_at_support',
+        value: level,
+        date: today(),
+        formula: `주봉 ${streak}연속 음봉 / 이격도 ${disparity?.toFixed(1) ?? '?'}% / 60D 저점 ${low3M.toFixed(0)} → ${(lastClose/low3M*100).toFixed(1)}% (≤103%=근접). ${label}. video3 §11:31-12:11 "주봉 음봉 + 지지".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P1-C #8: NASDAQ_RANGE_TRAP ===
+  //   video3 §12:54-13:09 "단기 급락 가속" — 60d high upward break + 5거래일 내 60d low downward break.
+  try {
+    const dailyHistRT = await fetchYahooHistory('^IXIC', 100);
+    if (dailyHistRT.length >= 65) {
+      const closes = dailyHistRT.map((p) => p.close);
+      const todayClose = closes[closes.length - 1];
+      const priorClosesBeforeToday = closes.slice(-66, -1); // 60d window before today
+      const priorHigh = Math.max(...priorClosesBeforeToday);
+      const todayBreaksHigh = todayClose > priorHigh;
+      // 5 거래일 내 60d low break
+      let downBreak = false;
+      let downIdx: number = -1;
+      for (let lookback = 0; lookback <= 5; lookback += 1) {
+        const idx = closes.length - 1 - lookback;
+        if (idx < 65) break;
+        const priorLow = Math.min(...closes.slice(idx - 60, idx));
+        if (closes[idx] < priorLow) { downBreak = true; downIdx = idx; break; }
+      }
+      let level = 0;
+      let label = '⚪ trap 미감지';
+      if (todayBreaksHigh && downBreak) {
+        level = 2;
+        label = `🔴 RANGE_TRAP 감지 (60d high 돌파 + 최근 5일 내 60d low 이탈)`;
+        const icsa = val(raw, 'ICSA');
+        if (icsa !== null && icsa < 300000) {
+          level = 3;
+          label += ` + ICSA ${Math.round(icsa/1000)}K<300K cascade`;
+        }
+      }
+      d.NASDAQ_RANGE_TRAP = {
+        name: 'nasdaq_range_trap',
+        value: level,
+        date: today(),
+        formula: `오늘 ${todayClose.toFixed(0)} > 60D high ${priorHigh.toFixed(0)} = ${todayBreaksHigh}, 5일 내 60D low 이탈 = ${downBreak} (idx=${downIdx}). ${label}. video3 §12:54-13:09.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P1-C #9: NASDAQ_HEALTHY_PULLBACK ===
+  //   video3 §05:12-05:25 "정배열에서 50DMA -3~-8% pullback = 분할매수 양호".
+  //   bias=+1 (50DMA > 200DMA), match=가격 50DMA -3~-8%, confirms=가격 > 200DMA.
+  //   정배열 + match + confirms → +1 / 역배열 + match → -1.
+  try {
+    const dailyHistHP = await fetchYahooHistory('^IXIC', 250);
+    if (dailyHistHP.length >= 200) {
+      const closes = dailyHistHP.map((p) => p.close);
+      const last = closes[closes.length - 1];
+      const sma50 = closes.slice(-50).reduce((a, b) => a + b, 0) / 50;
+      const sma200 = closes.slice(-200).reduce((a, b) => a + b, 0) / 200;
+      const upTrend = sma50 > sma200;
+      const downTrend = sma50 < sma200;
+      const dispFromSma50 = ((last - sma50) / sma50) * 100;
+      const match = dispFromSma50 <= -3 && dispFromSma50 >= -8;
+      const above200 = last > sma200;
+      let level = 0;
+      let label = '⚪ pullback 미발동';
+      if (upTrend && match && above200) {
+        level = 1;
+        label = `🟢 정배열 healthy pullback (50DMA ${dispFromSma50.toFixed(1)}% within -3~-8%, 200DMA 위) — video3 §05:12 분할매수 양호`;
+      } else if (downTrend && match) {
+        level = -1;
+        label = `🔴 역배열 + 50DMA pullback — 추세 미회복 대기 (video3 §05:25)`;
+      }
+      d.NASDAQ_HEALTHY_PULLBACK = {
+        name: 'nasdaq_healthy_pullback',
+        value: level,
+        date: today(),
+        formula: `last ${last.toFixed(0)} / SMA50 ${sma50.toFixed(0)} / SMA200 ${sma200.toFixed(0)} → 정배열=${upTrend}, 50DMA-${dispFromSma50.toFixed(1)}%, >200DMA=${above200}. ${label}. video3 §05:12-05:25.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P1-C #10: NASDAQ_DOUBLE_TOP ===
+  //   video3 §13:38 "쌍봉 이중천정 — 가격차≤2%, 시간차 30~60일, 사이 골≤-8%".
+  //   추가 주봉 20MA 하향 break → level=2.
+  try {
+    const dailyHistDT = await fetchYahooHistory('^IXIC', 90);
+    if (dailyHistDT.length >= 60) {
+      const closes = dailyHistDT.map((p) => p.close);
+      // local maxima detection: ±5일 윈도우.
+      const maxima: Array<{ idx: number; price: number }> = [];
+      const W = 5;
+      for (let i = W; i < closes.length - W; i += 1) {
+        const window = closes.slice(i - W, i + W + 1);
+        if (closes[i] === Math.max(...window)) {
+          maxima.push({ idx: i, price: closes[i] });
+        }
+      }
+      let detected = false;
+      let detail = 'maxima 부족';
+      for (let i = 0; i < maxima.length; i += 1) {
+        for (let j = i + 1; j < maxima.length; j += 1) {
+          const m1 = maxima[i];
+          const m2 = maxima[j];
+          const priceDiffPct = Math.abs(m2.price - m1.price) / m1.price * 100;
+          const timeDiff = m2.idx - m1.idx;
+          if (priceDiffPct > 2) continue;
+          if (timeDiff < 30 || timeDiff > 60) continue;
+          // 사이 골
+          const trough = Math.min(...closes.slice(m1.idx, m2.idx + 1));
+          const troughPct = (trough - Math.min(m1.price, m2.price)) / Math.min(m1.price, m2.price) * 100;
+          if (troughPct > -8) continue;
+          detected = true;
+          detail = `peak1 idx=${m1.idx}@${m1.price.toFixed(0)}, peak2 idx=${m2.idx}@${m2.price.toFixed(0)}, 가격차 ${priceDiffPct.toFixed(1)}%, 시간차 ${timeDiff}일, 골 ${troughPct.toFixed(1)}%`;
+          break;
+        }
+        if (detected) break;
+      }
+      let level = detected ? 1 : 0;
+      // 주봉 20MA 하향 break 확인
+      const wkly20 = d.NASDAQ_WEEKLY_20MA?.value ?? null;
+      const lastClose = closes[closes.length - 1];
+      if (detected && wkly20 !== null && lastClose < wkly20) {
+        level = 2;
+        detail += ` + 주봉 20MA(${wkly20.toFixed(0)}) 하향 break`;
+      }
+      d.NASDAQ_DOUBLE_TOP = {
+        name: 'nasdaq_double_top',
+        value: level,
+        date: today(),
+        formula: `${detected ? '🔴 쌍봉 감지' : '⚪ 미감지'}. ${detail}. video3 §13:38 "이중천정".`,
+      };
+    }
+  } catch { void 0; }
+
   return d;
 }
 
