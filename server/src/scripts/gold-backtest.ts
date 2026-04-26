@@ -34,6 +34,7 @@ const VARIANTS: Record<string, Template> = {
     RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0, copper: 0,  korea: 5,  emerging: 5  },
     STAGFLATION:    { ...DEFENSIVE_STAG },
     BOND_VIGILANTE: { ...DEFENSIVE_VIG },
+    STAGFLATION_BOND_VIGILANTE: { ...DEFENSIVE_VIG },
   },
   V1_lean_aggressive: {
     // gold: 5 / 12 / 20 / 22 / 15 / 28, 차액을 nasdaq + korea + emerging 에 분배
@@ -45,6 +46,7 @@ const VARIANTS: Record<string, Template> = {
     RECESSION_RISK: { cash: 48, nasdaq: 14, leverage: 0,  gold: 28, silver: 0, copper: 0,  korea: 5,  emerging: 5  },
     STAGFLATION:    { ...DEFENSIVE_STAG },
     BOND_VIGILANTE: { ...DEFENSIVE_VIG },
+    STAGFLATION_BOND_VIGILANTE: { ...DEFENSIVE_VIG },
   },
   V2_moderate: {
     // gold: 10 / 15 / 22 / 23 / 18 / 26
@@ -56,6 +58,7 @@ const VARIANTS: Record<string, Template> = {
     RECESSION_RISK: { cash: 49, nasdaq: 15, leverage: 0,  gold: 26, silver: 0, copper: 0,  korea: 5,  emerging: 5  },
     STAGFLATION:    { ...DEFENSIVE_STAG },
     BOND_VIGILANTE: { ...DEFENSIVE_VIG },
+    STAGFLATION_BOND_VIGILANTE: { ...DEFENSIVE_VIG },
   },
   V3_very_aggressive: {
     // gold: 3 / 10 / 18 / 20 / 12 / 25 (RECESSION 만 현 수준 유지)
@@ -67,6 +70,7 @@ const VARIANTS: Record<string, Template> = {
     RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0, copper: 0,  korea: 5,  emerging: 5  },
     STAGFLATION:    { ...DEFENSIVE_STAG },
     BOND_VIGILANTE: { ...DEFENSIVE_VIG },
+    STAGFLATION_BOND_VIGILANTE: { ...DEFENSIVE_VIG },
   },
   V4_mild: {
     // gold: 12 / 18 / 23 / 24 / 18 / 25 (현재보다 살짝만 낮춤)
@@ -78,6 +82,7 @@ const VARIANTS: Record<string, Template> = {
     RECESSION_RISK: { cash: 50, nasdaq: 15, leverage: 0,  gold: 25, silver: 0, copper: 0,  korea: 5,  emerging: 5  },
     STAGFLATION:    { ...DEFENSIVE_STAG },
     BOND_VIGILANTE: { ...DEFENSIVE_VIG },
+    STAGFLATION_BOND_VIGILANTE: { ...DEFENSIVE_VIG },
   },
 };
 

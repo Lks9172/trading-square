@@ -27,7 +27,8 @@ export type Regime =
   | 'PANIC_BUT_OK'
   | 'RECESSION_RISK'
   | 'STAGFLATION'
-  | 'BOND_VIGILANTE';
+  | 'BOND_VIGILANTE'
+  | 'STAGFLATION_BOND_VIGILANTE'; // 24차 Phase 2#16: 동시 발동 합성 라벨
 
 export interface RegimeState {
   regime: Regime;

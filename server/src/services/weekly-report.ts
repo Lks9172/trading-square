@@ -94,17 +94,23 @@ export function buildWeeklyReport(snapshot: SystemSnapshot): WeeklyReport {
   };
 }
 
-// 20차 D1 + 21차 P1#5: 7일간 복기 빈도 + 24h impulsive + 4주 동일실수 패턴 감지
+// 20차 D1 + 21차 P1#5 + 24차 Phase 2#18-20: 정성 정량화 3종 추가
 export interface PlanDiscipline {
   reviewsLast7d: number;
   reviewWarning: string | null;
   impulsiveTrades24h: number;
   impulsiveWarning: string | null;
-  // 21차 P1#5: 반복 동일 실수 — 시스템 권고와 반대 행동 횟수
   againstSystemCount4w: number;
   patternWarning: string | null;
-  // 21차 P2#15: horizon 변경 횟수
   horizonChangeCount30d: number;
+  // 24차 Phase 2#18: 시스템 vs 사용자 행동 90D 일치율 (INDEPENDENCE_INDEX 보완)
+  independenceIndex90d: number;       // 0~100, 높을수록 사용자 자기 판단 우세 (against_system 비율)
+  // 24차 Phase 2#19: 30D 시그널 미충족 시 매수 자제 일수 비율 (WAIT_DISCIPLINE)
+  waitDiscipline30d: number;          // 0~100, 높을수록 인내 양호
+  // 24차 Phase 2#20: 복기 깊이 + 연속 streak
+  reviewDepthAvgChars: number;        // 7일 observation 평균 글자수
+  reviewStreakDays: number;           // 연속 복기 일수 (현재까지)
+  reviewMaxStreakDays: number;        // 30일 내 최장 streak
 }
 
 export async function computePlanDiscipline(): Promise<PlanDiscipline> {
@@ -146,6 +152,55 @@ export async function computePlanDiscipline(): Promise<PlanDiscipline> {
     return Number.isFinite(t) && t >= cutoff30d && e.kind === 'observation' && /horizon change/i.test(e.notes ?? '');
   });
 
+  // 24차 Phase 2#18: INDEPENDENCE_INDEX — 90D 동안 user_action 중 against_system 비율
+  const cutoff90d = Date.now() - 90 * 86400000;
+  const allActions90d = log.filter((e) => {
+    const t = new Date(e.ts).getTime();
+    return Number.isFinite(t) && t >= cutoff90d && e.kind === 'user_action';
+  });
+  const independenceIndex90d = allActions90d.length > 0
+    ? Math.round((allActions90d.filter((e) => e.againstSystemRecommendation === true).length / allActions90d.length) * 100)
+    : 0;
+
+  // 24차 Phase 2#19: WAIT_DISCIPLINE — 30일 동안 user_action 횟수가 적을수록 양호
+  // 단순화: 30D user_action 0건 = 100, 10건+ = 0, 선형 보간
+  const userActions30d = log.filter((e) => {
+    const t = new Date(e.ts).getTime();
+    return Number.isFinite(t) && t >= cutoff30d && e.kind === 'user_action';
+  }).length;
+  const waitDiscipline30d = Math.max(0, Math.min(100, 100 - userActions30d * 10));
+
+  // 24차 Phase 2#20: REVIEW_DEPTH 평균 글자수 + STREAK
+  const reviews7dList = reviews7d.filter((e) => e.kind === 'observation');
+  const reviewDepthAvgChars = reviews7dList.length > 0
+    ? Math.round(reviews7dList.reduce((s, e) => s + (e.notes?.length ?? 0), 0) / reviews7dList.length)
+    : 0;
+  // streak: 일별 분포 — observation 기록된 날짜 set 만들고 연속 일수 카운트
+  const reviewDates = new Set<string>();
+  for (const e of log) {
+    if (e.kind !== 'observation') continue;
+    const t = new Date(e.ts).getTime();
+    if (Number.isFinite(t) && t >= cutoff30d) reviewDates.add(new Date(t).toISOString().slice(0, 10));
+  }
+  let reviewStreakDays = 0;
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    if (reviewDates.has(d)) reviewStreakDays++;
+    else if (i > 0) break;
+  }
+  // max streak in 30d window
+  let reviewMaxStreakDays = 0;
+  let curStreak = 0;
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    if (reviewDates.has(d)) {
+      curStreak++;
+      if (curStreak > reviewMaxStreakDays) reviewMaxStreakDays = curStreak;
+    } else {
+      curStreak = 0;
+    }
+  }
+
   return {
     reviewsLast7d: reviews7d.length,
     reviewWarning: reviews7d.length === 0
@@ -162,6 +217,12 @@ export async function computePlanDiscipline(): Promise<PlanDiscipline> {
       ? `⚠️ 4주간 시스템 권고 반대 ${againstCount}회 — 반복 패턴 점검 필요 (video1 §1부 "패닉 매도+추격 매수")`
       : null,
     horizonChangeCount30d: horizonChanges.length,
+    // 24차 Phase 2#18-20
+    independenceIndex90d,
+    waitDiscipline30d,
+    reviewDepthAvgChars,
+    reviewStreakDays,
+    reviewMaxStreakDays,
   };
 }
 

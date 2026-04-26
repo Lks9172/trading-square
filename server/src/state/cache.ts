@@ -208,11 +208,20 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
         const prevSig = prev.signal;
         // BUY/STRONG_BUY → HOLD/REDUCE 로 떨어지는 경우 prev 유지 (whipsaw 차단)
         if ((prevSig === 'BUY' || prevSig === 'STRONG_BUY') && (sig.signal === 'HOLD' || sig.signal === 'REDUCE')) {
-          // 23차 Tier 1#4: 의도 명확화 — 이전 met - 현재 met = 1 만 차단 (1met 변동).
+          // 23차 Tier 1#4 + 24차 Phase 2#15: BUY/STRONG_BUY → HOLD/REDUCE 강등 metDelta≤2 까지 차단.
+          // 이전 1met 만 차단 → 24차에서 video1 §11:14 "남의 판단" 보호 강화로 ≤2 까지 확장.
           const metDelta = (prev.conditionsMet ?? 0) - (sig.conditionsMet ?? 0);
-          if (metDelta === 1) {
+          if (metDelta >= 1 && metDelta <= 2) {
             sig.signal = prevSig as typeof sig.signal;
-            sig.reasons.push(`✓ Hysteresis 보호 — 직전 ${prevSig} 유지 (1met 변동, 21차 P1#3 / 23차 의도 fix)`);
+            sig.reasons.push(`✓ Hysteresis 보호 — 직전 ${prevSig} 유지 (metDelta=${metDelta}, 24차 ≤2 확장)`);
+          }
+        }
+        // 24차 Phase 2#15 추가: STRONG_BUY → BUY 강등도 metDelta≤2 보호
+        if (prevSig === 'STRONG_BUY' && sig.signal === 'BUY') {
+          const metDelta = (prev.conditionsMet ?? 0) - (sig.conditionsMet ?? 0);
+          if (metDelta >= 1 && metDelta <= 2) {
+            sig.signal = 'STRONG_BUY';
+            sig.reasons.push(`✓ Hysteresis 보호 — STRONG_BUY 유지 (metDelta=${metDelta}, 24차)`);
           }
         }
       }

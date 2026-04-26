@@ -27,6 +27,7 @@ const CURRENT_PRD: Template = {
   // Fix #5: 레짐 8종 확장. gold-sweep 은 기존 6종 대상이므로 두 신규 레짐은 RECESSION_RISK 수준 방어 비중 사용.
   STAGFLATION:    { cash: 25, nasdaq: 15, leverage: 0,  gold: 30, silver: 10, copper: 5,  korea: 8,  emerging: 7  },
   BOND_VIGILANTE: { cash: 30, nasdaq: 10, leverage: 0,  gold: 35, silver: 8,  copper: 3,  korea: 7,  emerging: 7  },
+  STAGFLATION_BOND_VIGILANTE: { cash: 35, nasdaq: 10, leverage: 0, gold: 37, silver: 5, copper: 3, korea: 5, emerging: 5  },
 };
 
 const GOLD_CANDIDATES = [0, 5, 10, 15, 20, 25, 30, 35];

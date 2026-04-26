@@ -287,12 +287,10 @@ export function classifyRegime(
   }
   const preOverrideRegime = regime;
 
-  // 23차 Tier 2#7: STAGFLATION + BOND_VIGILANTE 동시 발동 시 후자 무시 fix —
-  // 두 플래그 동시 활성 시 별도 라벨 STAGFLATION_BOND_VIGILANTE 로 표시 (else if 누적 처리).
+  // 23차 Tier 2#7 + 24차 Phase 2#16: STAGFLATION + BOND_VIGILANTE 동시 발동 시 합성 라벨.
   if (stagflation === 1 && bondVigilante === 1) {
-    overrides.push('STAGFLATION+BOND_VIGILANTE 동시 -> 양 override 누적, 라벨은 STAGFLATION 우선');
-    regime = 'STAGFLATION';
-    // BOND_VIGILANTE 도 함께 활성으로 표기 (override 로그)
+    overrides.push('STAGFLATION+BOND_VIGILANTE 동시 -> 합성 라벨 STAGFLATION_BOND_VIGILANTE');
+    regime = 'STAGFLATION_BOND_VIGILANTE';
   } else if (stagflation === 1) {
     overrides.push('STAGFLATION_WARNING=1 -> regime forced to STAGFLATION');
     regime = 'STAGFLATION';

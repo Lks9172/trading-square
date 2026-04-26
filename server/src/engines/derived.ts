@@ -842,7 +842,8 @@ export async function computeDerived(
 
   // === 은 아웃퍼폼 2조건 복합 (영상2 §금은비 "60~80 이상 + 경기 회복 동반 확인") ===
   const gsr = d.GOLD_SILVER_RATIO?.value;
-  const ismVal = d.ISM_PROXY?.value;
+  // 24차 P1#4: ISM_PROXY 결측 시 manualInputs.ismPmi fallback (사용자 입력 의미 회복)
+  const ismVal = d.ISM_PROXY?.value ?? (typeof manualInputs?.ismPmi === 'number' ? manualInputs.ismPmi : null);
   if (gsr !== undefined && gsr !== null && ismVal !== undefined && ismVal !== null) {
     const highRatio = gsr >= 70;
     const expansionConfirmed = ismVal >= 50;
@@ -1256,6 +1257,9 @@ export async function computeDerived(
   } else if (nasdaqDisparity !== null && nasdaqDisparity > 18 && fng !== null && fng > 80 && vixVal === null) {
     // VIX 결측 시 F&G 80+ 단독 강한 과열 (23차 Tier 2#10)
     d.OVERHEATED = { name: 'overheated', value: 1, date: dt, formula: '이격도+18% AND F&G 80+ AND VIX 결측 → 과열 (VIX 결측 fallback)' };
+  } else if (vixVal === null && fng === null) {
+    // 24차 Phase 2#9: VIX+F&G 동시 결측 시 hysteresis 7일 잠금 회피 — null 명시 (hardenFlag 가 prev 유지)
+    d.OVERHEATED = { name: 'overheated', value: null as unknown as number, date: dt, formula: 'VIX+F&G 동시 결측 — null 반환, hardenFlag 가 직전 7일 값 유지' };
   } else {
     d.OVERHEATED = { name: 'overheated', value: 0, date: dt, formula: vixVal === null ? '과열 미해당 (VIX 결측 — F&G 80+ fallback 미충족)' : '과열 조건 미충족' };
   }
@@ -3337,13 +3341,13 @@ export async function computeDerived(
     };
   } catch { /* skip */ }
 
-  // === Phase 2 B3: DRAWDOWN_ATH (video1 "펀더멘털 살아있는 -30%") ===
+  // === Phase 2 B3 + 24차 Phase 1#1: DRAWDOWN_ATH 5년 history (video1 §"2021.11 고점") ===
   for (const [symbol, derivedKey] of [
     ['^IXIC', 'NASDAQ_DRAWDOWN_ATH'],
     ['^KS11', 'KOSPI_DRAWDOWN_ATH'],
   ] as const) {
     try {
-      const hist = await fetchYahooHistory(symbol, 400); // 52주 여유
+      const hist = await fetchYahooHistory(symbol, 1260); // 5년 ≈ 1260영업일 (video1 사이클 ATH 인지)
       if (hist.length >= 100) {
         const closes = hist.map((h) => h.close);
         const ath = Math.max(...closes);
@@ -3910,35 +3914,38 @@ export async function computeDerived(
     };
   } catch { void 0; }
 
-  // === P2#7: 금 장기 컵앤핸들 레벨 (5년 근사) ===
-  // video2 §4부 "컵앤핸들/역H&S". GLD ETF 우선 — GC=F 선물보다 히스토리 안정.
+  // === P2#7 + 24차 P1#2: 금 장기 컵앤핸들 13년 (video2 §18:20 "2011-2024 13년 패턴") ===
+  // GLD ETF 13년 history (3300일) 시도, 부족 시 GC=F + 가능한 만큼 fallback.
   try {
-    let gHist = await fetchYahooHistory('GLD', 1500);
-    if (gHist.length < 800) gHist = await fetchYahooHistory('GC=F', 1500);
+    let gHist = await fetchYahooHistory('GLD', 3300);
+    if (gHist.length < 2000) gHist = await fetchYahooHistory('GC=F', 3300);
     if (gHist.length >= 800) {
       const closes = gHist.map((h) => h.close);
       const n = closes.length;
       const last = closes[n - 1];
-      // cup rim: 과거 구간 최고가 (2~4년 또는 가능한 만큼)
-      const rimEnd = Math.max(120, n - 504);
-      const rimStart = Math.max(0, n - 1008);
-      const rim = Math.max(...closes.slice(rimStart, rimEnd));
+      // cup rim: 8~13년 전 고점 (대형 패턴) — 가능한 만큼 깊은 과거
+      // 13년 history 확보 시: rimStart = n-3300, rimEnd = n-2000 (8~13년 전 max)
+      // 부족 시 가용 깊이의 가장 오래된 구간 사용
+      const targetRimStart = Math.max(0, n - 3300);
+      const targetRimEnd = Math.max(targetRimStart + 250, n - 2000);
+      const rim = Math.max(...closes.slice(targetRimStart, targetRimEnd));
       const hlStart = Math.max(20, n - 126);
       const handleLow = Math.min(...closes.slice(hlStart, n - 20));
       const recentMa = closes.slice(n - 20).reduce((a, b) => a + b, 0) / 20;
       const rimRecovered = last >= rim * 0.97;
       const handleConfirmed = recentMa > handleLow * 1.02 && last > handleLow * 1.05;
+      const yearsCovered = (n / 252).toFixed(1);
       let level: number;
       let label: string;
-      if (rimRecovered && handleConfirmed) { level = 2; label = '🟢 컵앤핸들 완성 (rim 재탈환 + handle 돌파)'; }
-      else if (rimRecovered) { level = 1; label = '🔵 cup rim 재탈환 — handle 대기'; }
-      else if (last > rim * 0.85) { level = 0; label = '⚪ cup 진행 (rim 85%+)'; }
-      else { level = -1; label = '🟡 cup 미완성'; }
+      if (rimRecovered && handleConfirmed) { level = 2; label = `🟢 컵앤핸들 완성 (rim 재탈환 + handle 돌파, ${yearsCovered}년 깊이)`; }
+      else if (rimRecovered) { level = 1; label = `🔵 cup rim 재탈환 — handle 대기 (${yearsCovered}년)`; }
+      else if (last > rim * 0.85) { level = 0; label = `⚪ cup 진행 (rim 85%+, ${yearsCovered}년)`; }
+      else { level = -1; label = `🟡 cup 미완성 (${yearsCovered}년)`; }
       d.GOLD_LONGTERM_CUP_HANDLE = {
         name: 'gold_longterm_cup_handle',
         value: level,
         date: today(),
-        formula: `rim=${rim.toFixed(0)}, last=${last.toFixed(0)}, handleLow=${handleLow.toFixed(0)}. ${label}. video2 §4부 근사 (5년).`,
+        formula: `rim=${rim.toFixed(0)} (8~13년 전 max), last=${last.toFixed(0)}, handleLow=${handleLow.toFixed(0)}, depth=${yearsCovered}년. ${label}. video2 §18:20.`,
       };
     }
   } catch { void 0; }
@@ -4126,8 +4133,8 @@ export async function computeDerived(
     };
   } catch { void 0; }
 
-  // === 19차 P3#14: DCA_TRANCHE_PROGRESS ===
-  // video1+3 "3회 이상 분할". 사용자가 manualInputs.trancheUsedPct 로 입력 — 잔여 buffer 표시.
+  // === 19차 P3#14 + 24차 P1#5: DCA_TRANCHE_PROGRESS + 잔여 buffer 가용 매수 룸 ===
+  // video1+3 "3회 이상 분할". 사용자 trancheUsedPct → 신호 가중치 / execution stage status 에 반영.
   try {
     const used = manualInputs?.trancheUsedPct;
     if (typeof used === 'number' && used >= 0 && used <= 100) {
@@ -4142,6 +4149,13 @@ export async function computeDerived(
         value: used,
         date: today(),
         formula: `사용자 분할매수 사용률 ${used}%. ${label}. video1+3 "3회 이상 분할".`,
+      };
+      // 24차 P1#5: 추가 매수 가용 buffer (100 - used). 신호 권고 강도 조정용 별도 derived.
+      d.DCA_BUFFER_REMAINING_PCT = {
+        name: 'dca_buffer_remaining_pct',
+        value: 100 - used,
+        date: today(),
+        formula: `추가 매수 가용 ${100 - used}%. signals 가중치 / execution stage 결정에 반영 권고.`,
       };
     }
   } catch { void 0; }
@@ -4160,22 +4174,25 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
-  // === 19차 P3#13 + 23차 Tier 2#13: SCENARIO_GATE_A_B (4축 — 거래량 추가) ===
-  // stt_kospi §4부 "두 가지 그림 동시에". 환율 1480 + 외인 흐름 + 코스피 200DMA + 거래량 지속.
+  // === 19차 P3#13 + 23차 Tier 2#13 + 24차 Phase 2#11: SCENARIO_GATE_A_B (5축 — 5150/4080 절대값 추가) ===
+  // stt_kospi §4부 "두 가지 그림 동시에" + §"5150 1차 / 4080 2차 지지". 환율 + 200DMA + 외인 + 거래량 + KOSPI 절대값.
   try {
     const krw = val(raw, 'USDKRW');
+    const kospi = val(raw, 'KOSPI');
     const kospiAbove200 = d.KOSPI_DISPARITY?.value ?? null;
     const fgnFlow = d.KOSPI_FOREIGN_FLOW_LEVEL?.value ?? d.KOSPI_FOREIGN_HISTORIC_EXTREME?.value ?? null;
-    // 23차: 거래량 지속 축 (KOSPI_VOLUME_CONFIRM 또는 명시 없으면 0)
     const volConfirm = d.KOSPI_VOLUME_CONFIRM?.value ?? 0;
+    // 24차 Phase 2#11: KOSPI 절대값 5150 (1차 지지) / 4080 (2차 지지) — stt_kospi §4부 명시
+    const above5150 = kospi !== null && kospi >= 5150;
+    const below4080 = kospi !== null && kospi < 4080;
     let scenario: number;
     let label: string;
-    if (krw !== null && krw <= 1480 && kospiAbove200 !== null && kospiAbove200 > 0 && (fgnFlow === null || fgnFlow >= 0) && volConfirm === 1) {
-      scenario = 1; label = '🟢 시나리오 A — 추세 재개 (환율<1480 + 200DMA 상회 + 외인 정상 + 거래량 지속)';
+    if (krw !== null && krw <= 1480 && kospiAbove200 !== null && kospiAbove200 > 0 && (fgnFlow === null || fgnFlow >= 0) && volConfirm === 1 && above5150) {
+      scenario = 1; label = '🟢 시나리오 A — 추세 재개 (환율<1480 + 200DMA + 외인 + 거래량 + 5150+ 5축 모두)';
     } else if (krw !== null && krw <= 1480 && kospiAbove200 !== null && kospiAbove200 > 0 && (fgnFlow === null || fgnFlow >= 0)) {
-      scenario = 1; label = '🟢 시나리오 A 진행 (3축 충족, 거래량 미확인)';
-    } else if (krw !== null && krw >= 1500 && kospiAbove200 !== null && kospiAbove200 < -3) {
-      scenario = -1; label = '🔴 시나리오 B — 박스 하방 이탈 (환율>1500 + 200DMA -3%↓)';
+      scenario = 1; label = '🟢 시나리오 A 진행 (3축 충족)';
+    } else if (below4080 || (krw !== null && krw >= 1500 && kospiAbove200 !== null && kospiAbove200 < -3)) {
+      scenario = -1; label = below4080 ? '🔴 시나리오 B — 4080 2차 지지 이탈 (stt_kospi §4부)' : '🔴 시나리오 B — 박스 하방 이탈';
     } else {
       scenario = 0; label = '🟡 관망 — 시나리오 분기점';
     }
@@ -4183,7 +4200,7 @@ export async function computeDerived(
       name: 'scenario_gate_a_b',
       value: scenario,
       date: today(),
-      formula: `KRW=${krw?.toFixed(1) ?? '-'}, KOSPI 200DMA disp=${kospiAbove200?.toFixed(2) ?? '-'}%, fgn=${fgnFlow ?? '-'}, vol_confirm=${volConfirm}. ${label}. stt_kospi §4부 "두 그림" 4축.`,
+      formula: `KRW=${krw?.toFixed(1) ?? '-'}, KOSPI=${kospi?.toFixed(0) ?? '-'} (5150+:${above5150 ? 'Y' : 'N'} / 4080-:${below4080 ? 'Y' : 'N'}), 200DMA=${kospiAbove200?.toFixed(2) ?? '-'}%, fgn=${fgnFlow ?? '-'}, vol=${volConfirm}. ${label}. stt_kospi §4부 5축.`,
     };
   } catch { void 0; }
 
@@ -4281,8 +4298,8 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
-  // === 20차 A3: TRUMP_AGENDA_PRESSURE (관세 + 지정학 + WTI + 선거 D-day 통합) ===
-  // stt_video4 §5:51 "관세 막기 싫으면 미국에 투자해라". 4축 압력.
+  // === 20차 A3 + 24차 P1#3: TRUMP_AGENDA_PRESSURE (5축 — policyDirection 가산) ===
+  // stt_video4 §5:51 "관세 막기 싫으면 미국에 투자해라". 5축 압력.
   try {
     const wti = val(raw, 'WTI');
     const wtiPrev = (await readHistory('fred', 'DCOILWTICO')).slice(-30).map((p) => p.value);
@@ -4290,13 +4307,17 @@ export async function computeDerived(
     const electionD = d.ELECTION_DDAY_LEVEL?.value ?? 0;
     const geoRisk = manualInputs?.geoRisk ?? 0;
     const dxy = val(raw, 'DXY') ?? 100;
+    // 24차 P1#3: policyDirection 사용자 입력 활용 — 매파 정책 (>0) 시 압력 가산
+    const policyDir = typeof manualInputs?.policyDirection === 'number' ? manualInputs.policyDirection : 0;
     let pressure = 0;
     if (geoRisk >= 3) pressure += 1;
     if (wti30D > 10) pressure += 1;
     if (electionD === 2) pressure += 1; // 선거 임박
     if (dxy > 105) pressure += 1; // 강달러 → 관세 효과 증폭
+    if (policyDir < 0) pressure += 1; // 매파(긴축) 정책 = 어젠다 압력 강화 (24차)
     let label: string;
-    if (pressure >= 3) label = '🔴 트럼프 어젠다 압력 극대';
+    if (pressure >= 4) label = '🔴 트럼프 어젠다 5축 극대';
+    else if (pressure >= 3) label = '🔴 트럼프 어젠다 압력 극대';
     else if (pressure >= 2) label = '🟠 트럼프 어젠다 압력 진행';
     else if (pressure >= 1) label = '🟡 단일 축 활성';
     else label = '⚪ 압력 약함';
@@ -4304,7 +4325,7 @@ export async function computeDerived(
       name: 'trump_agenda_pressure',
       value: pressure,
       date: today(),
-      formula: `관세 압력(geoRisk=${geoRisk}) + WTI 30D=${wti30D.toFixed(1)}% + 선거 D-day=${electionD} + DXY=${dxy.toFixed(1)} → ${pressure}/4. ${label}. stt_video4 §5:51.`,
+      formula: `관세(geoRisk=${geoRisk}) + WTI 30D=${wti30D.toFixed(1)}% + 선거 D=${electionD} + DXY=${dxy.toFixed(1)} + policyDir=${policyDir} → ${pressure}/5. ${label}. stt_video4 §5:51 (24차 5축).`,
     };
   } catch { void 0; }
 
@@ -4800,6 +4821,108 @@ export async function computeDerived(
         value: level,
         date: today(),
         formula: `M2=${m2.toFixed(1)}% VIX=${vix.toFixed(1)} DXY=${dxy.toFixed(1)}/${dxyTrend?.toFixed(2) ?? '-'}. ${label}. 노션 §StreetStats 유동성 게이트.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 24차 P1#6: 노션 본가 자체 도구 4종 ===
+  // (1) KOSDAQ_DRAWDOWN_ATH — 노션 본가 표시
+  try {
+    const kosdaqHist = await fetchYahooHistory('^KQ11', 1260);
+    if (kosdaqHist.length >= 100) {
+      const closes = kosdaqHist.map((h) => h.close);
+      const ath = Math.max(...closes);
+      const cur = closes[closes.length - 1];
+      const dd = ath > 0 ? ((cur - ath) / ath) * 100 : 0;
+      let level: number;
+      let label: string;
+      if (dd >= -5) { level = 2; label = 'ATH 근접'; }
+      else if (dd >= -10) { level = 1; label = '-5~-10% 소폭 조정'; }
+      else if (dd >= -20) { level = 0; label = '-10~-20% 조정'; }
+      else if (dd >= -30) { level = -1; label = '-20~-30% 약세'; }
+      else { level = -2; label = '<-30% 심각'; }
+      d.KOSDAQ_DRAWDOWN_ATH = {
+        name: 'kosdaq_drawdown_ath',
+        value: parseFloat(dd.toFixed(2)),
+        date: today(),
+        formula: `KOSDAQ ATH 대비 ${dd.toFixed(2)}% (${label}). 노션 §자산제곱 본가 자체 도구.`,
+      };
+      d.KOSDAQ_DRAWDOWN_LEVEL = {
+        name: 'kosdaq_drawdown_level',
+        value: level,
+        date: today(),
+        formula: `2=ATH근접, 1=소폭, 0=조정, -1=약세, -2=심각.`,
+      };
+    }
+  } catch { void 0; }
+
+  // (2) EM_TRIO_BREADTH — EWZ + INDA + VNM + EWJ 4종 30D 평균 수익률
+  try {
+    const emSyms = ['EWZ', 'INDA', 'VNM', 'EWJ'] as const;
+    const rets: Array<{ sym: string; ret: number }> = [];
+    for (const s of emSyms) {
+      const h = await fetchYahooHistory(s, 35);
+      if (h.length >= 22) {
+        const c = h.map((p) => p.close);
+        const ret = ((c[c.length - 1] - c[0]) / c[0]) * 100;
+        rets.push({ sym: s, ret });
+      }
+    }
+    if (rets.length >= 3) {
+      const avg = rets.reduce((s, r) => s + r.ret, 0) / rets.length;
+      const positives = rets.filter((r) => r.ret > 0).length;
+      let level: number;
+      let label: string;
+      if (positives === rets.length && avg > 3) { level = 2; label = `🟢 EM 4국 동조 강세 (avg +${avg.toFixed(1)}%)`; }
+      else if (positives >= 3 && avg > 0) { level = 1; label = `🔵 EM 우세 (${positives}/${rets.length})`; }
+      else if (positives <= 1 && avg < -3) { level = -2; label = `🔴 EM 동조 약세 (avg ${avg.toFixed(1)}%)`; }
+      else { level = 0; label = '⚪ EM 혼조'; }
+      d.EM_TRIO_BREADTH = {
+        name: 'em_trio_breadth',
+        value: level,
+        date: today(),
+        formula: `EM 4종(EWZ/INDA/VNM/EWJ) 30D ${rets.map((r) => `${r.sym}=${r.ret.toFixed(1)}%`).join(', ')}. avg=${avg.toFixed(1)}%, positives=${positives}/${rets.length}. ${label}. 노션 §본가 신흥국 4종.`,
+      };
+    }
+  } catch { void 0; }
+
+  // (3) STLFSI_LEVEL — Saint Louis Fed Financial Stress Index (FRED STLFSI4)
+  try {
+    const stlfsiHist = await readHistory('fred', 'STLFSI4');
+    if (stlfsiHist.length >= 1) {
+      const last = stlfsiHist[stlfsiHist.length - 1].value;
+      let level: number;
+      let label: string;
+      if (last >= 2) { level = -2; label = '🔴 금융 스트레스 극단 (≥2)'; }
+      else if (last >= 1) { level = -1; label = '🟠 금융 스트레스 경계 (1~2)'; }
+      else if (last >= 0) { level = 0; label = '⚪ 정상 범위 (0~1)'; }
+      else { level = 1; label = '🟢 매우 안정 (<0)'; }
+      d.STLFSI_LEVEL = {
+        name: 'stlfsi_level',
+        value: parseFloat(last.toFixed(2)),
+        date: today(),
+        formula: `St. Louis Fed Financial Stress Index ${last.toFixed(2)}. ${label}. 노션 §본가 STLFSI.`,
+      };
+    }
+  } catch { void 0; }
+
+  // (4) MMF_RRP_RATIO — MMF / RRP 비율 (시장 유동성 vs Fed 흡수)
+  try {
+    const mmf = val(raw, 'WRMFNS') ?? d.MMF_TIER?.value ?? null;
+    const rrp = val(raw, 'RRPONTSYD') ?? null;
+    if (mmf !== null && rrp !== null && rrp > 0) {
+      const ratio = mmf / rrp;
+      let level: number;
+      let label: string;
+      if (ratio >= 8) { level = 2; label = '🟢 MMF/RRP 8+ — RRP 대폭 감소, 시장 유동성 풍부'; }
+      else if (ratio >= 4) { level = 1; label = '🔵 MMF/RRP 4~8 — 정상'; }
+      else if (ratio >= 2) { level = 0; label = '🟡 MMF/RRP 2~4 — RRP 흡수 진행'; }
+      else { level = -1; label = '🟠 MMF/RRP <2 — Fed 흡수 강함'; }
+      d.MMF_RRP_RATIO = {
+        name: 'mmf_rrp_ratio',
+        value: parseFloat(ratio.toFixed(2)),
+        date: today(),
+        formula: `MMF ${mmf.toFixed(0)} / RRP ${rrp.toFixed(0)} = ${ratio.toFixed(2)}. ${label}. 노션 §본가 MMF vs RRP.`,
       };
     }
   } catch { void 0; }

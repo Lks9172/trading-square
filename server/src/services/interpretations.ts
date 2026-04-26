@@ -330,6 +330,41 @@ export function interpretDerived(
     if (value >= 7) return '🟡 네이버 투자정보 7일+ 공백';
     return null;
   }
+  // 24차 신규
+  if (key === 'KOSDAQ_DRAWDOWN_ATH') {
+    if (value <= -30) return '🔴 KOSDAQ -30%↓ 심각 약세';
+    if (value <= -20) return '🟠 KOSDAQ -20~-30% 약세';
+    if (value <= -10) return '🟡 KOSDAQ -10~-20% 조정';
+    return null;
+  }
+  if (key === 'EM_TRIO_BREADTH') {
+    if (value === 2) return '🟢 EM 4국 동조 강세 — 신흥국 우호';
+    if (value === 1) return '🔵 EM 우세';
+    if (value === -2) return '🔴 EM 동조 약세';
+    return null;
+  }
+  if (key === 'STLFSI_LEVEL') {
+    if (value >= 2) return '🔴 금융 스트레스 극단';
+    if (value >= 1) return '🟠 금융 스트레스 경계';
+    if (value < 0) return '🟢 금융 매우 안정';
+    return null;
+  }
+  if (key === 'MMF_RRP_RATIO') {
+    if (value >= 8) return '🟢 MMF/RRP 8+ 시장 유동성 풍부';
+    if (value < 2) return '🟠 MMF/RRP <2 Fed 흡수 강함';
+    return null;
+  }
+  if (key === 'DCA_BUFFER_REMAINING_PCT') {
+    if (value <= 0) return '🟠 분할매수 가용 0% — 추가 진입 불가';
+    if (value >= 70) return '🟢 분할매수 buffer 70%+ 충분';
+    return null;
+  }
+  if (key === 'KOSDAQ_DRAWDOWN_LEVEL') {
+    if (value <= -2) return '🔴 KOSDAQ 심각';
+    if (value === -1) return '🟠 KOSDAQ 약세';
+    return null;
+  }
+
   // 23차 신규
   if (key === 'COPPER_GOLD_RATIO_ZSCORE_90D') {
     if (value >= 1.5) return '🟢 CGR 90D z>+1.5 — 경기 회복 강신호 (video2 §3부)';

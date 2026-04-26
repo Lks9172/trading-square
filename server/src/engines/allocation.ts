@@ -62,6 +62,8 @@ const BASE_ALLOCATIONS: Record<Regime, Record<string, number>> = {
   //   11차 시정 (2026-04): silver 8→5. BOND_VIGILANTE 는 재정 악화+금리 급등 경제 불안
   //   국면이라 video2 "경기침체 시 은 더 크게 하락" 정합. 감축 3 = gold +2 / cash +1.
   BOND_VIGILANTE: { cash: 31, nasdaq: 10, leverage: 0,  gold: 37, silver: 5,  copper: 3,  korea: 7,  emerging: 7  },
+  // 24차 Phase 2#16: STAGFLATION + BOND_VIGILANTE 동시 발동 합성 라벨 — 두 방어 모드 평균 + cash 가산
+  STAGFLATION_BOND_VIGILANTE: { cash: 35, nasdaq: 10, leverage: 0, gold: 37, silver: 5, copper: 3, korea: 5, emerging: 5 },
 };
 
 // 신호 배수는 PRD §6.3.2 스펙을 따른다.

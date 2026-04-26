@@ -47,6 +47,7 @@ const CURRENT_PRD: Template = {
   // Fix #5: 레짐 8종 확장 — portfolio-sweep 탐색 대상 아님, 타입 만족용 고정 방어 비중.
   STAGFLATION:    { cash: 25, nasdaq: 15, leverage: 0,  gold: 30, silver: 10, copper: 5,  korea: 8,  emerging: 7  },
   BOND_VIGILANTE: { cash: 30, nasdaq: 10, leverage: 0,  gold: 35, silver: 8,  copper: 3,  korea: 7,  emerging: 7  },
+  STAGFLATION_BOND_VIGILANTE: { cash: 35, nasdaq: 10, leverage: 0, gold: 37, silver: 5, copper: 3, korea: 5, emerging: 5  },
 };
 
 /** 각 국면의 자산별 [lo, hi] 제약. 영상/PRD 철학 최소 준수. */
@@ -66,6 +67,7 @@ const CONSTRAINTS: Record<Regime, Record<string, [number, number]>> = {
   //   BASE 값도 동기 (STAGFLATION silver 10→5, BOND_VIGILANTE silver 8→5). 감축분은 gold/cash 이관.
   STAGFLATION:    { cash: [27, 27], nasdaq: [15, 15], leverage: [0, 0],   gold: [33, 33], silver: [5, 5],   copper: [5, 5],  korea: [8, 8],  emerging: [7, 7]  },
   BOND_VIGILANTE: { cash: [31, 31], nasdaq: [10, 10], leverage: [0, 0],   gold: [37, 37], silver: [5, 5],   copper: [3, 3],  korea: [7, 7],  emerging: [7, 7]  },
+  STAGFLATION_BOND_VIGILANTE: { cash: [35, 35], nasdaq: [10, 10], leverage: [0, 0], gold: [37, 37], silver: [5, 5], copper: [3, 3], korea: [5, 5], emerging: [5, 5] },
 };
 
 // 스윕 대상은 원 6종 유지 (두 신규 국면은 데이터 부재로 탐색 의미 없음).
