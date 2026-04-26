@@ -237,6 +237,47 @@ function nasdaqSignal(
     unmetReasons.push('⚠️ 60D 고점 break 후 5거래일 내 가격 ≈ break (±1%) — 추격 금지 플래그 (video2 §24:31)');
   }
 
+  // ★ === 29차 P2-C #13: NASDAQ_RESISTANCE_REJECTION_LEVEL — overheat flag ===
+  // video3 §12:20-12:38 "윗꼬리 비율 상승 + 고점 근접 = 저항 거부".
+  const resistanceLvl = dv(derived, 'NASDAQ_RESISTANCE_REJECTION_LEVEL');
+  if (resistanceLvl === 2) {
+    unmetReasons.push('⚠️ NASDAQ 저항 거부 강 (윗꼬리 Δ≥1.0 + 고점 근접, video3 §12:20)');
+  } else if (resistanceLvl === 1) {
+    unmetReasons.push('⚠️ NASDAQ 저항 거부 (윗꼬리 Δ≥0.5 + 고점 근접, video3 §12:20)');
+  }
+
+  // ★ === 29차 P2-C #14: NASDAQ_LONG_POSITION_PRESSURE — overheat flag ===
+  // video3 §11:14-11:30 "지지선 이탈 0회 = 롱 무게 → 단기 급락 위험".
+  const longPosPressure = dv(derived, 'NASDAQ_LONG_POSITION_PRESSURE');
+  if (longPosPressure === 2) {
+    unmetReasons.push('⚠️ NASDAQ 채널 하단 250일 무이탈 — 단기 급락 위험 (video3 §11:14)');
+  }
+
+  // ★ === 29차 P2-C #15: NASDAQ_W_BOTTOM_CONFIRMED ===
+  // video3 §15:02-15:55 — 3축 게이트 (RSI↑ + swing high break + W 패턴) → +2 (STRONG_BUY 가산).
+  const wConfirmed = dv(derived, 'NASDAQ_W_BOTTOM_CONFIRMED');
+  if (wConfirmed === 2) {
+    met += 2;
+    reasons.push('✓ W_BOTTOM_CONFIRMED 3축 (RSI↑ + swing break + W 패턴, video3 §15:02)');
+  }
+
+  // ★ === 29차 P2-C #19: EARNINGS_BEAT_RATIO_4Q ===
+  // video6 §05:00 — megacap 어닝 평균 surprise.
+  const earningsRatio = dv(derived, 'EARNINGS_BEAT_RATIO_4Q');
+  if (earningsRatio === 1) {
+    met += 1;
+    reasons.push('✓ 어닝 우호 — 평균 surprise ≥ +5% (video6 §05:00)');
+  } else if (earningsRatio === -1) {
+    unmetReasons.push('⚠️ 어닝 부정 — 평균 surprise ≤ -5% (video6 §05:00)');
+  }
+
+  // ★ === 29차 P2-C #20: MULTIPLE_RATE_DECOUPLING_FLAG ===
+  // video6 §08:21 — PER ↑ + DGS10 ↑ → 디커플 (멀티플 축소 부재).
+  const multiDecouple = dv(derived, 'MULTIPLE_RATE_DECOUPLING_FLAG');
+  if (multiDecouple === 1) {
+    unmetReasons.push('⚠️ PER+DGS10 디커플 (멀티플 축소 부재) — video6 §08:21');
+  }
+
   const xlk = dv(derived, 'SECTOR_XLK');
   if (xlk !== null && xlk > 0) { reasons.push(`XLK 기술섹터 +${xlk.toFixed(1)}% → 성장주 랠리 질 양호 (보조조건)`); }
   else if (xlk !== null && xlk < 0) { unmetReasons.push(`XLK 기술섹터 ${xlk.toFixed(1)}% → 성장주 주도력 약함 (보조조건)`); }
@@ -1415,6 +1456,26 @@ function kospiSignal(
   if (fxReversal === 1) {
     reasons.push('✓ 환율 반전 + 외인 복귀 정합 (stt_kospi §11:39)');
     met += 1;
+  }
+
+  // ★ === 29차 P2-C #17: KOSPI_PBR ===
+  // video6 §05:55 — < 0.9 → +1 / > 2.0 → -1.
+  const kospiPbrLvl = dv(derived, 'KOSPI_PBR');
+  if (kospiPbrLvl === 1) {
+    met += 1;
+    reasons.push('✓ KOSPI PBR < 0.9 (밸류 우호, video6 §05:55)');
+  } else if (kospiPbrLvl === -1) {
+    unmetReasons.push('⚠️ KOSPI PBR > 2.0 (밸류 과열, video6 §05:55)');
+  }
+
+  // ★ === 29차 P2-C #18: KOSPI_AGGREGATE_ROE ===
+  // video6 §04:35 — ≥10 → +1 / <5 → -1.
+  const kospiRoeLvl = dv(derived, 'KOSPI_AGGREGATE_ROE');
+  if (kospiRoeLvl === 1) {
+    met += 1;
+    reasons.push('✓ KOSPI 합산 ROE ≥ 10% (video6 §04:35)');
+  } else if (kospiRoeLvl === -1) {
+    unmetReasons.push('⚠️ KOSPI 합산 ROE < 5% (video6 §04:35)');
   }
 
   // ★ === 29차 P1-B #5: KOSPI_RECOVERY_3AXIS_LEVEL gate 강화 ===

@@ -7018,6 +7018,228 @@ export async function computeDerived(
     };
   } catch { void 0; }
 
+  // ★ === 29차 P2-C #13: NASDAQ_RESISTANCE_REJECTION_LEVEL ===
+  // video3 §12:20-12:38 — 주봉 환산 후 최근 8주 위꼬리/실체 비율 평균 vs 직전 8주 평균 (delta).
+  // delta ≥ 0.5 AND 종가 ≥ 8주 high -3% → 1, delta ≥ 1.0 → 2.
+  try {
+    const ndxOHLC = await fetchYahooOHLC('^IXIC', 120, '1wk');
+    let level = 0;
+    let detail = '데이터 부족';
+    if (ndxOHLC.length >= 16) {
+      const recent8 = ndxOHLC.slice(-8);
+      const prior8 = ndxOHLC.slice(-16, -8);
+      const upperWickRatio = (c: { open: number; high: number; low: number; close: number }) => {
+        const body = Math.abs(c.close - c.open);
+        if (body <= 0) return 0;
+        const upper = c.high - Math.max(c.open, c.close);
+        return upper / body;
+      };
+      const recentAvg = recent8.reduce((s, c) => s + upperWickRatio(c), 0) / 8;
+      const priorAvg = prior8.reduce((s, c) => s + upperWickRatio(c), 0) / 8;
+      const delta = recentAvg - priorAvg;
+      const last = ndxOHLC[ndxOHLC.length - 1];
+      const high8 = Math.max(...recent8.map((c) => c.high));
+      const nearHigh = last.close >= high8 * 0.97; // -3%
+      if (delta >= 1.0 && nearHigh) level = 2;
+      else if (delta >= 0.5 && nearHigh) level = 1;
+      detail = `최근 8주 윗꼬리/body 평균 ${recentAvg.toFixed(2)} / 직전 ${priorAvg.toFixed(2)} → Δ${delta.toFixed(2)}, 종가 ${last.close.toFixed(0)} vs 8주 high ${high8.toFixed(0)}*0.97=${(high8 * 0.97).toFixed(0)} → nearHigh=${nearHigh}, level=${level}`;
+    }
+    d.NASDAQ_RESISTANCE_REJECTION_LEVEL = {
+      name: 'nasdaq_resistance_rejection_level',
+      value: level,
+      date: today(),
+      formula: `${detail}. video3 §12:20-12:38 "윗꼬리 비율 상승 + 고점 근접 = 저항 거부".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-C #14: NASDAQ_LONG_POSITION_PRESSURE ===
+  // video3 §11:14-11:30 "지지선 한 번도 이탈 없으면 롱 무게".
+  // 최근 250일 NASDAQ_CHANNEL_LOWER (-1σ) 이탈 횟수.
+  try {
+    const ndxLower = d.NASDAQ_CHANNEL_LOWER?.value ?? null;
+    const ndxHist250 = await fetchYahooHistory('^IXIC', 260);
+    let level = 0;
+    let detail = '데이터 부족';
+    let breachCount = 0;
+    if (ndxLower !== null && ndxHist250.length >= 250) {
+      const last250 = ndxHist250.slice(-250);
+      breachCount = last250.filter((p) => p.close < ndxLower).length;
+      if (breachCount === 0) level = 2;
+      else if (breachCount <= 2) level = 1;
+      else level = 0;
+      detail = `250일 중 채널 하단(${ndxLower.toFixed(0)}) 이탈 ${breachCount}회 → level=${level}`;
+    }
+    d.NASDAQ_LONG_POSITION_PRESSURE = {
+      name: 'nasdaq_long_position_pressure',
+      value: level,
+      date: today(),
+      formula: `${detail}. video3 §11:14-11:30 "지지선 이탈 0회 = 롱 무게 → 단기 급락 위험".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-C #15: NASDAQ_W_BOTTOM_CONFIRMED ===
+  // video3 §15:02-15:55 — 기존 W_BOTTOM + 3축 게이트:
+  //   axis A: 5일 RSI 상승 (압력 둔화)
+  //   axis B: 직전 swing high 돌파
+  //   axis C: W 패턴 매치
+  // 3축 → 2 (STRONG_BUY 가산), W 만 → 1, else 0.
+  try {
+    const wBottom = d.NASDAQ_W_BOTTOM?.value ?? null;
+    let axisA = 0; let axisB = 0;
+    const axisC = wBottom === 1 ? 1 : 0;
+    // axis A: 5일 RSI 상승 — RSI history 가 없으니 NASDAQ history 14일 RSI 직접 계산
+    try {
+      const nHist20 = await fetchYahooHistory('^IXIC', 30);
+      const calcRsi = (closes: number[], len = 14): number | null => {
+        if (closes.length < len + 1) return null;
+        const recent = closes.slice(-len - 1);
+        let gains = 0; let losses = 0;
+        for (let i = 1; i < recent.length; i++) {
+          const d = recent[i] - recent[i - 1];
+          if (d > 0) gains += d; else losses -= d;
+        }
+        const avgG = gains / len; const avgL = losses / len;
+        if (avgL === 0) return 100;
+        const rs = avgG / avgL;
+        return 100 - 100 / (1 + rs);
+      };
+      if (nHist20.length >= 20) {
+        const closes = nHist20.map((p) => p.close);
+        const rsiToday = calcRsi(closes);
+        const rsi5dAgo = calcRsi(closes.slice(0, -5));
+        if (rsiToday !== null && rsi5dAgo !== null && rsiToday > rsi5dAgo) axisA = 1;
+      }
+    } catch { void 0; }
+    // axis B: 직전 swing high 돌파 — 최근 30일 high 돌파 검사
+    try {
+      const nHist60 = await fetchYahooHistory('^IXIC', 60);
+      if (nHist60.length >= 30) {
+        const recent30 = nHist60.slice(-30);
+        const last = recent30[recent30.length - 1].close;
+        const prior29 = recent30.slice(0, -1);
+        const swingHigh = Math.max(...prior29.map((p) => p.close));
+        if (last > swingHigh) axisB = 1;
+      }
+    } catch { void 0; }
+    const sum = axisA + axisB + axisC;
+    let level: number;
+    if (sum >= 3) level = 2;
+    else if (axisC === 1) level = 1;
+    else level = 0;
+    d.NASDAQ_W_BOTTOM_CONFIRMED = {
+      name: 'nasdaq_w_bottom_confirmed',
+      value: level,
+      date: today(),
+      formula: `axisA(RSI ↑)=${axisA} + axisB(swing high break)=${axisB} + axisC(W 패턴)=${axisC} → level=${level}. video3 §15:02-15:55.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-C #17: KOSPI_PBR ===
+  // video6 §05:55 — manual kospiPBR 또는 KRX 자동.
+  // < 0.9 → +1 (밸류 우호), > 2.0 → -1 (과열).
+  try {
+    const pbr = typeof manualInputs?.kospiPBR === 'number' ? manualInputs.kospiPBR : null;
+    if (pbr !== null) {
+      let level: number;
+      let label: string;
+      if (pbr < 0.9) { level = 1; label = `🟢 PBR ${pbr.toFixed(2)} < 0.9 (밸류 우호)`; }
+      else if (pbr > 2.0) { level = -1; label = `🔴 PBR ${pbr.toFixed(2)} > 2.0 (과열)`; }
+      else { level = 0; label = `⚪ PBR ${pbr.toFixed(2)}`; }
+      d.KOSPI_PBR = {
+        name: 'kospi_pbr',
+        value: level,
+        date: today(),
+        formula: `${label}. video6 §05:55.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P2-C #18: KOSPI_AGGREGATE_ROE ===
+  // video6 §04:35 — manual kospiROE.
+  // ≥ 10 → +1, < 5 → -1.
+  try {
+    const roe = typeof manualInputs?.kospiROE === 'number' ? manualInputs.kospiROE : null;
+    if (roe !== null) {
+      let level: number;
+      let label: string;
+      if (roe >= 10) { level = 1; label = `🟢 ROE ${roe.toFixed(1)}% ≥ 10`; }
+      else if (roe < 5) { level = -1; label = `🔴 ROE ${roe.toFixed(1)}% < 5`; }
+      else { level = 0; label = `⚪ ROE ${roe.toFixed(1)}%`; }
+      d.KOSPI_AGGREGATE_ROE = {
+        name: 'kospi_aggregate_roe',
+        value: level,
+        date: today(),
+        formula: `${label}. video6 §04:35.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P2-C #19: EARNINGS_BEAT_RATIO_4Q ===
+  // video6 §05:00 — earnings.ts 의 megacap 7 fetch. 평균 surprise.
+  // ≥ +5 → +1, ≤ -5 → -1.
+  try {
+    const { fetchEarningsSurprises } = await import('../collectors/earnings');
+    const agg = await fetchEarningsSurprises();
+    if (agg && agg.totalCount > 0) {
+      const avg = agg.avgSurprisePct;
+      let level: number;
+      let label: string;
+      if (avg >= 5) { level = 1; label = `🟢 평균 surprise +${avg.toFixed(1)}% ≥ +5 (어닝 우호)`; }
+      else if (avg <= -5) { level = -1; label = `🔴 평균 surprise ${avg.toFixed(1)}% ≤ -5`; }
+      else { level = 0; label = `⚪ 평균 surprise ${avg.toFixed(1)}%`; }
+      d.EARNINGS_BEAT_RATIO_4Q = {
+        name: 'earnings_beat_ratio_4q',
+        value: level,
+        date: today(),
+        formula: `megacap ${agg.totalCount} 개 평균 surprise ${avg.toFixed(2)}% (beats ${agg.beatCount} / misses ${agg.missCount}). ${label}. video6 §05:00.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P2-C #20: MULTIPLE_RATE_DECOUPLING_FLAG ===
+  // video6 §08:21 — NASDAQ_FORWARD_PER 6개월 변화 vs DGS10 6개월 변화.
+  // PER ↑ AND DGS10 ↑ → flag=1 (디커플, 위험).
+  // PER ↓ AND DGS10 ↑ → flag=0 (정상 멀티플 축소).
+  try {
+    const perCur = d.NASDAQ_FORWARD_PER?.value ?? null;
+    let perChange: number | null = null;
+    let dgs10Change: number | null = null;
+    if (perCur !== null) {
+      // PER history (derived) 6개월 (≈ 130일)
+      const perHist = await readHistory('derived', 'NASDAQ_FORWARD_PER').catch(() => [] as Array<{ date: string; value: number }>);
+      if (perHist.length >= 130) {
+        const per0 = perHist[perHist.length - 130].value;
+        if (per0 > 0) perChange = perCur - per0;
+      }
+    }
+    try {
+      const dgsHist = await readHistory('fred', 'DGS10').catch(() => [] as Array<{ date: string; value: number }>);
+      if (dgsHist.length >= 130) {
+        const d0 = dgsHist[dgsHist.length - 130].value;
+        const d1 = dgsHist[dgsHist.length - 1].value;
+        dgs10Change = d1 - d0;
+      }
+    } catch { void 0; }
+    if (perChange !== null && dgs10Change !== null) {
+      let flag = 0;
+      let label: string;
+      if (perChange > 0 && dgs10Change > 0) {
+        flag = 1;
+        label = `🔴 디커플 (PER +${perChange.toFixed(1)} & DGS10 +${dgs10Change.toFixed(2)} 동반 상승) — 멀티플 축소 부재 위험`;
+      } else if (perChange < 0 && dgs10Change > 0) {
+        label = `🟢 정상 (PER ${perChange.toFixed(1)} & DGS10 +${dgs10Change.toFixed(2)} → 멀티플 축소 진행)`;
+      } else {
+        label = `⚪ 중립 (PER ${perChange.toFixed(1)}, DGS10 ${dgs10Change.toFixed(2)})`;
+      }
+      d.MULTIPLE_RATE_DECOUPLING_FLAG = {
+        name: 'multiple_rate_decoupling_flag',
+        value: flag,
+        date: today(),
+        formula: `${label}. video6 §08:21.`,
+      };
+    }
+  } catch { void 0; }
+
   return d;
 }
 

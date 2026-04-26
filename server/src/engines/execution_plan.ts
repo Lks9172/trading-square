@@ -121,6 +121,10 @@ function nasdaqPlan(
   const fib382 = vDer(derived, 'NASDAQ_FIB_382');
   const fib500 = vDer(derived, 'NASDAQ_FIB_500');
   const fib618 = vDer(derived, 'NASDAQ_FIB_618');
+  // ★ === 29차 P2-C #16: 절대가격 trigger 보강 ===
+  // video3 §14:24 "여러 지지 요인 겹치는 곳" — channel mid/lower + 200DMA 절대가격을 stage 메시지에 노출.
+  const channelMid = vDer(derived, 'NASDAQ_CHANNEL_MID');
+  const channelLower = vDer(derived, 'NASDAQ_CHANNEL_LOWER');
   const inZone = (target: number | null, p: number | null, pct = 1): boolean => {
     if (target === null || p === null) return false;
     return Math.abs(p - target) / target * 100 <= pct;
@@ -132,13 +136,19 @@ function nasdaqPlan(
     const stage1Hit = inZone(fib382, price);
     const stage2Hit = inZone(fib500, price);
     const stage3Hit = inZone(fib618, price) && wBottom === 1;
-    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: stage1Hit ? `FIB 0.382 zone ($${fib382?.toFixed(0)}) 도달 — 현재가 즉시 (video2 §23:27)` : '현재가에서 즉시', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: `FIB 0.500 zone ($${fib500?.toFixed(0) ?? '?'}) 도달 또는 -5% 추가 하락`, triggerPrice: fib500 ?? (price ? round(price * 0.95) : undefined), status: stage2Hit ? 'ready' : 'pending' });
+    // 29차 P2-C #16: stage1 = FIB 0.382 또는 channel mid (절대가격 명시), stage2 = FIB 0.500 또는 channel lower, stage3 = FIB 0.618 + W or 200DMA
+    const stage1Trigger = stage1Hit ? `FIB 0.382 zone ($${fib382?.toFixed(0)}) 도달 — 현재가 즉시 (video2 §23:27)` : (channelMid ? `현재가 즉시 (channel mid $${channelMid.toFixed(0)} 기준, video3 §14:24)` : '현재가에서 즉시');
+    const stage2Trigger = `FIB 0.500 zone ($${fib500?.toFixed(0) ?? '?'}) 또는 channel lower ($${channelLower?.toFixed(0) ?? '?'}) 도달 (video3 §14:24)`;
+    const stage3Trigger = wBottom === 1
+      ? `FIB 0.618 zone ($${fib618?.toFixed(0) ?? '?'}) + W 반등 저점 (이미 확인, video2 §23:27) / 200DMA $${sma200?.toFixed(0) ?? '?'}`
+      : `FIB 0.618 zone ($${fib618?.toFixed(0) ?? '?'}) + W 반등 저점 / 200DMA $${sma200?.toFixed(0) ?? '?'}`;
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: stage1Trigger, triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: stage2Trigger, triggerPrice: fib500 ?? channelLower ?? (price ? round(price * 0.95) : undefined), status: stage2Hit ? 'ready' : 'pending' });
     stages.push({
       stage: 3,
       weightPct: defaultTrancheWeight(3),
-      triggerCondition: wBottom === 1 ? `FIB 0.618 zone ($${fib618?.toFixed(0) ?? '?'}) + W 반등 저점 (이미 확인, video2 §23:27)` : `FIB 0.618 zone ($${fib618?.toFixed(0) ?? '?'}) + W 반등 저점`,
-      triggerPrice: fib618 ?? (price ? round(price * 0.9) : undefined),
+      triggerCondition: stage3Trigger,
+      triggerPrice: fib618 ?? sma200 ?? (price ? round(price * 0.9) : undefined),
       status: stage3Hit ? 'ready' : 'pending',
     });
     if (sma200) { stopPrice = round(sma200 * 0.85); stopCond = '200DMA × 0.85 이탈'; }
@@ -146,9 +156,10 @@ function nasdaqPlan(
   } else if (signal.signal === 'BUY') {
     action = 'SCALE_IN';
     reason = `BUY (${signal.conditionsMet}/${signal.conditionsTotal}) — 1차만 즉시, 2·3차 조건 대기`;
-    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: '현재가에서 1차 진입', triggerPrice: price ?? undefined, status: 'ready' });
-    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: '이격도 -20% 도달 시', status: 'pending' });
-    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: 'W 반등 저점 확인 시', status: 'pending' });
+    // 29차 P2-C #16: 절대가격 명시
+    stages.push({ stage: 1, weightPct: defaultTrancheWeight(1), triggerCondition: channelMid ? `현재가에서 1차 진입 (channel mid $${channelMid.toFixed(0)} 기준)` : '현재가에서 1차 진입', triggerPrice: price ?? undefined, status: 'ready' });
+    stages.push({ stage: 2, weightPct: defaultTrancheWeight(2), triggerCondition: channelLower ? `이격도 -20% 또는 channel lower $${channelLower.toFixed(0)} 도달 시 (video3 §14:24)` : '이격도 -20% 도달 시', triggerPrice: channelLower ?? undefined, status: 'pending' });
+    stages.push({ stage: 3, weightPct: defaultTrancheWeight(3), triggerCondition: sma200 ? `W 반등 저점 또는 200DMA $${sma200.toFixed(0)} 확인 시` : 'W 반등 저점 확인 시', triggerPrice: sma200 ?? undefined, status: 'pending' });
     if (sma200) { stopPrice = round(sma200 * 0.9); stopCond = '200DMA × 0.90 이탈'; }
   } else if (signal.signal === 'REDUCE') {
     action = 'TAKE_PROFIT';
