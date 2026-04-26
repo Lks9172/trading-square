@@ -115,6 +115,11 @@ export async function computeDerived(
     geopoliticalCountdown?: Array<{ event: string; targetDate: string }>;
     // 29차 P1-D #11: KOSPI Forward PER 수동 입력
     kospiForwardPER?: number | null;
+    // 29차 P2-B #11
+    cbGoldTonnage12M?: number | null;
+    // 29차 P2-C #17/18
+    kospiPBR?: number | null;
+    kospiROE?: number | null;
   },
 ): Promise<Record<string, DerivedIndicator>> {
   const d: Record<string, DerivedIndicator> = {};
@@ -6735,6 +6740,281 @@ export async function computeDerived(
       value: level,
       date: today(),
       formula: `${detail}. video2 §04:54-04:57 "달러 강한데 금이 안 빠지면 = 구조적 수요".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-B #6: SILVER_OUTPERFORM_SETUP_V2 ===
+  // video2 §11:32-11:48 — GSR ≥ 60 + ISM_PROXY ≥ 50 + ISM 분기 평균 상승 → +1 (3축 환경).
+  try {
+    const gsr = d.GOLD_SILVER_RATIO?.value ?? null;
+    const ismValV2 = d.ISM_PROXY?.value ?? (typeof manualInputs?.ismPmi === 'number' ? manualInputs.ismPmi : null);
+    let level = 0;
+    let detail = '데이터 부족';
+    let ismRising = false;
+    try {
+      // ISM_PROXY history 90일 (분기) → 직전 분기 평균 vs 현 분기 평균
+      const ismHist = await readHistory('derived', 'ISM_PROXY').catch(() => [] as Array<{ date: string; value: number }>);
+      if (ismHist.length >= 180) {
+        const recent90 = ismHist.slice(-90);
+        const prior90 = ismHist.slice(-180, -90);
+        const recentAvg = recent90.reduce((s, p) => s + p.value, 0) / recent90.length;
+        const priorAvg = prior90.reduce((s, p) => s + p.value, 0) / prior90.length;
+        ismRising = recentAvg > priorAvg;
+        detail = `GSR ${gsr?.toFixed(1) ?? '?'} ≥60=${gsr !== null && gsr >= 60} · ISM ${ismValV2?.toFixed(1) ?? '?'} ≥50=${ismValV2 !== null && ismValV2 >= 50} · 분기 ${recentAvg.toFixed(1)} > ${priorAvg.toFixed(1)}=${ismRising}`;
+      } else {
+        detail = `GSR ${gsr?.toFixed(1) ?? '?'} · ISM ${ismValV2?.toFixed(1) ?? '?'} · 분기 추세 데이터 부족 (${ismHist.length}일)`;
+      }
+    } catch { void 0; }
+    if (gsr !== null && gsr >= 60 && ismValV2 !== null && ismValV2 >= 50 && ismRising) {
+      level = 1;
+      detail = `🟢 3축 충족 — ${detail}`;
+    }
+    d.SILVER_OUTPERFORM_SETUP_V2 = {
+      name: 'silver_outperform_setup_v2',
+      value: level,
+      date: today(),
+      formula: `${detail}. video2 §11:32-11:48 "은 아웃퍼폼 환경".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-B #7: SILVER_GSR_SIGNAL_GUARD ===
+  // video2 §11:48-12:05 "금은비 130 코로나 → 4개월 만에 은 +150% / GSR 높아도 경기 침체엔 더 빠짐".
+  // regime ∈ {RECESSION_RISK, PANIC_BUT_OK, CORRECTION, BOND_VIGILANTE} → guard=1 → GSR_EXTREME 무력화.
+  try {
+    const regimeLabelHist = await readHistory('signal', 'REGIME_LABEL').catch(() => [] as Array<{ date: string; value: number }>);
+    let regimeStr: string | null = null;
+    if (regimeLabelHist.length > 0) {
+      const lastCode = regimeLabelHist[regimeLabelHist.length - 1].value;
+      if (lastCode === 100) regimeStr = 'RISK_ON';
+      else if (lastCode === 80) regimeStr = 'NEUTRAL';
+      else if (lastCode === 60) regimeStr = 'CAUTION';
+      else if (lastCode === 40) regimeStr = 'CORRECTION';
+      else if (lastCode === 30) regimeStr = 'STAGFLATION';
+      else if (lastCode === 20) regimeStr = 'PANIC_BUT_OK';
+      else if (lastCode === 10) regimeStr = 'BOND_VIGILANTE';
+      else if (lastCode === 0) regimeStr = 'RECESSION_RISK';
+    }
+    const guardRegimes = ['RECESSION_RISK', 'PANIC_BUT_OK', 'CORRECTION', 'BOND_VIGILANTE'];
+    const guard = regimeStr !== null && guardRegimes.includes(regimeStr) ? 1 : 0;
+    d.SILVER_GSR_SIGNAL_GUARD = {
+      name: 'silver_gsr_signal_guard',
+      value: guard,
+      date: today(),
+      formula: `regime=${regimeStr ?? 'unknown'} → guard=${guard}. video2 §11:48-12:05 "GSR 높아도 침체엔 더 빠짐".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-B #8: COPPER_TIMEFRAME_SPLIT ===
+  // video2 §14:31-14:53 "장기 구조적 우상향 / 단기 인플레↑→에너지↑→제조 위축→구리 실수요↓".
+  // long_thesis: COPPER_AI_EV_DEMAND_PROXY (양수면 +1) / short_headwind: WTI 30D > +10% AND FXI 60D < 0 (+1 역풍)
+  // value = long - short (-1, 0, +1, +2).
+  try {
+    const longProxy = d.COPPER_AI_EV_DEMAND_PROXY?.value ?? null;
+    const longThesis = longProxy !== null && longProxy > 0 ? 1 : 0;
+    let wti30Ret: number | null = null;
+    let fxi60Ret: number | null = null;
+    try {
+      const wHist = await readHistory('yahoo', 'WTI').catch(() => [] as Array<{ date: string; value: number }>);
+      if (wHist.length >= 30) {
+        const w0 = wHist[wHist.length - 30].value;
+        const w1 = wHist[wHist.length - 1].value;
+        if (w0 > 0) wti30Ret = ((w1 - w0) / w0) * 100;
+      }
+    } catch { void 0; }
+    try {
+      const fxiHist = await fetchYahooHistory('FXI', 70);
+      if (fxiHist.length >= 60) {
+        const f0 = fxiHist[fxiHist.length - 60].close;
+        const f1 = fxiHist[fxiHist.length - 1].close;
+        if (f0 > 0) fxi60Ret = ((f1 - f0) / f0) * 100;
+      }
+    } catch { void 0; }
+    const shortHeadwind = (wti30Ret !== null && wti30Ret > 10 && fxi60Ret !== null && fxi60Ret < 0) ? 1 : 0;
+    const result = longThesis - shortHeadwind;
+    d.COPPER_TIMEFRAME_SPLIT = {
+      name: 'copper_timeframe_split',
+      value: result,
+      date: today(),
+      formula: `long_thesis(AI/EV proxy=${longProxy ?? '?'})=${longThesis} - short_headwind(WTI 30D ${wti30Ret?.toFixed(1) ?? '?'}%, FXI 60D ${fxi60Ret?.toFixed(1) ?? '?'}%)=${shortHeadwind} → ${result}. video2 §14:31-14:53.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-B #9: ASSET_CORR_MATRIX ===
+  // video2 §02:22-02:36 — 5자산 60D 일별 수익률 5x5 상관계수 매트릭스, max(|ρij|).
+  // ≥ 0.7 → +1 (집중 위험), ≥ 0.85 → +2.
+  try {
+    const symbols: Array<[string, string]> = [
+      ['SP500', '^GSPC'],
+      ['BOND', 'IEF'],
+      ['GOLD', 'GC=F'],
+      ['WTI', 'CL=F'],
+      ['DXY', 'DX-Y.NYB'],
+    ];
+    const histories: Record<string, Array<{ date: string; close: number }>> = {};
+    for (const [name, sym] of symbols) {
+      try {
+        const h = await fetchYahooHistory(sym, 70);
+        if (h.length >= 60) histories[name] = h.slice(-60);
+      } catch { void 0; }
+    }
+    const keys = Object.keys(histories);
+    let level = 0;
+    let detail = '데이터 부족';
+    let maxPair: { a: string; b: string; corr: number } | null = null;
+    if (keys.length >= 5) {
+      const minLen = Math.min(...keys.map((k) => histories[k].length));
+      const returns: Record<string, number[]> = {};
+      for (const k of keys) {
+        const h = histories[k].slice(-minLen);
+        const r: number[] = [];
+        for (let i = 1; i < h.length; i++) r.push((h[i].close - h[i - 1].close) / h[i - 1].close);
+        returns[k] = r;
+      }
+      const corr = (a: number[], b: number[]): number => {
+        const n = Math.min(a.length, b.length);
+        const aMean = a.slice(0, n).reduce((s, v) => s + v, 0) / n;
+        const bMean = b.slice(0, n).reduce((s, v) => s + v, 0) / n;
+        let cov = 0; let aVar = 0; let bVar = 0;
+        for (let i = 0; i < n; i++) {
+          cov += (a[i] - aMean) * (b[i] - bMean);
+          aVar += (a[i] - aMean) ** 2;
+          bVar += (b[i] - bMean) ** 2;
+        }
+        return aVar > 0 && bVar > 0 ? cov / Math.sqrt(aVar * bVar) : 0;
+      };
+      let maxAbsCorr = 0;
+      for (let i = 0; i < keys.length; i++) {
+        for (let j = i + 1; j < keys.length; j++) {
+          const c = corr(returns[keys[i]], returns[keys[j]]);
+          if (Math.abs(c) > maxAbsCorr) {
+            maxAbsCorr = Math.abs(c);
+            maxPair = { a: keys[i], b: keys[j], corr: c };
+          }
+        }
+      }
+      if (maxAbsCorr >= 0.85) level = 2;
+      else if (maxAbsCorr >= 0.7) level = 1;
+      detail = `최강 ${maxPair?.a}-${maxPair?.b} ρ=${maxPair?.corr.toFixed(2) ?? '?'}, max|ρ|=${maxAbsCorr.toFixed(2)} → level=${level}`;
+    }
+    d.ASSET_CORR_MATRIX = {
+      name: 'asset_corr_matrix',
+      value: level,
+      date: today(),
+      formula: `${detail}. video2 §02:22-02:36 "5자산 쏠림 점수".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-B #10: DOLLAR_STRUCTURAL_DIRECTION ===
+  // video2 §04:51-05:30 "트럼프 = 상대적 약달러" — DXY 1Y YoY + 정책방향(geoRisk weighted) + 연준 인하 기대.
+  // 각 axis -2~+2, 합 → -1/0/+1 (구조적 강달러/중립/약달러).
+  try {
+    let dxyYoY: number | null = null;
+    try {
+      const dxyHist = await fetchYahooHistory('DX-Y.NYB', 380);
+      if (dxyHist.length >= 250) {
+        const d0 = dxyHist[dxyHist.length - 250].close;
+        const d1 = dxyHist[dxyHist.length - 1].close;
+        if (d0 > 0) dxyYoY = ((d1 - d0) / d0) * 100;
+      }
+    } catch { void 0; }
+    // axis A: DXY YoY (강달러 → 양수 → 우호 강달러 = -1 점, 즉 dollar weak 으로 볼 때 negative)
+    let axisDxy = 0;
+    if (dxyYoY !== null) {
+      if (dxyYoY <= -3) axisDxy = -2;       // 1Y 약세 강함 → 약달러 -2
+      else if (dxyYoY <= -1) axisDxy = -1;
+      else if (dxyYoY >= 3) axisDxy = 2;    // 1Y 강세 강함 → 강달러 +2
+      else if (dxyYoY >= 1) axisDxy = 1;
+    }
+    // axis B: 정책방향 (manualInputs.policyDirection -2~+2, 음수=완화=약달러)
+    const policy = typeof manualInputs?.policyDirection === 'number' ? manualInputs.policyDirection : 0;
+    // 완화(positive policy=완화? convention 확인) — 기존 코드 convention 사용 (positive policyDirection = 완화 → 약달러)
+    const axisPolicy = -policy;
+    // axis C: 연준 인하 기대 (CME FedWatch — cutProb25bp + cutProb50bp 합)
+    let axisFed = 0;
+    try {
+      const { fetchFedWatchProbabilities } = await import('../collectors/cme-fedwatch');
+      const fw = await fetchFedWatchProbabilities();
+      if (fw) {
+        const cutTotal = (fw.cutProb25bp ?? 0) + (fw.cutProb50bp ?? 0);
+        if (cutTotal >= 0.7) axisFed = -2;
+        else if (cutTotal >= 0.5) axisFed = -1;
+        else if (cutTotal <= 0.3) axisFed = 1;
+      }
+    } catch { void 0; }
+    const sum = axisDxy + axisPolicy + axisFed;
+    let level: number;
+    if (sum <= -2) level = -1;            // 약달러
+    else if (sum >= 2) level = 1;         // 강달러
+    else level = 0;
+    d.DOLLAR_STRUCTURAL_DIRECTION = {
+      name: 'dollar_structural_direction',
+      value: level,
+      date: today(),
+      formula: `axisDxy(${dxyYoY?.toFixed(1) ?? '?'}%)=${axisDxy} + axisPolicy(policy=${policy})=${axisPolicy} + axisFed=${axisFed} = ${sum} → level=${level}. video2 §04:51-05:30.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-B #11: CB_GOLD_TONNAGE_TREND ===
+  // video2 §05:38-05:48 "전 세계 중앙은행 3년 연속 1000톤+".
+  // UserProfile.manualInputs.cbGoldTonnage12M (수동) 또는 WGC proxy (없으면 null).
+  // ≥ 1000 → +1, ≥ 1100 → +2, < 800 → -1.
+  try {
+    const tonnage = typeof manualInputs?.cbGoldTonnage12M === 'number' ? manualInputs.cbGoldTonnage12M : null;
+    if (tonnage !== null) {
+      let level: number;
+      let label: string;
+      if (tonnage >= 1100) { level = 2; label = `🟢🟢 ${tonnage}톤 ≥ 1100 (구조적 매수 가속)`; }
+      else if (tonnage >= 1000) { level = 1; label = `🟢 ${tonnage}톤 ≥ 1000 (3년 연속 트렌드 유지)`; }
+      else if (tonnage < 800) { level = -1; label = `🔴 ${tonnage}톤 < 800 (구조적 매수 둔화)`; }
+      else { level = 0; label = `⚪ ${tonnage}톤 (800~1000 중립)`; }
+      d.CB_GOLD_TONNAGE_TREND = {
+        name: 'cb_gold_tonnage_trend',
+        value: level,
+        date: today(),
+        formula: `${label}. video2 §05:38-05:48 "3년 연속 1000톤+".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P2-B #12: BREAKOUT_CHASE_RISK ===
+  // video2 §24:31-25:16 "박스권 돌파 후 V자 직행 거의 없음 / 추격매수 시 고점 물림".
+  // NASDAQ 60일 high upward break 후 5거래일 이내 가격이 break 가격 ±1% 안 → +1 (추격 금지 플래그).
+  try {
+    const ndxHist = await fetchYahooHistory('^IXIC', 70);
+    let level = 0;
+    let detail = '데이터 부족';
+    if (ndxHist.length >= 60) {
+      const recent = ndxHist.slice(-60);
+      const last = recent[recent.length - 1];
+      const prior55 = recent.slice(0, 55);
+      const priorHigh = Math.max(...prior55.map((p) => p.close));
+      // breakout 시점 검출 — 직전 5거래일 중 prior 55일 고점을 처음 돌파한 일자.
+      const last5 = recent.slice(-5);
+      let breakIdx = -1;
+      for (let i = 0; i < last5.length; i++) {
+        if (last5[i].close > priorHigh * 1.001) { // 0.1% 마진
+          breakIdx = i;
+          break;
+        }
+      }
+      if (breakIdx >= 0) {
+        const breakPrice = last5[breakIdx].close;
+        const pctDelta = Math.abs(last.close - breakPrice) / breakPrice * 100;
+        if (pctDelta <= 1) {
+          level = 1;
+          detail = `🔴 break 후 D+${last5.length - 1 - breakIdx}일 가격 ${last.close.toFixed(0)} ≈ break ${breakPrice.toFixed(0)} (±${pctDelta.toFixed(2)}%) — 추격 금지`;
+        } else {
+          detail = `break 후 D+${last5.length - 1 - breakIdx}일 가격 ${last.close.toFixed(0)} vs break ${breakPrice.toFixed(0)} (±${pctDelta.toFixed(2)}%) — 추격 위험 낮음`;
+        }
+      } else {
+        detail = `최근 5일 60D 고점 ${priorHigh.toFixed(0)} 돌파 없음`;
+      }
+    }
+    d.BREAKOUT_CHASE_RISK = {
+      name: 'breakout_chase_risk',
+      value: level,
+      date: today(),
+      formula: `${detail}. video2 §24:31-25:16 "추격매수 = 고점 물림".`,
     };
   } catch { void 0; }
 

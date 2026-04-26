@@ -138,6 +138,12 @@ export interface UserProfile {
     geopoliticalCountdown?: Array<{ event: string; targetDate: string }>;
     // ★ 29차 P1-D #11: KOSPI Forward PER 수동 입력 (자동 fetch 어려움)
     kospiForwardPER?: number | null;
+    // ★ 29차 P2-B #11: 중앙은행 12M 금 매입량 (톤, WGC 분기 보고)
+    cbGoldTonnage12M?: number | null;
+    // ★ 29차 P2-C #17: KOSPI PBR 수동 입력 (KRX 자동 어려움)
+    kospiPBR?: number | null;
+    // ★ 29차 P2-C #18: KOSPI 합산 ROE 수동 입력
+    kospiROE?: number | null;
   };
 }
 

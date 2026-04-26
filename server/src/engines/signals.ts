@@ -230,6 +230,13 @@ function nasdaqSignal(
   const chaseNasdaq = dv(derived, 'CHASE_NASDAQ');
   if (chaseNasdaq !== null && chaseNasdaq > 15) { unmetReasons.push(`⚠️ 나스닥 20일 +${chaseNasdaq.toFixed(1)}% → 추격매수 주의 (보조조건)`); }
 
+  // ★ === 29차 P2-B #12: BREAKOUT_CHASE_RISK ===
+  // video2 §24:31-25:16 "박스권 돌파 후 V자 직행 거의 없음 / 추격매수 시 고점 물림".
+  const breakoutChase = dv(derived, 'BREAKOUT_CHASE_RISK');
+  if (breakoutChase === 1) {
+    unmetReasons.push('⚠️ 60D 고점 break 후 5거래일 내 가격 ≈ break (±1%) — 추격 금지 플래그 (video2 §24:31)');
+  }
+
   const xlk = dv(derived, 'SECTOR_XLK');
   if (xlk !== null && xlk > 0) { reasons.push(`XLK 기술섹터 +${xlk.toFixed(1)}% → 성장주 랠리 질 양호 (보조조건)`); }
   else if (xlk !== null && xlk < 0) { unmetReasons.push(`XLK 기술섹터 ${xlk.toFixed(1)}% → 성장주 주도력 약함 (보조조건)`); }
@@ -751,6 +758,29 @@ function goldSignal(
     reasons.push('✓ DXY 강세 + 금 상승 디커플 — 구조적 수요 (video2 §04:54)');
   }
 
+  // ★ === 29차 P2-B #10: DOLLAR_STRUCTURAL_DIRECTION — 약달러 시 +1 ===
+  // video2 §04:51-05:30 "트럼프 = 상대적 약달러".
+  const dollarDir = dv(derived, 'DOLLAR_STRUCTURAL_DIRECTION');
+  if (dollarDir === -1) {
+    score += 1; maxScore += 1; metCount += 1;
+    reasons.push('✓ 구조적 약달러 환경 — 금 우호 (video2 §04:51)');
+  } else if (dollarDir === 1) {
+    unmetReasons.push('⚠️ 구조적 강달러 환경 — 금 역풍 (video2 §04:51)');
+  }
+
+  // ★ === 29차 P2-B #11: CB_GOLD_TONNAGE_TREND ===
+  // video2 §05:38-05:48 "전 세계 중앙은행 3년 연속 1000톤+".
+  const cbTonnage = dv(derived, 'CB_GOLD_TONNAGE_TREND');
+  if (cbTonnage === 2) {
+    score += 1; maxScore += 1;
+    reasons.push('✓ CB 12M 금 매입 ≥1100톤 — 구조적 매수 가속 (video2 §05:38)');
+  } else if (cbTonnage === 1) {
+    score += 0.5; maxScore += 0.5;
+    reasons.push('✓ CB 12M 금 매입 ≥1000톤 — 3년 연속 트렌드 (video2 §05:38)');
+  } else if (cbTonnage === -1) {
+    unmetReasons.push('⚠️ CB 12M 금 매입 <800톤 — 구조적 매수 둔화 (video2 §05:38)');
+  }
+
   // ★ === 29차 P1-B #6: GOLD_AXIS_GATE_FLAG — HEADWIND 시 지정학 단독 매수 차단 ===
   // video2 §10:48 "1·2순위 (실질금리·DXY) NG 시 추격 금지".
   // gateFlag = -1 (HEADWIND) AND 지정학(rank4) 단독 우호 시 reason 가산 (실제 강등은 baseSignal 결정 후 override 단계에서).
@@ -883,13 +913,25 @@ function silverSignal(
 
   // 27차 Phase 1#2: GOLD_SILVER_RATIO_HISTORICAL_BAND value=2 (GSR≥100 극단) 시 STRONG_BUY 가산
   // video2 §"코로나 130 → 4개월 150% 반등" 사례 정합 — 은 매수 강화
+  // ★ 29차 P2-B #7: SILVER_GSR_SIGNAL_GUARD — 침체 regime 시 GSR_EXTREME 무력화.
   const gsrBand = dv(derived, 'GOLD_SILVER_RATIO_HISTORICAL_BAND');
-  if (gsrBand === 2) {
+  const gsrGuard = dv(derived, 'SILVER_GSR_SIGNAL_GUARD');
+  if (gsrGuard === 1 && (gsrBand === 1 || gsrBand === 2)) {
+    unmetReasons.push('⚠️ SILVER_GSR_SIGNAL_GUARD=1 (침체 regime) — GSR 극단 가산 무력화 (video2 §11:48)');
+  } else if (gsrBand === 2) {
     auxMet += 2; // STRONG_BUY 승격 ladder 보강
     reasons.push('✓ GSR 100+ 극단 — video2 §"코로나 130→은 150%" 사례 구간 (auxMet +2, 27차)');
   } else if (gsrBand === 1) {
     auxMet += 1;
     reasons.push('🟡 GSR 80-100 금 우세 — 은 매수 우호 (auxMet +1, 27차)');
+  }
+
+  // ★ === 29차 P2-B #6: SILVER_OUTPERFORM_SETUP_V2 ===
+  // video2 §11:32-11:48 — GSR≥60 + ISM≥50 + ISM 분기 추세 상승 → +1 (3축 환경).
+  const silverV2 = dv(derived, 'SILVER_OUTPERFORM_SETUP_V2');
+  if (silverV2 === 1) {
+    met += 1;
+    reasons.push('✓ 은 아웃퍼폼 V2 3축 환경 (video2 §11:32)');
   }
 
   // Fix #6(2차 감사): REDUCE 분기 복구 — 기존에는 met=0 이어도 HOLD 만 부여하여 약세 강등이 없었다.
@@ -979,6 +1021,18 @@ function copperSignal(
   if (recoveryLvlCu !== null && recoveryLvlCu >= 2) {
     reasons.push('✓ 회복 3축 충족 (video2 §13:42)');
     met += 1;
+  }
+
+  // ★ === 29차 P2-B #8: COPPER_TIMEFRAME_SPLIT 가산 ===
+  // video2 §14:31-14:53 "장기 우상향 / 단기 인플레→에너지→제조 위축 역풍".
+  const copperTimeframe = dv(derived, 'COPPER_TIMEFRAME_SPLIT');
+  if (copperTimeframe !== null) {
+    if (copperTimeframe >= 1) {
+      met += 1;
+      reasons.push(`✓ COPPER_TIMEFRAME_SPLIT=${copperTimeframe} (장기 우호 우세, video2 §14:31)`);
+    } else if (copperTimeframe === -1) {
+      unmetReasons.push('⚠️ 단기 역풍 (WTI 30D >+10% + FXI 60D <0, video2 §14:31)');
+    }
   }
 
   if (reasons.length === 0) reasons.push('조건 미충족, 대기');
