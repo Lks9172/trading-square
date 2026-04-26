@@ -630,6 +630,44 @@ function nasdaqSignal(
     }
   }
 
+  // ★ === 29차 P3-C #14: COPPER_LEAD_DIVERGENCE_60D — 60D 명시 보강 ===
+  const copperLead60 = dv(derived, 'COPPER_LEAD_DIVERGENCE_60D');
+  if (copperLead60 === 1) {
+    met += 1;
+    reasons.push('✓ 구리 60D ≥+5% + S&P 횡보 — 회복 선행 (video2 §13:08)');
+  } else if (copperLead60 === -1) {
+    unmetReasons.push('⚠️ 구리 60D ≤-3% + S&P 양수 — 경고 선행 (video2 §13:08)');
+  }
+
+  // ★ === 29차 P3-C #16: ENTRY_TIMING_QUINTILE ===
+  const entryQ = dv(derived, 'ENTRY_TIMING_QUINTILE');
+  if (entryQ === 1) {
+    met += 1;
+    reasons.push('✓ ENTRY_TIMING_QUINTILE=하위 20% (매수 우호, video1 §01:24 "타이밍이 목적지 결정")');
+  } else if (entryQ === -1) {
+    unmetReasons.push('⚠️ ENTRY_TIMING_QUINTILE=상위 20% (추격 주의, video1 §01:24)');
+  }
+
+  // ★ === 29차 P3-C #17: NASDAQ_15Y_CHANNEL_POSITION ===
+  const ch15y = dv(derived, 'NASDAQ_15Y_CHANNEL_POSITION');
+  if (ch15y !== null) {
+    if (ch15y <= -2) {
+      met += 1;
+      reasons.push('✓ NASDAQ 15Y 채널 -1σ 이하 (구조적 매수 강, video3 §09:48)');
+    } else if (ch15y === -1) {
+      reasons.push('✓ NASDAQ 15Y 채널 -1σ~0 (보조, video3 §09:48)');
+    } else if (ch15y === 2) {
+      unmetReasons.push('⚠️ NASDAQ 15Y 채널 +2σ 초과 (구조적 과열, video3 §09:48)');
+    }
+  }
+
+  // ★ === 29차 P3-C #19: NASDAQ_PIN_BAR_NEXT_YEAR_BULLISH_RATE — 참조 통계 가산 ===
+  const pinRate = dv(derived, 'NASDAQ_PIN_BAR_NEXT_YEAR_BULLISH_RATE');
+  if (pinRate !== null && pinRate >= 0.7) {
+    met += 0.5;
+    reasons.push(`✓ yearly pin bar 다음 해 양봉 ${(pinRate * 100).toFixed(0)}% (참조 통계, video3 §09:09 "100%")`);
+  }
+
   // ★ === 29차 P3-A #5: JGB_10Y_LEVEL — 캐리 트레이드 unwind 위험 ===
   // video6 §04:28 "일본 금리 체크" — JGB ↑ 시 NASDAQ 보조 -0.5.
   const jgbLvl = dv(derived, 'JGB_10Y_LEVEL');
@@ -1685,6 +1723,12 @@ function kospiSignal(
     reasons.push('✓ 추경 효과 반영 시점 도달 (D+180 경과, stt_kospi §10:30)');
   } else if (fiscalProg !== null && fiscalProg >= 0.5) {
     reasons.push('🟡 추경 효과 절반 진입 (보조, stt_kospi §10:30)');
+  }
+
+  // ★ === 29차 P3-C #20: KOSPI_UNCHARTED_TERRITORY_FLAG — 심리 불안 경고 ===
+  const kUncharted = dv(derived, 'KOSPI_UNCHARTED_TERRITORY_FLAG');
+  if (kUncharted === 1) {
+    unmetReasons.push('⚠️ KOSPI_UNCHARTED_TERRITORY=1 — 역대 high 95%↑ 30일 연속 (심리 불안정성, stt_kospi §"5천/6천도 처음")');
   }
 
   // ★ === 29차 P3-B #11: KOSPI_HISTORIC_OVERSHOOT_RANK — 다음 해 평균 -44% 경고 ===
