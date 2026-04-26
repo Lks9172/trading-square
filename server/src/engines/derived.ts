@@ -7240,6 +7240,313 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
+  // ★ === 29차 P2-D #21: USER_BEHAVIOR_FOMO_FLAG ===
+  // video6 §03:28 — trade-log 사용자 BUY 액션 60일 / BUY 시점 직전 NASDAQ 30D ≥+10% 였던 비율 ≥0.4 → flag=1.
+  try {
+    const { readRecentTradeLog } = await import('../services/investment-plan');
+    const log = await readRecentTradeLog(500);
+    const cutoff = Date.now() - 60 * 86400000;
+    const buyEntries = log.filter((e) => e.kind === 'user_action' && (e.notes?.includes('BUY') || e.to === 'BUY' || e.to === 'STRONG_BUY') && new Date(e.ts).getTime() >= cutoff);
+    if (buyEntries.length >= 3) {
+      // BUY 시점 NASDAQ 직전 30D 수익률 ≥+10% 였는지 — history 로 추정.
+      const ndxHist = await fetchYahooHistory('^IXIC', 200);
+      const datedNdx: Map<string, number> = new Map();
+      for (const p of ndxHist) datedNdx.set(p.date, p.close);
+      const sortedDates = ndxHist.map((p) => p.date).sort();
+      let fomoCount = 0;
+      let evaluated = 0;
+      for (const e of buyEntries) {
+        const eDate = e.ts.slice(0, 10);
+        // 가장 가까운 과거 거래일 close
+        let closeNow: number | null = null;
+        for (let i = sortedDates.length - 1; i >= 0; i--) {
+          if (sortedDates[i] <= eDate) { closeNow = datedNdx.get(sortedDates[i]) ?? null; break; }
+        }
+        if (closeNow === null) continue;
+        // 30일 전 close
+        const eMs = new Date(eDate).getTime();
+        const target = new Date(eMs - 30 * 86400000).toISOString().slice(0, 10);
+        let close30Ago: number | null = null;
+        for (let i = sortedDates.length - 1; i >= 0; i--) {
+          if (sortedDates[i] <= target) { close30Ago = datedNdx.get(sortedDates[i]) ?? null; break; }
+        }
+        if (close30Ago === null || close30Ago <= 0) continue;
+        evaluated += 1;
+        const ret30 = ((closeNow - close30Ago) / close30Ago) * 100;
+        if (ret30 >= 10) fomoCount += 1;
+      }
+      const ratio = evaluated > 0 ? fomoCount / evaluated : 0;
+      const flag = ratio >= 0.4 ? 1 : 0;
+      d.USER_BEHAVIOR_FOMO_FLAG = {
+        name: 'user_behavior_fomo_flag',
+        value: flag,
+        date: today(),
+        formula: `60일 BUY ${buyEntries.length} 회 / 평가 ${evaluated} 회 / 직전 30D ≥+10% 였던 ${fomoCount} 회 = ${(ratio*100).toFixed(0)}% → flag=${flag}. video6 §03:28 "FOMO 패턴".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P2-D #22: USER_PORTFOLIO_RECOVERY_PCT_NEEDED ===
+  // video6 §01:50 "50% 잃으면 100% 필요". totalCapital + currentHoldings → drawdown_pct.
+  try {
+    const { readInvestmentPlan } = await import('../services/investment-plan');
+    const plan = await readInvestmentPlan();
+    const startKRW = plan.startingCapitalKRW ?? 0;
+    const startUSD = plan.startingCapitalUSD ?? 0;
+    const usdkrwRate = val(raw, 'USDKRW') ?? 1400;
+    const startTotalUSD = (startKRW / usdkrwRate) + startUSD;
+    const curTotalUSDPoint = d.USER_USD_CAPITAL_TOTAL?.value ?? null;
+    if (startTotalUSD > 0 && curTotalUSDPoint !== null) {
+      const maxEquity = Math.max(startTotalUSD, curTotalUSDPoint);
+      const dd = (maxEquity - curTotalUSDPoint) / maxEquity;
+      const recoveryNeeded = dd > 0 && dd < 1 ? (dd / (1 - dd)) * 100 : 0;
+      let level: number;
+      let label: string;
+      if (recoveryNeeded > 100) { level = 3; label = `🔴 ${recoveryNeeded.toFixed(0)}% 필요 — video6 §01:50 "50%↓ = 100%↑" 초과`; }
+      else if (recoveryNeeded > 50) { level = 2; label = `🟠 ${recoveryNeeded.toFixed(0)}% 회복 필요 (drawdown ${(dd*100).toFixed(1)}%)`; }
+      else if (recoveryNeeded > 25) { level = 1; label = `🟡 ${recoveryNeeded.toFixed(0)}% 회복 필요`; }
+      else { level = 0; label = `⚪ ${recoveryNeeded.toFixed(0)}% 회복 필요`; }
+      d.USER_PORTFOLIO_RECOVERY_PCT_NEEDED = {
+        name: 'user_portfolio_recovery_pct_needed',
+        value: parseFloat(recoveryNeeded.toFixed(1)),
+        date: today(),
+        formula: `max equity ${maxEquity.toFixed(0)} USD vs current ${curTotalUSDPoint.toFixed(0)} USD = drawdown ${(dd*100).toFixed(1)}%, recovery_needed = ${recoveryNeeded.toFixed(1)}%, level=${level}. ${label}. video6 §01:50.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P2-D #23: CASH_AS_OPTIONALITY_FLAG ===
+  // video6 §15:52 "현금 있으면 폭락 = 세일".
+  // cash_pct < 10 AND VIX ≥ 30 → flag=1.
+  try {
+    const { readInvestmentPlan } = await import('../services/investment-plan');
+    const plan = await readInvestmentPlan();
+    const cashPct = plan.currentHoldings?.cash ?? 0;
+    const vixCur = val(raw, 'VIXCLS');
+    let flag = 0;
+    let label: string;
+    if (cashPct < 10 && vixCur !== null && vixCur >= 30) {
+      flag = 1;
+      label = `🔴 cash ${cashPct.toFixed(1)}% < 10 + VIX ${vixCur.toFixed(1)} ≥ 30 — 폭락 세일 진입 어려움 (video6 §15:52)`;
+    } else {
+      label = `⚪ cash ${cashPct.toFixed(1)}%, VIX ${vixCur?.toFixed(1) ?? '?'}`;
+    }
+    d.CASH_AS_OPTIONALITY_FLAG = {
+      name: 'cash_as_optionality_flag',
+      value: flag,
+      date: today(),
+      formula: `${label}. video6 §15:52 "현금 = 자유".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-D #24: NASDAQ_RSI_OVERSOLD_DURATION_DAYS ===
+  // video6 §10:22 "RSI<30 연속 14일+ = 추세 약함, 분할매수 정지".
+  try {
+    const ndxHist = await fetchYahooHistory('^IXIC', 60);
+    let duration = 0;
+    if (ndxHist.length >= 30) {
+      const closes = ndxHist.map((p) => p.close);
+      const calcRsi = (arr: number[], len = 14): number | null => {
+        if (arr.length < len + 1) return null;
+        const recent = arr.slice(-len - 1);
+        let g = 0; let l = 0;
+        for (let i = 1; i < recent.length; i++) {
+          const d = recent[i] - recent[i - 1];
+          if (d > 0) g += d; else l -= d;
+        }
+        const aG = g / len; const aL = l / len;
+        if (aL === 0) return 100;
+        const rs = aG / aL;
+        return 100 - 100 / (1 + rs);
+      };
+      // 역순으로 < 30 연속 일수
+      for (let i = 0; i < closes.length - 14; i++) {
+        const slice = closes.slice(0, closes.length - i);
+        const r = calcRsi(slice);
+        if (r === null) break;
+        if (r < 30) duration += 1;
+        else break;
+      }
+    }
+    d.NASDAQ_RSI_OVERSOLD_DURATION_DAYS = {
+      name: 'nasdaq_rsi_oversold_duration_days',
+      value: duration,
+      date: today(),
+      formula: `NASDAQ RSI<30 연속 ${duration}일. ${duration >= 14 ? '🔴 ≥14일 → 추세 약함, 분할매수 정지 (video6 §10:22)' : '⚪ <14일'}.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-D #25: VIX_HISTORIC_BUY_OPPORTUNITY ===
+  // video6 §10:36 "VIX 80 = 10년 만의 매수 기회".
+  // VIXCLS ≥ 60 + ICSA < 300K → +2, VIXCLS ≥ 80 + ICSA < 300K → +3.
+  try {
+    const vixCur = val(raw, 'VIXCLS');
+    const icsa = val(raw, 'ICSA');
+    let level = 0;
+    let label = '⚪ 미충족';
+    if (vixCur !== null && icsa !== null) {
+      if (vixCur >= 80 && icsa < 300000) {
+        level = 3;
+        label = `🟢🟢🟢 VIX ${vixCur.toFixed(1)} ≥ 80 + ICSA ${(icsa/1000).toFixed(0)}K < 300K — 10년 매수 기회 (video6 §10:36)`;
+      } else if (vixCur >= 60 && icsa < 300000) {
+        level = 2;
+        label = `🟢🟢 VIX ${vixCur.toFixed(1)} ≥ 60 + ICSA ${(icsa/1000).toFixed(0)}K < 300K — 강한 매수 기회 (video6 §10:36)`;
+      }
+    }
+    d.VIX_HISTORIC_BUY_OPPORTUNITY = {
+      name: 'vix_historic_buy_opportunity',
+      value: level,
+      date: today(),
+      formula: `VIX ${vixCur?.toFixed(1) ?? '?'} / ICSA ${icsa !== null ? (icsa/1000).toFixed(0) + 'K' : '?'} → level=${level}. ${label}. video6 §10:36.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-D #26: MACRO_REGIME_HISTORY_MATCH ===
+  // video2 §15:49 "2020·2021 조합" — 4D 벡터 (REAL_YIELD, CPI YoY, DXY YoY, ISM) 라벨 매핑.
+  try {
+    const realYield = d.REAL_YIELD?.value ?? null;
+    const cpiYoY = d.CPI_YOY?.value ?? null;
+    let dxyYoY: number | null = null;
+    try {
+      const dxyHist = await fetchYahooHistory('DX-Y.NYB', 380);
+      if (dxyHist.length >= 250) {
+        const d0 = dxyHist[dxyHist.length - 250].close;
+        const d1 = dxyHist[dxyHist.length - 1].close;
+        if (d0 > 0) dxyYoY = ((d1 - d0) / d0) * 100;
+      }
+    } catch { void 0; }
+    const ismVal = d.ISM_PROXY?.value ?? null;
+    let label: string;
+    let level = 0;
+    if (realYield !== null && cpiYoY !== null && dxyYoY !== null) {
+      const ryNeg = realYield < 0;
+      const dxyWeak = dxyYoY < 0;
+      if (ryNeg && cpiYoY > 4 && dxyWeak) { label = 'stagflation_2022'; level = -2; }
+      else if (ryNeg && cpiYoY < 3 && dxyWeak) { label = 'goldilocks_2020-2021'; level = 2; }
+      else if (!ryNeg && cpiYoY > 4) { label = 'high_rate_squeeze'; level = -1; }
+      else if (!ryNeg && cpiYoY < 3 && !dxyWeak) { label = 'tightening_normalize'; level = 0; }
+      else { label = 'mixed'; level = 0; }
+    } else {
+      label = 'data_insufficient';
+    }
+    d.MACRO_REGIME_HISTORY_MATCH = {
+      name: 'macro_regime_history_match',
+      value: level,
+      date: today(),
+      formula: `REAL_YIELD ${realYield?.toFixed(2) ?? '?'} / CPI YoY ${cpiYoY?.toFixed(1) ?? '?'}% / DXY YoY ${dxyYoY?.toFixed(1) ?? '?'}% / ISM ${ismVal?.toFixed(1) ?? '?'} → ${label} (level=${level}). video2 §15:49.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-D #27: RETAIL_PANIC_SELL ===
+  // video1 §03:06 "2020.3 저점 직후 한 달 개인 순매도 역대 최대".
+  // VIX ≥ 30 AND NASDAQ 20D < -10% AND (NAAIM < 30 OR AAII Bull% < 25) → +1.
+  try {
+    const vixCur = val(raw, 'VIXCLS');
+    let ndx20Ret: number | null = null;
+    try {
+      const n = await fetchYahooHistory('^IXIC', 25);
+      if (n.length >= 20) {
+        const n0 = n[n.length - 20].close;
+        const n1 = n[n.length - 1].close;
+        if (n0 > 0) ndx20Ret = ((n1 - n0) / n0) * 100;
+      }
+    } catch { void 0; }
+    const naaim = d.NAAIM_EXPOSURE?.value ?? null;
+    const aaii = d.AAII_BULL_BEAR_SPREAD?.value ?? null;
+    // AAII Bull% 25% 미만 = bull-bear 양수일 가능성 낮음. 단순화: aaii 음수 (bear>bull) 시 25% 미만 추정.
+    const sentLow = (naaim !== null && naaim < 30) || (aaii !== null && aaii < -10);
+    let level = 0;
+    let label = '⚪ 미충족';
+    if (vixCur !== null && vixCur >= 30 && ndx20Ret !== null && ndx20Ret < -10 && sentLow) {
+      level = 1;
+      label = `🟢 역발상 매수 신호 — VIX ${vixCur.toFixed(1)} ≥ 30 + NDX 20D ${ndx20Ret.toFixed(1)}% < -10 + 심리 저조 (video1 §03:06)`;
+    }
+    d.RETAIL_PANIC_SELL = {
+      name: 'retail_panic_sell',
+      value: level,
+      date: today(),
+      formula: `VIX ${vixCur?.toFixed(1) ?? '?'} / NDX 20D ${ndx20Ret?.toFixed(1) ?? '?'}% / NAAIM ${naaim?.toFixed(0) ?? '?'} / AAII ${aaii?.toFixed(1) ?? '?'} → level=${level}. ${label}.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-D #28: BOUNCE_QUALITY_FOLLOWTHROUGH_DAYS ===
+  // stt_kospi §05:40 — GEOPOLITICAL_UNWIND_EVENT=1 후 D+5 까지 KOSPI_VOLUME_CONFIRM=1 + 직후 +2% 유지.
+  try {
+    const unwindHist = await readHistory('derived', 'GEOPOLITICAL_UNWIND_EVENT').catch(() => [] as Array<{ date: string; value: number }>);
+    if (unwindHist.length >= 6) {
+      // 가장 최근 unwind=1 시점 찾기
+      let lastIdx = -1;
+      for (let i = unwindHist.length - 1; i >= 0; i--) {
+        if (unwindHist[i].value === 1) { lastIdx = i; break; }
+      }
+      let level = 0;
+      let detail = '직전 unwind 이벤트 없음';
+      if (lastIdx >= 0 && lastIdx < unwindHist.length - 5) {
+        const eventDate = unwindHist[lastIdx].date;
+        const ksHist = await fetchYahooHistory('^KS11', 30);
+        const eventClose = ksHist.find((p) => p.date >= eventDate)?.close ?? null;
+        if (eventClose !== null) {
+          // D+5 까지 +2% 유지
+          const followUp = ksHist.filter((p) => p.date > eventDate).slice(0, 5);
+          const minRet = followUp.length > 0 ? Math.min(...followUp.map((p) => ((p.close - eventClose) / eventClose) * 100)) : null;
+          // 거래량 확인 — VOLUME_CONFIRM history
+          const volConfirmHist = await readHistory('derived', 'KOSPI_VOLUME_CONFIRM').catch(() => [] as Array<{ date: string; value: number }>);
+          const followVolConfirm = volConfirmHist.filter((p) => p.date > eventDate).slice(0, 5);
+          const allVolOk = followVolConfirm.length > 0 && followVolConfirm.every((p) => p.value === 1);
+          if (minRet !== null && minRet >= 2 && allVolOk) {
+            level = 1;
+            detail = `🟢 D+5 까지 +${minRet.toFixed(1)}% 유지 + volume confirm ✓`;
+          } else {
+            level = 0;
+            detail = `🔴 D+5 minRet ${minRet?.toFixed(1) ?? '?'}% (재하락) / volume ${allVolOk ? 'OK' : 'NG'}`;
+          }
+        }
+      }
+      d.BOUNCE_QUALITY_FOLLOWTHROUGH_DAYS = {
+        name: 'bounce_quality_followthrough_days',
+        value: level,
+        date: today(),
+        formula: `${detail}. stt_kospi §05:40 "반등 추세 진위 D+5 검증".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P2-D #29: FX_FOREIGN_BASELINE_GAP_TRILLION ===
+  // stt_kospi §08:21 "환율 10% 상승 = 외인 5조 적정".
+  // 실제 외인 60D 누적 - (KRW 60D % × 0.5조 / 1%) → 절대값 ≥ 30조 → +1.
+  try {
+    const foreignHist = await readHistory('krx', 'KOSPI_FOREIGN_NET_1D').catch(() => [] as Array<{ date: string; value: number }>);
+    let foreign60Sum = 0;
+    if (foreignHist.length >= 60) {
+      foreign60Sum = foreignHist.slice(-60).reduce((s, p) => s + p.value, 0);
+    }
+    let krw60Pct: number | null = null;
+    try {
+      const krHist = await fetchYahooHistory('KRW=X', 70);
+      if (krHist.length >= 60) {
+        const k0 = krHist[krHist.length - 60].close;
+        const k1 = krHist[krHist.length - 1].close;
+        if (k0 > 0) krw60Pct = ((k1 - k0) / k0) * 100;
+      }
+    } catch { void 0; }
+    if (krw60Pct !== null && foreignHist.length >= 60) {
+      // 적정: KRW 1% 상승당 외인 -0.5조 (즉 KRW 10% → -5조)
+      const baseline = -krw60Pct * 0.5; // 조원
+      const actualTrillion = foreign60Sum / 1e4; // KRX 단위 억 → 조 (10000 억 = 1조)
+      const gap = Math.abs(actualTrillion - baseline);
+      let level = 0;
+      let label: string;
+      if (gap >= 30) { level = 1; label = `🟠 갭 ${gap.toFixed(1)}조 ≥ 30 — ATM 화 강 경고`; }
+      else { label = `⚪ 갭 ${gap.toFixed(1)}조`; }
+      d.FX_FOREIGN_BASELINE_GAP_TRILLION = {
+        name: 'fx_foreign_baseline_gap_trillion',
+        value: level,
+        date: today(),
+        formula: `KRW 60D ${krw60Pct.toFixed(2)}% → baseline ${baseline.toFixed(1)}조 vs 실제 ${actualTrillion.toFixed(1)}조 = 갭 ${gap.toFixed(1)}조. ${label}. stt_kospi §08:21.`,
+      };
+    }
+  } catch { void 0; }
+
   return d;
 }
 

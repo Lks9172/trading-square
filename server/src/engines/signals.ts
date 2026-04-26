@@ -278,6 +278,29 @@ function nasdaqSignal(
     unmetReasons.push('⚠️ PER+DGS10 디커플 (멀티플 축소 부재) — video6 §08:21');
   }
 
+  // ★ === 29차 P2-D #25: VIX_HISTORIC_BUY_OPPORTUNITY ===
+  // video6 §10:36 "VIX 80 = 10년 만의 매수 기회".
+  const vixHistoric = dv(derived, 'VIX_HISTORIC_BUY_OPPORTUNITY');
+  if (vixHistoric !== null && vixHistoric >= 2) {
+    met += 2;
+    reasons.push(`✓ VIX_HISTORIC_BUY level=${vixHistoric} — video6 §10:36 "10년 매수 기회"`);
+  }
+
+  // ★ === 29차 P2-D #27: RETAIL_PANIC_SELL ===
+  // video1 §03:06 "2020.3 저점 직후 한 달 개인 순매도 역대 최대" — 역발상 매수 신호.
+  const retailPanic = dv(derived, 'RETAIL_PANIC_SELL');
+  if (retailPanic === 1) {
+    met += 1;
+    reasons.push('✓ RETAIL_PANIC_SELL — 개인 패닉 매도 환경 (역발상 매수, video1 §03:06)');
+  }
+
+  // ★ === 29차 P2-D #24: NASDAQ_RSI_OVERSOLD_DURATION_DAYS ===
+  // video6 §10:22 "RSI<30 14일+ → 추세 약함, 분할매수 정지".
+  const rsiDuration = dv(derived, 'NASDAQ_RSI_OVERSOLD_DURATION_DAYS');
+  if (rsiDuration !== null && rsiDuration >= 14) {
+    unmetReasons.push(`⚠️ RSI<30 ${rsiDuration}일 연속 — 추세 약함, 분할매수 정지 (video6 §10:22)`);
+  }
+
   const xlk = dv(derived, 'SECTOR_XLK');
   if (xlk !== null && xlk > 0) { reasons.push(`XLK 기술섹터 +${xlk.toFixed(1)}% → 성장주 랠리 질 양호 (보조조건)`); }
   else if (xlk !== null && xlk < 0) { unmetReasons.push(`XLK 기술섹터 ${xlk.toFixed(1)}% → 성장주 주도력 약함 (보조조건)`); }
@@ -1511,10 +1534,11 @@ function kospiSignal(
   }
 
   // 15차 Phase 1+2: KOSPI RSI + DRAWDOWN_ATH
+  // ★ 29차 P2-D #24: RSI 임계 35 → 30 정렬 (NASDAQ RSI 기준 통일).
   const kRsi = dv(derived, 'KOSPI_RSI_14');
   if (kRsi !== null) {
-    if (kRsi < 35) {
-      reasons.push(`✓ KOSPI RSI ${kRsi.toFixed(1)} 과매도 근접 (video2 §RSI 정합)`);
+    if (kRsi < 30) {
+      reasons.push(`✓ KOSPI RSI ${kRsi.toFixed(1)} < 30 과매도 (video2 §RSI 정합, 29차 P2-D #24 임계 정렬)`);
       met += 1;
     } else if (kRsi > 70) {
       unmetReasons.push(`⚠️ KOSPI RSI ${kRsi.toFixed(1)} 과매수 — 추격 주의`);
@@ -1553,6 +1577,24 @@ function kospiSignal(
       '반등의 질 감별 필요 → HOLD 강등 (추세 재개 3조건 확인 후 재진입)';
     overrides.push(overrideReason);
     reasons.push(overrideReason);
+  }
+
+  // ★ === 29차 P2-D #28: BOUNCE_QUALITY_FOLLOWTHROUGH_DAYS ===
+  // stt_kospi §05:40 — quality=0 (재하락) 시 BUY → HOLD 강등.
+  const bounceQuality = dv(derived, 'BOUNCE_QUALITY_FOLLOWTHROUGH_DAYS');
+  if (bounceQuality === 0 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
+    const previous = signal;
+    signal = 'HOLD';
+    const overrideReason = `⚠️ BOUNCE_QUALITY=0 (D+5 재하락 또는 거래량 미확인) → ${previous} → HOLD (stt_kospi §05:40)`;
+    overrides.push(overrideReason);
+    unmetReasons.push(overrideReason);
+  }
+
+  // ★ === 29차 P2-D #29: FX_FOREIGN_BASELINE_GAP_TRILLION ===
+  // stt_kospi §08:21 — 갭 ≥30조 → ATM 화 강 경고 (unmetReason).
+  const fxForeignGap = dv(derived, 'FX_FOREIGN_BASELINE_GAP_TRILLION');
+  if (fxForeignGap === 1) {
+    unmetReasons.push('⚠️ FX-외인 baseline 갭 ≥30조 — ATM 화 강 경고 (stt_kospi §08:21)');
   }
 
   // 코스피 완화 규칙:

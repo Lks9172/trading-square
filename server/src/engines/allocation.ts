@@ -437,6 +437,27 @@ export function computeAllocation(
     }
   }
 
+  // ★ === 29차 P2-D #25: VIX_HISTORIC_BUY_OPPORTUNITY 시 nasdaq +10 ===
+  // video6 §10:36 "VIX 80 = 10년 만의 매수 기회".
+  const vixHistoricLvl = derived.VIX_HISTORIC_BUY_OPPORTUNITY?.value ?? null;
+  if (vixHistoricLvl !== null && vixHistoricLvl >= 2) {
+    const boost = Math.min(10, (base.cash ?? 0));
+    if (boost > 0) {
+      const beforeNdx = base.nasdaq || 0;
+      const beforeCash = base.cash || 0;
+      base.nasdaq = beforeNdx + boost;
+      base.cash = beforeCash - boost;
+      explanation?.adjustments.push({
+        step: 'vix-historic-buy',
+        detail: `VIX_HISTORIC_BUY level=${vixHistoricLvl} -> cash ${boost}% → nasdaq (video6 §10:36 "10년 매수 기회")`,
+        allocKey: 'nasdaq',
+        amount: boost,
+        before: beforeNdx,
+        after: base.nasdaq,
+      });
+    }
+  }
+
   const leverageSignal = signals.find((s) => s.asset === 'LEVERAGE');
   // Fix #3: STRONG_BUY 도 허용. 기존엔 === 'BUY' 만 통과시켜 STRONG_BUY 시 레버리지 0%
   // 처리되는 비대칭이 있었다(3/3 조건 충족 후 승격되면 오히려 차단되는 모순).
