@@ -77,7 +77,7 @@ export function Dashboard({ snapshot }: Props) {
         </span>
       </header>
 
-      <RegimeHeader regime={currentSnapshot.regime} />
+      <RegimeHeader regime={currentSnapshot.regime} derived={currentSnapshot.derived} />
 
       {/* 19차 P1#1: 18·19차 신규 derived 통합 노출 */}
       <ConvictionPanel derived={currentSnapshot.derived} />

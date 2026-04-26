@@ -13,6 +13,18 @@ interface InsiderData {
   dataromaAvgAddPct?: number;
   dataromaAvgReducePct?: number;
   dataromaNetPortfolioFlow?: number;
+  sources?: {
+    openInsider: boolean;
+    dataroma: boolean;
+    insiderPrimarySource?: "openinsider-latest" | "openinsider-screener" | "sec-form4" | "none";
+  };
+  cache?: {
+    status: "fresh" | "cached" | "stale";
+    fetchedAt: string;
+    ageMs: number;
+    ttlMs: number;
+    staleTtlMs: number;
+  };
   lastUpdated: string;
 }
 
@@ -34,10 +46,38 @@ export function SmartMoneyPanel() {
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
       <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
         <h3 className="text-base sm:text-lg font-semibold mb-1">스마트머니 추적</h3>
-        <p className="text-[11px] sm:text-xs text-[var(--muted)] mb-3">최근 7일 미국 내부자거래 요약 (OpenInsider)</p>
+        <p className="text-[11px] sm:text-xs text-[var(--muted)] mb-3">최근 7일 미국 내부자거래 요약 (OpenInsider / SEC Form 4)</p>
 
         {insider ? (
           <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-xs text-[var(--muted)]">
+              <span className={`rounded-full border px-2 py-0.5 ${insider.sources?.openInsider ? "border-green-500/40 text-green-400" : "border-amber-500/40 text-amber-300"}`}>
+                OpenInsider {insider.sources?.openInsider ? "정상" : "지연"}
+              </span>
+              <span className={`rounded-full border px-2 py-0.5 ${insider.sources?.dataroma ? "border-green-500/40 text-green-400" : "border-amber-500/40 text-amber-300"}`}>
+                Dataroma {insider.sources?.dataroma ? "정상" : "지연"}
+              </span>
+              <span className="rounded-full border border-sky-500/40 px-2 py-0.5 text-sky-300">
+                내부자 소스 {insider.sources?.insiderPrimarySource === "sec-form4"
+                  ? "SEC Form 4"
+                  : insider.sources?.insiderPrimarySource === "openinsider-screener"
+                    ? "OpenInsider Screener"
+                    : insider.sources?.insiderPrimarySource === "openinsider-latest"
+                      ? "OpenInsider Latest"
+                      : "미확인"}
+              </span>
+              {insider.cache ? (
+                <span className={`rounded-full border px-2 py-0.5 ${
+                  insider.cache.status === "fresh"
+                    ? "border-green-500/40 text-green-400"
+                    : insider.cache.status === "cached"
+                      ? "border-sky-500/40 text-sky-300"
+                      : "border-amber-500/40 text-amber-300"
+                }`}>
+                  {insider.cache.status === "fresh" ? "fresh" : insider.cache.status === "cached" ? "cached" : "stale"} · {Math.max(0, Math.round(insider.cache.ageMs / 60000))}m
+                </span>
+              ) : null}
+            </div>
             <div className="flex items-center justify-between">
               <span className="text-sm">내부자 매수 비율</span>
               <span className={`text-lg font-mono font-bold ${insider.insiderBuyRatio > 55 ? "text-green-400" : insider.insiderBuyRatio < 45 ? "text-red-400" : "text-neutral-400"}`}>
