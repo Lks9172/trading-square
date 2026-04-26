@@ -30,12 +30,14 @@ const FRESH_MS = 4 * 60 * 60 * 1000;
 const STALE_MS = 24 * 60 * 60 * 1000;
 
 export interface FedWatchSnapshot {
-  impliedRatePct: number;        // ZQ-implied effective rate
-  currentTargetMidPct: number;   // 현재 target mid
-  gapBp: number;                 // (implied - target) * 100
-  cutProb25bp: number;           // 0~100
-  hikeProb25bp: number;          // 0~100
-  holdProb: number;              // 0~100
+  impliedRatePct: number;
+  currentTargetMidPct: number;
+  gapBp: number;
+  cutProb25bp: number;
+  cutProb50bp: number;        // 25차 신규
+  hikeProb25bp: number;
+  hikeProb50bp: number;       // 25차 신규
+  holdProb: number;
   source: 'zq-yahoo' | 'manual-fallback';
   fetchedAt: string;
 }
@@ -137,20 +139,40 @@ async function fetchTargetMid(): Promise<number | null> {
   }
 }
 
-function probsFromGap(gapBp: number): { cut25: number; hike25: number; hold: number } {
-  // 단순 선형 매핑. -25bp gap = ~100% cut, +25bp gap = ~100% hike, 0 = ~100% hold.
-  // 실제 시장에선 시간가치 + 다음 FOMC 까지 잔여일수에 따라 달라지지만, daily snapshot 용으로는 충분.
+function probsFromGap(gapBp: number): { cut25: number; cut50: number; hike25: number; hike50: number; hold: number } {
+  // 25차: 다단계 확률 분포 (-50bp / -25bp / hold / +25bp / +50bp).
+  // 단순 선형 매핑이지만 ±50bp 까지 분리해 시장 매파/비둘기파 강도 차등화.
   let cut25 = 0;
+  let cut50 = 0;
   let hike25 = 0;
-  let hold = 100;
-  if (gapBp <= -25) cut25 = 100;
-  else if (gapBp <= -5) cut25 = ((-gapBp - 5) / 20) * 100;
-  if (gapBp >= 25) hike25 = 100;
-  else if (gapBp >= 5) hike25 = ((gapBp - 5) / 20) * 100;
-  hold = Math.max(0, 100 - cut25 - hike25);
+  let hike50 = 0;
+  if (gapBp <= -45) {
+    // -45bp 이하: 50bp 인하 우세
+    cut50 = Math.min(100, ((-gapBp - 45) / 15 + 1) * 50);
+    cut25 = Math.max(0, 100 - cut50);
+  } else if (gapBp <= -20) {
+    // -20 ~ -45bp: 25bp 인하 우세
+    cut25 = ((-gapBp - 5) / 25) * 100;
+    cut25 = Math.min(100, cut25);
+  } else if (gapBp <= -5) {
+    // -5 ~ -20bp: 25bp 인하 약세
+    cut25 = ((-gapBp - 5) / 25) * 100;
+  }
+  if (gapBp >= 45) {
+    hike50 = Math.min(100, ((gapBp - 45) / 15 + 1) * 50);
+    hike25 = Math.max(0, 100 - hike50);
+  } else if (gapBp >= 20) {
+    hike25 = ((gapBp - 5) / 25) * 100;
+    hike25 = Math.min(100, hike25);
+  } else if (gapBp >= 5) {
+    hike25 = ((gapBp - 5) / 25) * 100;
+  }
+  const hold = Math.max(0, 100 - cut25 - cut50 - hike25 - hike50);
   return {
     cut25: parseFloat(cut25.toFixed(1)),
+    cut50: parseFloat(cut50.toFixed(1)),
     hike25: parseFloat(hike25.toFixed(1)),
+    hike50: parseFloat(hike50.toFixed(1)),
     hold: parseFloat(hold.toFixed(1)),
   };
 }
@@ -175,7 +197,9 @@ export async function fetchFedWatchProbabilities(): Promise<FedWatchSnapshot | n
     currentTargetMidPct: parseFloat(targetMid.toFixed(3)),
     gapBp: parseFloat(gapBp.toFixed(1)),
     cutProb25bp: probs.cut25,
+    cutProb50bp: probs.cut50,
     hikeProb25bp: probs.hike25,
+    hikeProb50bp: probs.hike50,
     holdProb: probs.hold,
     source: 'zq-yahoo',
     fetchedAt: new Date().toISOString(),

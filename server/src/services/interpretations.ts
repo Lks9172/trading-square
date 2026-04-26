@@ -330,6 +330,23 @@ export function interpretDerived(
     if (value >= 7) return '🟡 네이버 투자정보 7일+ 공백';
     return null;
   }
+  // 25차 신규
+  if (key === 'META_MISSING_DERIVED_COUNT') {
+    if (value >= 5) return '🔴 핵심 derived 5종+ 결측 — 데이터 파이프라인 점검 필요';
+    if (value >= 2) return '🟡 핵심 derived 2-4종 결측';
+    return null;
+  }
+  if (key === 'GLOBAL_M2_AGGREGATE_YOY') {
+    if (value >= 8) return '🟢 글로벌 M2 (3국 평균) 8%+ — 유동성 확장 강';
+    if (value <= 0) return '🟠 글로벌 M2 정체/감소';
+    return null;
+  }
+  if (key === 'RRP_ABSOLUTE_LEVEL') {
+    if (value < 100) return '🟢 RRP 거의 소진 (<100B) — Fed 흡수 종료';
+    if (value < 500) return '🔵 RRP 약화';
+    return null;
+  }
+
   // 24차 신규
   if (key === 'KOSDAQ_DRAWDOWN_ATH') {
     if (value <= -30) return '🔴 KOSDAQ -30%↓ 심각 약세';
@@ -603,6 +620,15 @@ export function interpretDerived(
   }
   if (key === 'FOMC_RATE_HIKE_PROB_25BP') {
     if (value >= 50) return '🔴 25bp 인상 우세 — 매파 베팅';
+    return null;
+  }
+  if (key === 'FOMC_RATE_CUT_PROB_50BP') {
+    if (value >= 50) return '🟢 50bp 인하 우세 — 강한 비둘기파 베팅';
+    if (value >= 20) return '🟡 50bp 인하 가능성 활성';
+    return null;
+  }
+  if (key === 'FOMC_RATE_HIKE_PROB_50BP') {
+    if (value >= 50) return '🔴 50bp 인상 우세 — 강한 매파 베팅';
     return null;
   }
   if (key === 'M2_SP500_LEAD_ALIGNMENT') {

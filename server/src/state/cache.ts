@@ -224,6 +224,17 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
             sig.reasons.push(`✓ Hysteresis 보호 — STRONG_BUY 유지 (metDelta=${metDelta}, 24차)`);
           }
         }
+        // 25차: leverage tier flicker 차단 (HARD↔MEDIUM↔SOFT 한 단계 변동만 보호)
+        if (sig.asset === 'LEVERAGE' && prev.tier && sig.tier && prev.tier !== sig.tier) {
+          const tierOrder: Record<string, number> = { SOFT: 1, MEDIUM: 2, HARD: 3 };
+          const prevLevel = tierOrder[prev.tier] ?? 0;
+          const currLevel = tierOrder[sig.tier] ?? 0;
+          // 한 단계 차이 (예: HARD → MEDIUM 또는 MEDIUM → SOFT) 면 직전 tier 유지
+          if (Math.abs(prevLevel - currLevel) === 1) {
+            sig.tier = prev.tier;
+            sig.reasons.push(`✓ leverage tier hysteresis — ${prev.tier} 유지 (1단계 변동 차단, 25차)`);
+          }
+        }
       }
     }
   } catch { void 0; }

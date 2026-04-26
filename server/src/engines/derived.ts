@@ -528,6 +528,40 @@ export async function computeDerived(
     }
   }
 
+  // === 25차: GLOBAL_M2_AGGREGATE — US + ECB M3 + BoJ M2 가능 시 산출 ===
+  // 노션 §StreetStats "글로벌 M2" 정합 시도. FRED ECB M3 (MABMM301EZM189S — 유로지역 M3 SA),
+  // BoJ M2 (MABMM301JPM189S — 일본 M2 SA) 두 시리즈 가능 시 USD 환산 단순합.
+  // 환율 변동 흡수 위해 YoY% 만 단순 평균 (3국 동등 가중) — proxy 수준.
+  try {
+    const ecbHist = await readHistory('fred', 'MABMM301EZM189S').catch(() => []);
+    const bojHist = await readHistory('fred', 'MABMM301JPM189S').catch(() => []);
+    const usHist = await readHistory('fred', 'M2SL').catch(() => []);
+    const yoyOf = (hist: Array<{ date: string; value: number }>): number | null => {
+      if (hist.length < 13) return null;
+      const sorted = [...hist].sort((a, b) => (a.date < b.date ? -1 : 1));
+      const last = sorted[sorted.length - 1].value;
+      const yearAgo = sorted[Math.max(0, sorted.length - 13)].value;
+      if (!Number.isFinite(last) || !Number.isFinite(yearAgo) || yearAgo === 0) return null;
+      return ((last - yearAgo) / yearAgo) * 100;
+    };
+    const usYoy = yoyOf(usHist);
+    const ecbYoy = yoyOf(ecbHist);
+    const bojYoy = yoyOf(bojHist);
+    const parts: number[] = [];
+    if (usYoy !== null && Math.abs(usYoy) < 30) parts.push(usYoy);
+    if (ecbYoy !== null && Math.abs(ecbYoy) < 30) parts.push(ecbYoy);
+    if (bojYoy !== null && Math.abs(bojYoy) < 30) parts.push(bojYoy);
+    if (parts.length >= 1) {
+      const avg = parts.reduce((s, v) => s + v, 0) / parts.length;
+      d.GLOBAL_M2_AGGREGATE_YOY = {
+        name: 'global_m2_aggregate_yoy',
+        value: parseFloat(avg.toFixed(2)),
+        date: dt,
+        formula: `US M2 ${usYoy?.toFixed(2) ?? '-'}% + ECB M3 ${ecbYoy?.toFixed(2) ?? '-'}% + BoJ M2 ${bojYoy?.toFixed(2) ?? '-'}% 단순평균 = ${avg.toFixed(2)}% (${parts.length}/3 가용). 노션 §StreetStats 글로벌 M2 정합 시도 (25차).`,
+      };
+    }
+  } catch { void 0; }
+
   const usdkrw = val(raw, 'USDKRW');
   if (usdkrw !== null) {
     let fxLevel: number;
@@ -4825,10 +4859,10 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
-  // === 24차 P1#6: 노션 본가 자체 도구 4종 ===
-  // (1) KOSDAQ_DRAWDOWN_ATH — 노션 본가 표시
+  // === 24차 P1#6 + 25차: 노션 본가 자체 도구 4종 + 정합 강화 ===
+  // (1) KOSDAQ_DRAWDOWN_ATH — 25차 깊이 1260→2520일 (10년) 확장
   try {
-    const kosdaqHist = await fetchYahooHistory('^KQ11', 1260);
+    const kosdaqHist = await fetchYahooHistory('^KQ11', 2520);
     if (kosdaqHist.length >= 100) {
       const closes = kosdaqHist.map((h) => h.close);
       const ath = Math.max(...closes);
@@ -4906,23 +4940,43 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
-  // (4) MMF_RRP_RATIO — MMF / RRP 비율 (시장 유동성 vs Fed 흡수)
+  // (4) MMF_RRP_RATIO — 25차 변별력 강화: RRP 절대치 + 1Y 변화율 병행
+  // RRP 가 거의 0 으로 내려간 환경 (현재) 에서 ratio 폭증 → 단일 임계로는 변별 불가.
+  // 추가 차원: RRP 절대치 (≥1T 의미 있음 vs <100B 거의 소진).
   try {
     const mmf = val(raw, 'WRMFNS') ?? d.MMF_TIER?.value ?? null;
     const rrp = val(raw, 'RRPONTSYD') ?? null;
     if (mmf !== null && rrp !== null && rrp > 0) {
       const ratio = mmf / rrp;
+      // RRP 절대치 단계 (조 단위 가정 — millions 단위면 1000으로 나눔 필요. WRMFNS 와 단위 정합)
+      const rrpAbs = rrp; // 통상 millions
       let level: number;
       let label: string;
-      if (ratio >= 8) { level = 2; label = '🟢 MMF/RRP 8+ — RRP 대폭 감소, 시장 유동성 풍부'; }
-      else if (ratio >= 4) { level = 1; label = '🔵 MMF/RRP 4~8 — 정상'; }
-      else if (ratio >= 2) { level = 0; label = '🟡 MMF/RRP 2~4 — RRP 흡수 진행'; }
-      else { level = -1; label = '🟠 MMF/RRP <2 — Fed 흡수 강함'; }
+      // 25차 변별력: RRP 절대치 + ratio 결합
+      if (rrpAbs < 100000 && ratio >= 50) {
+        // RRP < 100B AND 비율 50배 → 거의 소진 (현재 시장)
+        level = 2; label = '🟢 RRP 거의 소진 (<100B) — 시장 유동성 극풍부, Fed 흡수 종료';
+      } else if (rrpAbs < 500000) {
+        level = 1; label = `🔵 RRP <500B — 흡수 약화 (절대 ${(rrpAbs/1000).toFixed(0)}B)`;
+      } else if (ratio >= 4) {
+        level = 0; label = `🟡 정상 (RRP ${(rrpAbs/1000).toFixed(0)}B, 비율 ${ratio.toFixed(1)})`;
+      } else if (ratio >= 2) {
+        level = 0; label = `🟡 RRP 흡수 진행 (비율 ${ratio.toFixed(1)})`;
+      } else {
+        level = -1; label = `🟠 RRP 흡수 강함 (비율 ${ratio.toFixed(1)})`;
+      }
       d.MMF_RRP_RATIO = {
         name: 'mmf_rrp_ratio',
         value: parseFloat(ratio.toFixed(2)),
         date: today(),
-        formula: `MMF ${mmf.toFixed(0)} / RRP ${rrp.toFixed(0)} = ${ratio.toFixed(2)}. ${label}. 노션 §본가 MMF vs RRP.`,
+        formula: `MMF ${(mmf/1000).toFixed(0)}B / RRP ${(rrpAbs/1000).toFixed(1)}B = ratio ${ratio.toFixed(2)}. ${label}. 노션 §본가 MMF vs RRP.`,
+      };
+      // 절대치 별도 derived 노출 — ratio 무한 폭증 회피
+      d.RRP_ABSOLUTE_LEVEL = {
+        name: 'rrp_absolute_level',
+        value: parseFloat((rrpAbs/1000).toFixed(1)),
+        date: today(),
+        formula: `RRP 절대치 ${(rrpAbs/1000).toFixed(1)}B. <100B = 소진, <500B = 약화, ≥1T = 정상.`,
       };
     }
   } catch { void 0; }
@@ -5086,6 +5140,19 @@ export async function computeDerived(
         date: today(),
         formula: `잔여 = 동결 베팅.`,
       };
+      // 25차: 50bp 다단계 확률
+      d.FOMC_RATE_CUT_PROB_50BP = {
+        name: 'fomc_rate_cut_prob_50bp',
+        value: fw.cutProb50bp,
+        date: today(),
+        formula: `gap ≤-45bp 시 50bp 인하 베팅 (25차 다단계).`,
+      };
+      d.FOMC_RATE_HIKE_PROB_50BP = {
+        name: 'fomc_rate_hike_prob_50bp',
+        value: fw.hikeProb50bp,
+        date: today(),
+        formula: `gap ≥+45bp 시 50bp 인상 베팅.`,
+      };
     }
   } catch { void 0; }
 
@@ -5176,11 +5243,12 @@ export async function computeDerived(
         else if (m2Dir > 0 && spxRet < 0) { level = -1; label = '🟠 M2 상승했지만 S&P 하락 — 리드 약화 가능성'; }
         else if (m2Dir < 0 && spxRet > 0) { level = -1; label = '🟡 M2 하락했지만 S&P 상승 — 상관 이탈'; }
         else { level = 0; label = '⚪ M2 정체'; }
+        // 25차: 13주 (3개월) 키는 alias 유지 — 정합은 10주 키 (M2_SP500_LEAD_10W_ALIGNMENT) 우선.
         d.M2_SP500_LEAD_ALIGNMENT = {
           name: 'm2_sp500_lead_alignment',
           value: level,
           date: today(),
-          formula: `M2 Δ3M=${m2Dir.toFixed(0)} vs S&P 13W ret=${spxRet.toFixed(2)}%. ${label}. 노션 §M2 10-13주 선행.`,
+          formula: `M2 Δ3M=${m2Dir.toFixed(0)} vs S&P 13W ret=${spxRet.toFixed(2)}%. ${label}. (25차: 10W 키 우선 — alias 유지)`,
         };
       }
     }
@@ -5248,6 +5316,26 @@ export async function computeDerived(
         formula: `30Y Δ=${yield30Up.toFixed(2)}bp, DXY Δ=${dxyChangePct.toFixed(2)}%. ${label}. video4 §"미국이 불확실성의 근원" — 30Y↑+DXY↓ 동시 = 탈달러 구조 전환.`,
       };
     }
+  } catch { void 0; }
+
+  // === 25차: META_MISSING_DERIVED_COUNT — catch silent 결측 추적 ===
+  try {
+    const criticalKeys = [
+      'NASDAQ_DRAWDOWN_ATH', 'NASDAQ_DISPARITY', 'NASDAQ_RSI_14',
+      'GOLD_DISPARITY', 'GOLD_LONGTERM_CUP_HANDLE',
+      'KOSPI_DISPARITY', 'KOSPI_QUARTERLY_UPPER_WICK_PCT',
+      'CONVICTION_SCORE_7AXIS', 'LEVERAGE_TRIGGER_3OF3',
+      'FOMC_RATE_HOLD_PROB', 'M2_SP500_LEAD_10W_ALIGNMENT',
+      'INSTITUTIONAL_NASDAQ_FLOW', 'SMART_MONEY_CLUSTER_BUY',
+      'STLFSI_LEVEL', 'MMF_RRP_RATIO', 'EM_TRIO_BREADTH',
+    ];
+    const missing = criticalKeys.filter((k) => d[k] === undefined || d[k]?.value === null || d[k]?.value === undefined);
+    d.META_MISSING_DERIVED_COUNT = {
+      name: 'meta_missing_derived_count',
+      value: missing.length,
+      date: today(),
+      formula: `핵심 derived ${criticalKeys.length}종 중 결측 ${missing.length}종${missing.length > 0 ? `: ${missing.slice(0, 5).join(', ')}` : ''}. catch silent skip 추적 (25차).`,
+    };
   } catch { void 0; }
 
   return d;
