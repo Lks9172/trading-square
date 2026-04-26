@@ -53,7 +53,9 @@ describe('computeSignals', () => {
   it('LEVERAGE HARD tier (disp<=-25, VIX>=35, ICSA<300K) → STRONG_BUY, 15% cap', () => {
     const raw = makeRaw({ VIXCLS: 38, ICSA: 200000 });
     const derived = makeDerived({ NASDAQ_DISPARITY: -26 });
-    const signals = computeSignals(raw, derived, defaultRegime, defaultProfile);
+    // 29차 fix-F: LEVERAGE STRONG_BUY 는 RISK_ON/PANIC_BUT_OK 에서만 허용.
+    // VIX=38 + 이격도=-26% 는 PANIC_BUT_OK 환경 — regime 정합 반영.
+    const signals = computeSignals(raw, derived, { regime: 'PANIC_BUT_OK', score: 30, components: {}, date: '2026-01-01' }, defaultProfile);
     const lev = signals.find((s) => s.asset === 'LEVERAGE');
     expect(lev?.signal).toBe('STRONG_BUY');
     expect(lev?.tier).toBe('HARD');

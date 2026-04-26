@@ -8457,6 +8457,17 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
+  // ★ === 29차 fix-F: CROSS_ASSET_STRONG_BUY_COUNT — 자산군 동시 STRONG_BUY 알림 ===
+  // video2 §03:35 자산분류: 위험/안전/중간 동시 STRONG_BUY 는 영상 철학상 모순.
+  // signals 결정 후 별도 산출 필요 — 본 derived 는 placeholder, 실제 계산은
+  // state/cache 에서 signals 결과 합산 후 주입 권장. 우선 0 으로 초기화.
+  d.CROSS_ASSET_STRONG_BUY_COUNT = {
+    name: 'cross_asset_strong_buy_count',
+    value: 0,
+    date: today(),
+    formula: '8자산 STRONG_BUY 카운트 — 위험(NASDAQ/KOSPI/EMERGING/LEVERAGE/COPPER) + 안전(GOLD/CASH) + 중간(SILVER) 그룹 동시 STRONG_BUY 시 알림. 산출은 state/cache 에서 signals 결과 합산 후 주입.',
+  };
+
   return d;
 }
 

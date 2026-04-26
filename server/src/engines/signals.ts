@@ -183,10 +183,59 @@ function softenRiskSignal(signal: Signal): Signal {
   return signal;
 }
 
+/**
+ * 29차 fix-F: 자산군 × regime 정합 매트릭스 — 영상 철학 게이트.
+ *
+ * video2 §03:35 자산 3분류: 안전(금) / 위험(주식) / 중간(은·구리)
+ * video4 §"빨간불/노란불/초록불": regime 정합성 = 자산 신호의 절대 게이트
+ * video1 §전략C: STRONG_BUY 는 시스템 위기 직후 V자 반등 시점만 (3-of-3 동시)
+ *
+ * 룰: regime 부적합 자산이 STRONG_BUY 도달 시 BUY 자동 강등.
+ *     CASH 의 STRONG_BUY 는 RISK_ON/NEUTRAL 에서 자동 BUY 강등.
+ */
+type RegimeName = 'RISK_ON' | 'NEUTRAL' | 'CAUTION' | 'CORRECTION' | 'RECESSION_RISK'
+  | 'STAGFLATION' | 'BOND_VIGILANTE' | 'STAGFLATION_BOND_VIGILANTE' | 'PANIC_BUT_OK';
+
+const STRONG_BUY_REGIME_FIT: Record<string, RegimeName[]> = {
+  // 위험자산: 우호 regime 에서만 STRONG_BUY 허용
+  NASDAQ:   ['RISK_ON', 'NEUTRAL', 'PANIC_BUT_OK'],
+  KOSPI:    ['RISK_ON', 'NEUTRAL', 'PANIC_BUT_OK'],
+  EMERGING: ['RISK_ON', 'NEUTRAL'],
+  LEVERAGE: ['RISK_ON', 'PANIC_BUT_OK'],
+  COPPER:   ['RISK_ON', 'NEUTRAL'],          // 중간 — 경기회복 시
+  SILVER:   ['RISK_ON', 'NEUTRAL', 'STAGFLATION'], // 중간 — 인플레/회복
+  // 안전자산: 위기 regime 에서 STRONG_BUY 허용
+  GOLD:     ['NEUTRAL', 'CAUTION', 'CORRECTION', 'RECESSION_RISK',
+             'STAGFLATION', 'BOND_VIGILANTE', 'STAGFLATION_BOND_VIGILANTE', 'PANIC_BUT_OK'],
+  CASH:     ['CAUTION', 'CORRECTION', 'RECESSION_RISK', 'STAGFLATION',
+             'BOND_VIGILANTE', 'STAGFLATION_BOND_VIGILANTE'],
+};
+
+function applyRegimeCoherenceGate(
+  asset: string,
+  signal: Signal,
+  regime: string,
+  overrides: string[],
+  unmetReasons: string[],
+): Signal {
+  if (signal !== 'STRONG_BUY') return signal;
+  const fitRegimes = STRONG_BUY_REGIME_FIT[asset];
+  if (!fitRegimes) return signal;
+  if (!fitRegimes.includes(regime as RegimeName)) {
+    const overrideReason =
+      `regime ${regime} 에서 ${asset} STRONG_BUY 부적합 (video2 §03:35 자산분류 + video4 §"빨간불/노란불/초록불") → STRONG_BUY → BUY`;
+    overrides.push(overrideReason);
+    unmetReasons.push(overrideReason);
+    return 'BUY';
+  }
+  return signal;
+}
+
 function nasdaqSignal(
   raw: Record<string, MarketDataPoint>,
   derived: Record<string, DerivedIndicator>,
-  profile: UserProfile
+  profile: UserProfile,
+  regime: RegimeState,
 ): AssetSignal {
   // 영상1 §전략B "5기준" 을 카테고리 축으로 반영:
   //   1) 저점 (200DMA / 이격도 / VIX / ICSA / F&G)
@@ -802,11 +851,12 @@ function nasdaqSignal(
         overrides.push(overrideReason);
         unmetReasons.push(overrideReason);
       }
-    } else if (tripleGate < 0.0) {
+    } else if (tripleGate < 0.33) {
+      // 29차 fix-F: 임계 < 0 → < 0.33 강화. 0.33 미만은 3축 정합 부족 → STRONG_BUY 차단.
       if (signal === 'STRONG_BUY') {
         const previous = signal;
         signal = 'BUY';
-        const overrideReason = `TRIPLE_GATE ${tripleGate.toFixed(2)} < 0 (3축 약분기, video6 §04:48) → ${previous} → BUY`;
+        const overrideReason = `TRIPLE_GATE ${tripleGate.toFixed(2)} < 0.33 (3축 정합 부족, video6 §04:48) → STRONG_BUY → BUY`;
         overrides.push(overrideReason);
         unmetReasons.push(overrideReason);
       }
@@ -814,6 +864,9 @@ function nasdaqSignal(
       reasons.push(`✓ TRIPLE_GATE ${tripleGate.toFixed(2)} ≥ 0.66 (3축 정합, video6 §04:48 "펀더×매크로×차트")`);
     }
   }
+
+  // === Override 4: 29차 fix-F — 자산군 × regime 정합 게이트 ===
+  signal = applyRegimeCoherenceGate('NASDAQ', signal, regime.regime, overrides, unmetReasons);
 
   return withSignalExplanation({
     asset: 'NASDAQ',
@@ -831,7 +884,8 @@ function nasdaqSignal(
 function goldSignal(
   raw: Record<string, MarketDataPoint>,
   derived: Record<string, DerivedIndicator>,
-  profile: UserProfile
+  profile: UserProfile,
+  regime: RegimeState,
 ): AssetSignal {
   // 18차 P2#8: 금·은·구리 우선순위 주석 (video2 §1부 "우선순위").
   //   1) 실질금리 하락 (가중치 3.0) — 최상위 전제. video2: "실질금리 깨면 다른 지표 의미 약함".
@@ -1100,6 +1154,9 @@ function goldSignal(
   // 향후 신규 가산 도입 시 over-cap 방지 위해 명시 cap 일관 적용.
   if (score > maxScore) score = maxScore;
 
+  // === 29차 fix-F — 자산군 × regime 정합 게이트 ===
+  signal = applyRegimeCoherenceGate('GOLD', signal, regime.regime, overrides, unmetReasons);
+
   return withSignalExplanation({
     asset: 'GOLD',
     signal,
@@ -1223,6 +1280,9 @@ function silverSignal(
   // 29차 fix-B: SILVER weightedScore cap — V2 등 신규 가산으로 met>total 가능 (over-cap 방지).
   if (met > total) met = total;
 
+  // === 29차 fix-F — 자산군 × regime 정합 게이트 ===
+  signal = applyRegimeCoherenceGate('SILVER', signal, regime.regime, overrides, unmetReasons);
+
   return withSignalExplanation({
     asset: 'SILVER',
     signal,
@@ -1239,7 +1299,8 @@ function silverSignal(
 function copperSignal(
   derived: Record<string, DerivedIndicator>,
   raw: Record<string, MarketDataPoint>,
-  profile: UserProfile
+  profile: UserProfile,
+  regime: RegimeState,
 ): AssetSignal {
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
@@ -1323,6 +1384,10 @@ function copperSignal(
     strongBuy: 3,
   });
   let signal: Signal = baseSignal;
+  const overrides: string[] = [];
+
+  // === 29차 fix-F — 자산군 × regime 정합 게이트 ===
+  signal = applyRegimeCoherenceGate('COPPER', signal, regime.regime, overrides, unmetReasons);
 
   return withSignalExplanation({
     asset: 'COPPER',
@@ -1334,7 +1399,7 @@ function copperSignal(
     reasons,
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  }, baseSignal);
+  }, baseSignal, overrides);
 }
 
 function cashSignal(regime: RegimeState): AssetSignal {
@@ -1360,23 +1425,32 @@ function cashSignal(regime: RegimeState): AssetSignal {
     RISK_ON: '위험선호 → 현금 최소화',
   };
 
+  const baseSignal: Signal = map[regime.regime] ?? 'HOLD';
+  let signal = baseSignal;
+  const overrides: string[] = [];
+  const unmetReasons: string[] = [];
+
+  // === 29차 fix-F — 자산군 × regime 정합 게이트 ===
+  signal = applyRegimeCoherenceGate('CASH', signal, regime.regime, overrides, unmetReasons);
+
   return withSignalExplanation({
     asset: 'CASH',
-    signal: map[regime.regime] ?? 'HOLD',
+    signal,
     conditionsMet: 0,
     conditionsTotal: 0,
     weightedScore: 0,
     weightedMaxScore: 0,
     reasons: [reasons[regime.regime] ?? ''],
-    unmetReasons: [],
+    unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  }, map[regime.regime] ?? 'HOLD');
+  }, baseSignal, overrides);
 }
 
 function leverageCheck(
   raw: Record<string, MarketDataPoint>,
   derived: Record<string, DerivedIndicator>,
   profile: UserProfile,
+  regime: RegimeState,
 ): AssetSignal {
   if (!profile.leverageEnabled) {
     clearLeverageEntry();
@@ -1486,6 +1560,9 @@ function leverageCheck(
   // 29차 fix-B: LEVERAGE weightedScore cap (일관 패턴 적용).
   if (met > total) met = total;
 
+  // === 29차 fix-F — 자산군 × regime 정합 게이트 ===
+  signal = applyRegimeCoherenceGate('LEVERAGE', signal, regime.regime, overrides, unmetReasons);
+
   return withSignalExplanation({
     asset: 'LEVERAGE',
     signal,
@@ -1504,6 +1581,7 @@ function kospiSignal(
   raw: Record<string, MarketDataPoint>,
   derived: Record<string, DerivedIndicator>,
   profile: UserProfile,
+  regime: RegimeState,
 ): AssetSignal {
   if (!profile.includeKR) {
     return disabledAssetSignal('KOSPI', '사용자 설정 includeKR=false — 한국 자산 제외');
@@ -1956,6 +2034,9 @@ function kospiSignal(
     }
   }
 
+  // === 29차 fix-F — 자산군 × regime 정합 게이트 ===
+  signal = applyRegimeCoherenceGate('KOSPI', signal, regime.regime, overrides, unmetReasons);
+
   return withSignalExplanation({
     asset: 'KOSPI',
     signal,
@@ -1985,6 +2066,7 @@ function emergingSignal(
   raw: Record<string, MarketDataPoint>,
   derived: Record<string, DerivedIndicator>,
   profile: UserProfile,
+  regime: RegimeState,
 ): AssetSignal {
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
@@ -2053,6 +2135,9 @@ function emergingSignal(
   // 29차 fix-B: EMERGING weightedScore cap (일관 패턴 적용).
   if (met > total) met = total;
 
+  // === 29차 fix-F — 자산군 × regime 정합 게이트 ===
+  signal = applyRegimeCoherenceGate('EMERGING', signal, regime.regime, overrides, unmetReasons);
+
   return withSignalExplanation({
     asset: 'EMERGING',
     signal,
@@ -2073,14 +2158,14 @@ export function computeSignals(
   profile: UserProfile
 ): AssetSignal[] {
   return [
-    nasdaqSignal(raw, derived, profile),
-    kospiSignal(raw, derived, profile),
-    goldSignal(raw, derived, profile),
+    nasdaqSignal(raw, derived, profile, regime),
+    kospiSignal(raw, derived, profile, regime),
+    goldSignal(raw, derived, profile, regime),
     silverSignal(derived, raw, regime),
-    copperSignal(derived, raw, profile),
-    emergingSignal(raw, derived, profile),
+    copperSignal(derived, raw, profile, regime),
+    emergingSignal(raw, derived, profile, regime),
     cashSignal(regime),
-    leverageCheck(raw, derived, profile),
+    leverageCheck(raw, derived, profile, regime),
   ].map((signal) => signal.explanation
     ? signal
     : withSignalExplanation(signal, signal.signal));
