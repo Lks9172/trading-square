@@ -336,6 +336,17 @@ function kospiPlan(
     }
   }
 
+  // ★ === 29차 P3-B #12: KOSPI_POST_OVERSHOOT_EXPECTED_DRAWDOWN_PCT → stop-loss 권고 ===
+  // stt_kospi §"다음 해 평균 -44%" — 75%+ 과열 시 보수 stop-loss 자동 권고.
+  const expectedDD = vDer(derived, 'KOSPI_POST_OVERSHOOT_EXPECTED_DRAWDOWN_PCT');
+  if (expectedDD !== null && expectedDD <= -40 && price !== null) {
+    const protectivePrice = round(price * (1 + expectedDD / 100 * 0.5)); // 예상 -44% 의 절반(-22%) 시 stop
+    if (stopPrice === null || stopPrice > protectivePrice) {
+      stopPrice = protectivePrice;
+      stopCond = `${stopCond ? stopCond + ' 또는 ' : ''}KOSPI_POST_OVERSHOOT 통계 보수 stop (예상 ${expectedDD}% 의 절반 도달, stt_kospi §"다음 해 평균 -44%")`;
+    }
+  }
+
   return {
     asset: 'KOSPI',
     action,

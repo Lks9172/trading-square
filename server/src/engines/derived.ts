@@ -7863,6 +7863,138 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
+  // ★ === 29차 P3-B #7: KR_BOK_LOCKED_FLAG ===
+  // stt_kospi §09:55 "한은 사방이 막힌 미로".
+  // USDKRW ≥ 1500 OR krHouseholdDebtPctGdp > 100 OR krCpi ≥ 3 → flag=1.
+  try {
+    const usdkrw = val(raw, 'USDKRW') ?? null;
+    const hh = manualInputs?.krHouseholdDebtPctGdp ?? null;
+    const cpi = manualInputs?.krCpi ?? null;
+    const fxLocked = usdkrw !== null && usdkrw >= 1500;
+    const debtLocked = hh !== null && hh > 100;
+    const cpiLocked = cpi !== null && cpi >= 3;
+    const flag = (fxLocked || debtLocked || cpiLocked) ? 1 : 0;
+    const reasons = [];
+    if (fxLocked) reasons.push(`USDKRW ${usdkrw?.toFixed(0)}≥1500`);
+    if (debtLocked) reasons.push(`가계부채 ${hh?.toFixed(0)}%>100`);
+    if (cpiLocked) reasons.push(`CPI ${cpi?.toFixed(1)}%≥3`);
+    d.KR_BOK_LOCKED_FLAG = {
+      name: 'kr_bok_locked_flag',
+      value: flag,
+      date: today(),
+      formula: `USDKRW=${usdkrw?.toFixed(1) ?? '?'} / 가계부채%GDP=${hh ?? '?'} / krCPI=${cpi ?? '?'}. ${flag ? `🔒 한은 lock-in (${reasons.join(' · ')}, KOSPI -1)` : '⚪ 정책 여유'}. stt_kospi §09:55 "한은 사방 막힘".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P3-B #8: WGBI_INFLOW_TAILWIND ===
+  // stt_kospi §09:33 "WGBI 편입 외국인 자금 유입".
+  // calendar 의 WGBI 편입 D-Day (하드코딩 2026-10-01) 기준 D-180 ~ D+180 활성, USDKRW < 1500.
+  try {
+    const wgbiDate = new Date('2026-10-01');
+    const today2 = new Date();
+    const daysFromWgbi = Math.round((today2.getTime() - wgbiDate.getTime()) / 86400000);
+    const inWindow = daysFromWgbi >= -180 && daysFromWgbi <= 180;
+    const usdkrw = val(raw, 'USDKRW') ?? null;
+    const fxOk = usdkrw !== null && usdkrw < 1500;
+    const flag = (inWindow && fxOk) ? 1 : 0;
+    d.WGBI_INFLOW_TAILWIND = {
+      name: 'wgbi_inflow_tailwind',
+      value: flag,
+      date: today(),
+      formula: `WGBI 2026-10-01 D${daysFromWgbi >= 0 ? '+' : ''}${daysFromWgbi}, window=${inWindow}, USDKRW=${usdkrw?.toFixed(1) ?? '?'}<1500=${fxOk}. ${flag ? '🟢 WGBI tailwind 활성 (KOSPI +1)' : '⚪ 미발동'}. stt_kospi §09:33.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P3-B #9: KR_FISCAL_LAG_PROGRESS_DAYS ===
+  // stt_kospi §10:30 "추경 27조 → 6개월 후 효과".
+  // calendar.ts STATIC_POLITICAL_EVENTS 추경 D-Day (2026-04-15) 경과일수 / 180.
+  try {
+    const fiscalDate = new Date('2026-04-15');
+    const today2 = new Date();
+    const elapsed = Math.round((today2.getTime() - fiscalDate.getTime()) / 86400000);
+    const progress = elapsed / 180;
+    let level: number;
+    let label: string;
+    if (progress >= 1) { level = 2; label = `🟢 ${progress.toFixed(2)} ≥ 1 — 효과 반영 시점 (KOSPI +0.5)`; }
+    else if (progress >= 0.5) { level = 1; label = `🟡 ${progress.toFixed(2)} ≥ 0.5 — 절반 진입`; }
+    else if (progress >= 0) { level = 0; label = `⚪ ${progress.toFixed(2)} — 진행 중`; }
+    else { level = -1; label = `⏳ 시행 전 (D${elapsed})`; }
+    d.KR_FISCAL_LAG_PROGRESS_DAYS = {
+      name: 'kr_fiscal_lag_progress_days',
+      value: parseFloat(progress.toFixed(2)),
+      date: today(),
+      formula: `추경 D${elapsed >= 0 ? '+' : ''}${elapsed} / 180일 = ${progress.toFixed(2)}. ${label}. stt_kospi §10:30 "추경 27조 → 6개월 효과".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P3-B #10: KR_POLICY_GRIDLOCK_REGIME_PRESSURE ===
+  // stt_kospi §"한은 사방 막힘" — KR_BOK_LOCKED_FLAG=1 시 KOSPI 비중 결정 시 -0.5 보조.
+  try {
+    const lockedFlag = d.KR_BOK_LOCKED_FLAG?.value ?? null;
+    const pressure = lockedFlag === 1 ? -0.5 : 0;
+    d.KR_POLICY_GRIDLOCK_REGIME_PRESSURE = {
+      name: 'kr_policy_gridlock_regime_pressure',
+      value: pressure,
+      date: today(),
+      formula: `KR_BOK_LOCKED_FLAG=${lockedFlag}, regime KOSPI 비중 보조 ${pressure}. stt_kospi §"한은 사방 막힘".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P3-B #11: KOSPI_HISTORIC_OVERSHOOT_RANK ===
+  // stt_kospi §01:55 "1999/2007/2020 사례".
+  // 기존 KOSPI_HISTORIC_OVERSHOOT_FLAG (≥75% YTD) 보강 — rank 분류.
+  try {
+    const ytd = d.KOSPI_YEAR_RETURN?.value ?? null;
+    if (ytd !== null) {
+      let rank: number | null = null;
+      let label: string;
+      if (ytd >= 83) { rank = 2; label = `🔴🔴 rank=2 (1999 IT버블 ${ytd.toFixed(1)}% ≥83%)`; }
+      else if (ytd >= 75) { rank = 3; label = `🔴 rank=3 (2020 코로나 ${ytd.toFixed(1)}% ≥75%)`; }
+      else if (ytd >= 50) { rank = 4; label = `🟠 rank=4 (2007 GFC 직전 ${ytd.toFixed(1)}% ≥50%)`; }
+      else { label = `⚪ rank=null (${ytd.toFixed(1)}% < 50%)`; }
+      d.KOSPI_HISTORIC_OVERSHOOT_RANK = {
+        name: 'kospi_historic_overshoot_rank',
+        value: rank,
+        date: today(),
+        formula: `KOSPI 1년 ${ytd.toFixed(1)}%. ${label}. stt_kospi §01:55 "1999/2007/2020 사례 다음 해 평균 -44%".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P3-B #12: KOSPI_POST_OVERSHOOT_EXPECTED_DRAWDOWN_PCT ===
+  // stt_kospi §"다음 해 평균 -44%" — KOSPI_YEAR_RETURN ≥ 75% 시 -44 (3 사례 평균).
+  try {
+    const ytd = d.KOSPI_YEAR_RETURN?.value ?? null;
+    if (ytd !== null) {
+      const expected = ytd >= 75 ? -44 : null;
+      d.KOSPI_POST_OVERSHOOT_EXPECTED_DRAWDOWN_PCT = {
+        name: 'kospi_post_overshoot_expected_drawdown_pct',
+        value: expected,
+        date: today(),
+        formula: `KOSPI YTD ${ytd.toFixed(1)}% ${expected !== null ? `≥75 → 다음 해 평균 ${expected}% (1999/2007/2020 3사례 평균, kospiPlan stop-loss 권고)` : '<75 → 미적용'}. stt_kospi §"다음 해 평균 -44%".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P3-B #13: KOSPI_ABSOLUTE_LEVEL_LEVEL ===
+  // stt_kospi §"5150 1차 / 4080 2차" — SCENARIO_GATE_A_B 와 분리한 단순 노출.
+  try {
+    const k = val(raw, 'KOSPI') ?? null;
+    if (k !== null) {
+      let level: number;
+      let label: string;
+      if (k >= 5150) { level = 2; label = `🔴 ${k.toFixed(0)} ≥ 5150 (1차 지지 위 — 과열권)`; }
+      else if (k >= 4080) { level = 0; label = `⚪ ${k.toFixed(0)} (4080~5150 사이)`; }
+      else { level = -2; label = `🔵 ${k.toFixed(0)} < 4080 (2차 지지 이탈)`; }
+      d.KOSPI_ABSOLUTE_LEVEL_LEVEL = {
+        name: 'kospi_absolute_level_level',
+        value: level,
+        date: today(),
+        formula: `KOSPI ${k.toFixed(0)} → level=${level}. ${label}. stt_kospi §"5150 1차 / 4080 2차".`,
+      };
+    }
+  } catch { void 0; }
+
   return d;
 }
 

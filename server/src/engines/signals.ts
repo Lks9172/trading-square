@@ -1661,6 +1661,43 @@ function kospiSignal(
     met += 1;
   }
 
+  // ★ === 29차 P3-B #7: KR_BOK_LOCKED_FLAG → KOSPI -1 패널티 ===
+  // stt_kospi §09:55 "한은 사방이 막힌 미로".
+  const bokLocked = dv(derived, 'KR_BOK_LOCKED_FLAG');
+  if (bokLocked === 1) {
+    met = Math.max(0, met - 1);
+    unmetReasons.push('⚠️ KR_BOK_LOCKED_FLAG=1 — 한은 정책 무력 (USDKRW≥1500 OR 가계부채>100% OR CPI≥3, KOSPI -1, stt_kospi §09:55)');
+  }
+
+  // ★ === 29차 P3-B #8: WGBI_INFLOW_TAILWIND → +1 가점 ===
+  // stt_kospi §09:33 "WGBI 편입 외국인 자금 유입".
+  const wgbiTw = dv(derived, 'WGBI_INFLOW_TAILWIND');
+  if (wgbiTw === 1) {
+    met += 1;
+    reasons.push('✓ WGBI 편입 window + 환율 안정 (외국인 자금 유입 기반, stt_kospi §09:33)');
+  }
+
+  // ★ === 29차 P3-B #9: KR_FISCAL_LAG_PROGRESS_DAYS → 효과 반영 시점 가산 ===
+  // stt_kospi §10:30 "추경 27조 → 6개월 후 효과".
+  const fiscalProg = dv(derived, 'KR_FISCAL_LAG_PROGRESS_DAYS');
+  if (fiscalProg !== null && fiscalProg >= 1) {
+    met += 1;
+    reasons.push('✓ 추경 효과 반영 시점 도달 (D+180 경과, stt_kospi §10:30)');
+  } else if (fiscalProg !== null && fiscalProg >= 0.5) {
+    reasons.push('🟡 추경 효과 절반 진입 (보조, stt_kospi §10:30)');
+  }
+
+  // ★ === 29차 P3-B #11: KOSPI_HISTORIC_OVERSHOOT_RANK — 다음 해 평균 -44% 경고 ===
+  // stt_kospi §01:55 "1999/2007/2020 사례".
+  const overshootRank = dv(derived, 'KOSPI_HISTORIC_OVERSHOOT_RANK');
+  if (overshootRank === 2) {
+    unmetReasons.push('⚠️⚠️ KOSPI 역사적 과열 rank=2 (≥83% IT버블 수준) — 다음 해 평균 -44% (stt_kospi §01:55)');
+  } else if (overshootRank === 3) {
+    unmetReasons.push('⚠️ KOSPI 역사적 과열 rank=3 (≥75% 코로나 수준) — 다음 해 평균 -44% (stt_kospi §01:55)');
+  } else if (overshootRank === 4) {
+    unmetReasons.push('⚠️ KOSPI 과열 rank=4 (≥50% GFC 직전 수준, stt_kospi §01:55)');
+  }
+
   // ★ === 29차 P2-E #36: KOSPI_VOLUME_TIER ===
   // stt_kospi §"주간 평균 20조" — tier +1/0/-1.
   const volTier = dv(derived, 'KOSPI_VOLUME_TIER');
