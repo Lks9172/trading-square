@@ -22,6 +22,7 @@
 import axios from 'axios';
 import { childLogger, serializeError } from '../services/logger';
 import { readSourceCacheWithin, writeSourceCache } from '../services/source-cache';
+import { getYahooCrumb, invalidateYahooCrumb } from '../utils/yahoo-auth';
 
 const log = childLogger({ module: 'collector.cme-fedwatch' });
 const CACHE_KEY = 'cme-fedwatch-probabilities';
@@ -39,23 +40,80 @@ export interface FedWatchSnapshot {
   fetchedAt: string;
 }
 
+// ZQ Fed Funds futures front-month price 다중 소스 fetch.
+// 우선순위: 1) stooq CSV (무인증) → 2) Yahoo crumb 인증 quoteSummary → 3) Yahoo chart API.
 async function fetchZqFront(): Promise<number | null> {
+  // ── 1. stooq.com (무인증, ZQ continuous) ──
   try {
-    const { data } = await axios.get(
-      'https://query1.finance.yahoo.com/v7/finance/quote?symbols=ZQ%3DF',
+    const { data } = await axios.get<string>(
+      'https://stooq.com/q/d/l/?s=zq.f&i=d',
       {
-        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        timeout: 10000,
+        responseType: 'text',
+      },
+    );
+    if (typeof data === 'string' && data.includes('Date,Open,High,Low,Close')) {
+      const lines = data.trim().split('\n').filter((l) => l && !l.startsWith('Date'));
+      const last = lines[lines.length - 1];
+      if (last) {
+        const parts = last.split(',');
+        const close = parseFloat(parts[4]);
+        if (Number.isFinite(close) && close > 50 && close < 105) {
+          log.info({ source: 'stooq', close }, 'ZQ stooq fetched');
+          return close;
+        }
+      }
+    }
+  } catch (err) {
+    log.warn({ source: 'stooq', error: serializeError(err) }, 'stooq ZQ fetch failed');
+  }
+
+  // ── 2. Yahoo crumb 인증 quoteSummary (v10) ──
+  try {
+    const auth = await getYahooCrumb();
+    if (auth) {
+      const { data } = await axios.get(
+        `https://query2.finance.yahoo.com/v10/finance/quoteSummary/ZQ%3DF?modules=price&crumb=${encodeURIComponent(auth.crumb)}`,
+        {
+          headers: { 'User-Agent': 'Mozilla/5.0', Cookie: auth.cookie, Accept: 'application/json' },
+          timeout: 10000,
+        },
+      );
+      const p = data?.quoteSummary?.result?.[0]?.price;
+      const price = p?.regularMarketPrice?.raw ?? p?.postMarketPrice?.raw ?? p?.preMarketPrice?.raw;
+      if (typeof price === 'number' && Number.isFinite(price) && price > 50) {
+        log.info({ source: 'yahoo-crumb', price }, 'ZQ yahoo-crumb fetched');
+        return price;
+      }
+    }
+  } catch (err: any) {
+    if (err?.response?.status === 401) invalidateYahooCrumb();
+    log.warn({ source: 'yahoo-crumb', error: serializeError(err) }, 'yahoo-crumb ZQ fetch failed');
+  }
+
+  // ── 3. Yahoo chart API (인증 불필요한 경로) ──
+  try {
+    const period2 = Math.floor(Date.now() / 1000);
+    const period1 = period2 - 7 * 86400;
+    const { data } = await axios.get(
+      `https://query1.finance.yahoo.com/v8/finance/chart/ZQ%3DF?period1=${period1}&period2=${period2}&interval=1d`,
+      {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
         timeout: 10000,
       },
     );
-    const r = data?.quoteResponse?.result?.[0];
-    const price = r?.regularMarketPrice ?? r?.postMarketPrice ?? r?.preMarketPrice;
-    if (typeof price === 'number' && Number.isFinite(price) && price > 50) return price;
-    return null;
+    const closes: number[] = data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+    const last = closes.filter((v) => Number.isFinite(v) && v > 50).pop();
+    if (typeof last === 'number') {
+      log.info({ source: 'yahoo-chart', last }, 'ZQ yahoo-chart fetched');
+      return last;
+    }
   } catch (err) {
-    log.warn({ error: serializeError(err) }, 'ZQ=F fetch failed');
-    return null;
+    log.warn({ source: 'yahoo-chart', error: serializeError(err) }, 'yahoo-chart ZQ fetch failed');
   }
+
+  return null;
 }
 
 async function fetchTargetMid(): Promise<number | null> {

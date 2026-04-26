@@ -23,27 +23,9 @@ const SURPRISE_FRESH_MS = 12 * 60 * 60 * 1000;
 const SURPRISE_STALE_MS = 14 * 24 * 60 * 60 * 1000;
 const MEGACAP_SURPRISE_TICKERS = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA'];
 
-// Yahoo crumb + cookie (2024+ 필수). earnings module 도 인증 대상.
-let cachedCrumb: { crumb: string; cookie: string; at: number } | null = null;
-const CRUMB_TTL_MS = 60 * 60 * 1000;
-async function getCrumb(): Promise<{ crumb: string; cookie: string } | null> {
-  if (cachedCrumb && Date.now() - cachedCrumb.at < CRUMB_TTL_MS) return { crumb: cachedCrumb.crumb, cookie: cachedCrumb.cookie };
-  try {
-    const step1 = await axios.get('https://fc.yahoo.com', {
-      headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000, validateStatus: () => true, maxRedirects: 5,
-    });
-    const setCookie = step1.headers['set-cookie'];
-    const cookie = Array.isArray(setCookie) ? setCookie.map((c) => c.split(';')[0]).join('; ') : '';
-    if (!cookie) return null;
-    const step2 = await axios.get('https://query2.finance.yahoo.com/v1/test/getcrumb', {
-      headers: { 'User-Agent': 'Mozilla/5.0', Cookie: cookie }, timeout: 10000,
-    });
-    const crumb = typeof step2.data === 'string' ? step2.data.trim() : '';
-    if (!crumb) return null;
-    cachedCrumb = { crumb, cookie, at: Date.now() };
-    return { crumb, cookie };
-  } catch { return null; }
-}
+// Yahoo crumb 공용 헬퍼 사용 (20차 활성화).
+import { getYahooCrumb, invalidateYahooCrumb } from '../utils/yahoo-auth';
+const getCrumb = getYahooCrumb;
 
 async function fetchYahooEarningsSurprise(ticker: string): Promise<EarningsSurprise | null> {
   try {
@@ -66,7 +48,7 @@ async function fetchYahooEarningsSurprise(ticker: string): Promise<EarningsSurpr
     const surprisePct = parseFloat((((actual - estimate) / Math.abs(estimate)) * 100).toFixed(2));
     return { ticker, quarter: String(quarter), actualEps: actual, estimateEps: estimate, surprisePct };
   } catch (err: any) {
-    if (err?.response?.status === 401) cachedCrumb = null;
+    if (err?.response?.status === 401) invalidateYahooCrumb();
     return null;
   }
 }

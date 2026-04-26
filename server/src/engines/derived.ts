@@ -4012,28 +4012,29 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
-  // === 19차 P2#9: UPPER_WICK_IMPULSE (close 변동 + 거래량 가중 단순화) ===
-  // video2 §4부 "추세 통틀어 가장 강한 매도세". OHLC 미수집 환경에서는 close 일변동 + 거래량으로 근사.
+  // === 19차 P2#9: UPPER_WICK_IMPULSE (OHLC 정식 복구 — fetchYahooOHLC 사용) ===
+  // video2 §4부 "추세 통틀어 가장 강한 매도세". 윗꼬리/몸통 비율 × 거래량 임팩트.
   try {
-    const nHist = await fetchYahooHistory('^IXIC', 70);
-    if (nHist.length >= 60) {
-      const last = nHist[nHist.length - 1] as any;
-      const prev = nHist[nHist.length - 2] as any;
-      const dropPct = prev?.close > 0 ? Math.max(0, ((prev.close - last.close) / prev.close) * 100) : 0;
-      const v = last.volume ?? 0;
-      const avgVol = nHist.slice(-60).reduce((s, p: any) => s + (p.volume ?? 0), 0) / 60;
-      const volImpact = avgVol > 0 ? v / avgVol : 1;
-      const impulse = dropPct * volImpact;
+    const { fetchYahooOHLC } = await import('../collectors/yahoo');
+    const ohlc = await fetchYahooOHLC('^IXIC', 100);
+    if (ohlc.length >= 60) {
+      const last = ohlc[ohlc.length - 1];
+      const upperWick = Math.max(0, last.high - Math.max(last.open, last.close));
+      const body = Math.max(0.0001, Math.abs(last.close - last.open));
+      const wickRatio = upperWick / body;
+      const avgVol = ohlc.slice(-60).reduce((s, p) => s + (p.volume ?? 0), 0) / 60;
+      const volImpact = avgVol > 0 ? last.volume / avgVol : 1;
+      const impulse = wickRatio * volImpact;
       let level: number;
       let label: string;
-      if (impulse >= 3 && dropPct >= 1.5) { level = 2; label = `🔴 강한 매도세 (drop ${dropPct.toFixed(2)}%, vol×${volImpact.toFixed(2)})`; }
-      else if (impulse >= 1.5 && dropPct >= 1) { level = 1; label = '🟡 매도 압력'; }
+      if (impulse >= 3 && wickRatio >= 1) { level = 2; label = `🔴 강한 윗꼬리 매도세 (wick/body=${wickRatio.toFixed(2)}, vol×${volImpact.toFixed(2)})`; }
+      else if (impulse >= 1.5 && wickRatio >= 0.6) { level = 1; label = '🟡 윗꼬리 매도 압력'; }
       else { level = 0; label = '⚪ 정상'; }
       d.NASDAQ_UPPER_WICK_IMPULSE = {
         name: 'nasdaq_upper_wick_impulse',
         value: parseFloat(impulse.toFixed(2)),
         date: today(),
-        formula: `일변동 -${dropPct.toFixed(2)}% × 거래량 비율 ${volImpact.toFixed(2)} = ${impulse.toFixed(2)}. ${label}. video2 §4부.`,
+        formula: `윗꼬리/몸통 ${wickRatio.toFixed(2)} × 거래량 ${volImpact.toFixed(2)} = ${impulse.toFixed(2)}. last OHLC=${last.open.toFixed(0)}/${last.high.toFixed(0)}/${last.low.toFixed(0)}/${last.close.toFixed(0)}. ${label}. video2 §4부.`,
       };
       d.NASDAQ_UPPER_WICK_LEVEL = {
         name: 'nasdaq_upper_wick_level',
@@ -4478,13 +4479,13 @@ export async function computeDerived(
         name: 'te_stream_minutes_ago',
         value: te.minutesAgo,
         date: today(),
-        formula: `TE stream 최신 "${te.latestHeadline.slice(0, 60)}..." (${te.minutesAgo}분 전, 24h ${te.count24h}건). 노션 §전세계 경제 뉴스.`,
+        formula: `${te.source}: "${te.latestHeadline.slice(0, 60)}..." (${te.minutesAgo}분 전, 24h ${te.count24h}건). 노션 §전세계 경제 뉴스.`,
       };
       d.TE_STREAM_COUNT_24H = {
         name: 'te_stream_count_24h',
         value: te.count24h,
         date: today(),
-        formula: `TE stream 24h 헤드라인 ${te.count24h}건. 폭증 시 매크로 노이즈 강함.`,
+        formula: `${te.source} 24h 헤드라인 ${te.count24h}건. 폭증 시 매크로 노이즈 강함.`,
       };
     }
   } catch { void 0; }

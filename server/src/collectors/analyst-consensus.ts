@@ -12,6 +12,7 @@
 import axios from 'axios';
 import { childLogger, serializeError } from '../services/logger';
 import { readSourceCacheWithin, writeSourceCache } from '../services/source-cache';
+import { getYahooCrumb, invalidateYahooCrumb } from '../utils/yahoo-auth';
 
 const log = childLogger({ module: 'collector.analyst-consensus' });
 const CACHE_KEY = 'analyst-consensus-nasdaq-megacap';
@@ -36,39 +37,8 @@ function scoreFromTrend(t: Trend): number {
   return weighted / total;
 }
 
-// Yahoo Finance crumb + cookie 인증 (2024+ 필수)
-let cachedCrumb: { crumb: string; cookie: string; at: number } | null = null;
-const CRUMB_TTL_MS = 60 * 60 * 1000; // 1시간
-
-async function getCrumb(): Promise<{ crumb: string; cookie: string } | null> {
-  if (cachedCrumb && Date.now() - cachedCrumb.at < CRUMB_TTL_MS) {
-    return { crumb: cachedCrumb.crumb, cookie: cachedCrumb.cookie };
-  }
-  try {
-    // 1) cookie 획득
-    const step1 = await axios.get('https://fc.yahoo.com', {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      timeout: 10000,
-      validateStatus: () => true,
-      maxRedirects: 5,
-    });
-    const setCookie = step1.headers['set-cookie'];
-    const cookie = Array.isArray(setCookie) ? setCookie.map((c) => c.split(';')[0]).join('; ') : '';
-    if (!cookie) return null;
-    // 2) crumb 획득
-    const step2 = await axios.get('https://query2.finance.yahoo.com/v1/test/getcrumb', {
-      headers: { 'User-Agent': 'Mozilla/5.0', Cookie: cookie },
-      timeout: 10000,
-    });
-    const crumb = typeof step2.data === 'string' ? step2.data.trim() : '';
-    if (!crumb) return null;
-    cachedCrumb = { crumb, cookie, at: Date.now() };
-    return { crumb, cookie };
-  } catch (err) {
-    log.warn({ error: serializeError(err) }, 'crumb acquire failed');
-    return null;
-  }
-}
+// Yahoo crumb 헬퍼는 utils/yahoo-auth 공용 모듈로 통합 (20차 활성화).
+const getCrumb = getYahooCrumb;
 
 async function fetchOneTicker(ticker: string): Promise<{ ticker: string; score: number; upsidePct?: number } | null> {
   try {
@@ -96,7 +66,7 @@ async function fetchOneTicker(ticker: string): Promise<{ ticker: string; score: 
     }
     return { ticker, score: scoreFromTrend(current), upsidePct };
   } catch (error: any) {
-    if (error?.response?.status === 401) cachedCrumb = null;
+    if (error?.response?.status === 401) invalidateYahooCrumb();
     log.warn({ ticker, error: serializeError(error) }, 'analyst fetch failed');
     return null;
   }
