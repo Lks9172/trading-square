@@ -241,13 +241,17 @@ function nasdaqSignal(
     met += 1;
   }
 
-  // 15차 Phase 2 B3: NASDAQ_DRAWDOWN_ATH (video1 "펀더멘털 살아있는 -30% = 기회")
+  // 15차 Phase 2 B3 + 23차 Tier 1#1: NASDAQ_DRAWDOWN_ATH 매수 본진 -34% 까지 확장
+  // video1 §"2020.3 -34% / 2022 -33% 펀더멘털 살아있는 기회" + §"-55% 시스템 위기".
+  // 기회 구간: -20% ~ -34% (영상 명시 본진), 위험 구간: -34% 초과.
   const nqDd = dv(derived, 'NASDAQ_DRAWDOWN_ATH');
-  if (nqDd !== null && nqDd <= -20 && nqDd >= -30) {
-    reasons.push(`✓ NASDAQ ATH 대비 ${nqDd.toFixed(1)}% 조정 (video1 "펀더멘털 살아있는 -20~-30% = 기회" 구간)`);
+  if (nqDd !== null && nqDd <= -20 && nqDd >= -34) {
+    reasons.push(`✓ NASDAQ ATH 대비 ${nqDd.toFixed(1)}% 조정 (video1 §1부 "2020.3 -34% / 2022 -33% 본진 기회 구간")`);
     met += 1;
-  } else if (nqDd !== null && nqDd < -30) {
-    unmetReasons.push(`⚠️ NASDAQ ATH 대비 ${nqDd.toFixed(1)}% — 구조적 위험 가능성 (video1 "-55% 시스템 위기" 경계)`);
+  } else if (nqDd !== null && nqDd < -34 && nqDd >= -55) {
+    unmetReasons.push(`⚠️ NASDAQ ATH 대비 ${nqDd.toFixed(1)}% — 영상 본진(-30~-34%) 이탈, 시스템 위기(-55%) 경계`);
+  } else if (nqDd !== null && nqDd < -55) {
+    unmetReasons.push(`🚨 NASDAQ ATH 대비 ${nqDd.toFixed(1)}% — video1 §"-55% 시스템 위기" 진입`);
   }
 
   // 15차 Phase 1 A1: NASDAQ_RSI_14 (video2 §22:51 RSI 중립/모멘텀 평가)
@@ -468,6 +472,12 @@ function nasdaqSignal(
     }
   }
 
+  // 23차 Tier 1#3: NASDAQ signal met/total 정합 cap.
+  //   기존 met++ 만 하는 가점들 (NASDAQ_DRAWDOWN, RSI<30, 이격도 -25%, W_BOTTOM, econDiv, wtiCuLag 등) 이
+  //   total 동기화 안 돼 met/total > 100% 가능. PSYCH 외 가점은 "강도 가산"으로 보고 met cap = total.
+  //   비율 신뢰성 확보 + STRONG_BUY 자동 도달 차단.
+  if (met > total) met = total;
+
   return withSignalExplanation({
     asset: 'NASDAQ',
     signal,
@@ -496,7 +506,9 @@ function goldSignal(
   const unmetReasons: string[] = [];
   let score = 0;
   let metCount = 0;
-  let maxScore = 8; // 12차 N1: seasonal 발동 시 8.5 로 확장
+  // 23차 Tier 1#2: maxScore 정합 — 메인 가중치 합 = 3(real_yield) + 2(dxy) + 1.5(cb) + 0.5(geo) = 7.
+  // seasonal/RSI/FIB 발동 시 +0.5 씩 max 8.5 까지 확장. 발동 안 하면 maxScore 7 유지 (이전 8 영구 cap 해소).
+  let maxScore = 7;
 
   const realYield = dv(derived, 'REAL_YIELD');
   const ryTrend = dv(derived, 'REAL_YIELD_TREND');

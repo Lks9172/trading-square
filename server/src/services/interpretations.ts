@@ -330,6 +330,34 @@ export function interpretDerived(
     if (value >= 7) return '🟡 네이버 투자정보 7일+ 공백';
     return null;
   }
+  // 23차 신규
+  if (key === 'COPPER_GOLD_RATIO_ZSCORE_90D') {
+    if (value >= 1.5) return '🟢 CGR 90D z>+1.5 — 경기 회복 강신호 (video2 §3부)';
+    if (value >= 0.5) return '🟢 CGR 90D z>+0.5 — 상승 우세';
+    if (value <= -0.5) return '🟠 CGR 90D z<-0.5 — 하락 전환';
+    return null;
+  }
+  if (key === 'M2_SP500_LEAD_10W_ALIGNMENT') {
+    if (value === 1) return '🟢 M2 10주 리드 정합 — 유동성 신호 유효 (노션 §StreetStats)';
+    if (value === -1) return '🟠 M2-S&P 10주 이탈';
+    return null;
+  }
+  if (key === 'SMART_MONEY_3AXIS_ALIGNMENT') {
+    if (value === 2) return '🟢 세력 3축 동조 매수 (13F+8-K+내부자) — 노션 §스마트머니 강신호';
+    if (value === 1) return '🔵 세력 2축 활성';
+    return null;
+  }
+  if (key === 'LIQUIDITY_TRIPLE_GATE') {
+    if (value === 2) return '🟢 유동성 트리플 게이트 발동 (M2↑+VIX↓+DXY↓) — 위험자산 호조';
+    if (value === 1) return '🔵 유동성 2축 활성';
+    if (value === -1) return '🟠 유동성 약화';
+    return null;
+  }
+  if (key === 'KOSPI_VOLUME_20T_FLAG') {
+    if (value === 1) return '🟢 KOSPI 거래대금 20조+ — 지속성 우호 (video5 §73)';
+    return null;
+  }
+
   // 22차 신규
   if (key === 'OPERATOR_PHILOSOPHY_QUOTE_INDEX') {
     return null; // formula 에 short 인용이 이미 들어가있음

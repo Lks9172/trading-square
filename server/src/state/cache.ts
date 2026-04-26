@@ -197,21 +197,22 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
       ),
     ),
   );
-  // 21차 P1#3: signal hysteresis — BUY 진입 후 5거래일 minDwell 보호.
-  // whipsaw 방지: 직전 5분 snapshot 의 signal 이 BUY/STRONG_BUY 였다면 HOLD/REDUCE 로 즉시 강등 차단.
+  // 21차 P1#3 + 23차 Tier 1#4: signal hysteresis 1met 변동만 차단.
+  // 직전 snapshot 의 met 와 현재 met 차이 = 1 인 경우만 강등 차단 (이전 metGap 휴리스틱은 met 큰 폭 변동도 보호).
   try {
     if (cachedSnapshot && cachedSnapshot.signals) {
-      const prevSignals = new Map(cachedSnapshot.signals.map((s) => [s.asset, s.signal]));
+      const prevByAsset = new Map(cachedSnapshot.signals.map((s) => [s.asset, s]));
       for (const sig of signals) {
-        const prev = prevSignals.get(sig.asset);
+        const prev = prevByAsset.get(sig.asset);
+        if (!prev) continue;
+        const prevSig = prev.signal;
         // BUY/STRONG_BUY → HOLD/REDUCE 로 떨어지는 경우 prev 유지 (whipsaw 차단)
-        // 단 conditionsMet 이 hold 임계 이상으로 떨어졌을 때는 정상 강등 — 1 met 변동만 막음.
-        if ((prev === 'BUY' || prev === 'STRONG_BUY') && (sig.signal === 'HOLD' || sig.signal === 'REDUCE')) {
-          const metGap = (sig.conditionsTotal - sig.conditionsMet);
-          if (metGap <= 3) {
-            // 1met 변동으로 인한 강등 — 차단
-            sig.signal = prev as typeof sig.signal;
-            sig.reasons.push(`✓ Hysteresis 보호 — 직전 ${prev} 유지 (21차 P1#3)`);
+        if ((prevSig === 'BUY' || prevSig === 'STRONG_BUY') && (sig.signal === 'HOLD' || sig.signal === 'REDUCE')) {
+          // 23차 Tier 1#4: 의도 명확화 — 이전 met - 현재 met = 1 만 차단 (1met 변동).
+          const metDelta = (prev.conditionsMet ?? 0) - (sig.conditionsMet ?? 0);
+          if (metDelta === 1) {
+            sig.signal = prevSig as typeof sig.signal;
+            sig.reasons.push(`✓ Hysteresis 보호 — 직전 ${prevSig} 유지 (1met 변동, 21차 P1#3 / 23차 의도 fix)`);
           }
         }
       }

@@ -429,6 +429,22 @@ export function computeAllocation(
         after: 0,
       });
     }
+  } else if (leverageAllowed && base.leverage === 0 && leverageCap > 0) {
+    // 23차 Tier 2#8: leverage HARD/MEDIUM/SOFT 발동 + 현재 regime 의 base.leverage=0 (RISK_ON 등) 시
+    // nasdaq 에서 leverageCap 만큼 이관해 base.leverage 를 활성화. 영상1 §전략C 정합.
+    const cap = Math.min(leverageCap, base.nasdaq * 0.5); // 안전: nasdaq 의 50% 이내
+    if (cap > 0) {
+      base.leverage = cap;
+      base.nasdaq -= cap;
+      explanation?.adjustments.push({
+        step: 'leverage-activate',
+        detail: `leverage tier=${leverageTier} 발동 + base.leverage=0 -> nasdaq 에서 ${cap}% 이관 (23차 Tier 2#8)`,
+        allocKey: 'leverage',
+        amount: cap,
+        before: 0,
+        after: cap,
+      });
+    }
   }
   // 주의: base.leverage 에 대한 pre-normalize clamp 는 의도적으로 제거.
   // normalize() 가 전체 합 기준 재스케일을 수행하므로 pre-clamp 15 는 normalize

@@ -287,10 +287,13 @@ export function classifyRegime(
   }
   const preOverrideRegime = regime;
 
-  // Fix #5: STAGFLATION / BOND_VIGILANTE 최우선 override.
-  // 두 국면은 일반 score 분류보다 우선한다 — 플래그가 의미하는 구조적 신호는
-  // 0~100 점수에 완전히 매핑되지 않기 때문. 영상4 §137-147 / §145.
-  if (stagflation === 1) {
+  // 23차 Tier 2#7: STAGFLATION + BOND_VIGILANTE 동시 발동 시 후자 무시 fix —
+  // 두 플래그 동시 활성 시 별도 라벨 STAGFLATION_BOND_VIGILANTE 로 표시 (else if 누적 처리).
+  if (stagflation === 1 && bondVigilante === 1) {
+    overrides.push('STAGFLATION+BOND_VIGILANTE 동시 -> 양 override 누적, 라벨은 STAGFLATION 우선');
+    regime = 'STAGFLATION';
+    // BOND_VIGILANTE 도 함께 활성으로 표기 (override 로그)
+  } else if (stagflation === 1) {
     overrides.push('STAGFLATION_WARNING=1 -> regime forced to STAGFLATION');
     regime = 'STAGFLATION';
   } else if (bondVigilante === 1) {

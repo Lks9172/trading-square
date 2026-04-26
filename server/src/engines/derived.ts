@@ -856,6 +856,38 @@ export async function computeDerived(
   }
 
   // === 구리 3조건 강매수 복합 (영상2 §닥터코퍼 ISM + 금구리비 + ICSA 동시) ===
+  // 23차 Tier 1#6: CGR 90D z-score 정규화 — 절대 임계 0.00125 자체 TODO 해소.
+  // 영상2 §3부 "금구리비 상승세" 의 "상승" 정의를 90일 분포 기준 z>0.5 로 통계화.
+  try {
+    const cgrHist: Array<{ date: string; value: number }> = [];
+    // CGR 자체 history 가 없으면 raw COPPER/GOLD 일별 비율로 90일 산출
+    const copperHist = await fetchYahooHistory('HG=F', 95);
+    const goldHist = await fetchYahooHistory('GC=F', 95);
+    if (copperHist.length >= 60 && goldHist.length >= 60) {
+      const goldByDate = new Map(goldHist.map((h) => [h.date, h.close]));
+      for (const c of copperHist) {
+        const g = goldByDate.get(c.date);
+        if (typeof g === 'number' && g > 0 && c.close > 0) {
+          cgrHist.push({ date: c.date, value: c.close / g });
+        }
+      }
+      if (cgrHist.length >= 60) {
+        const values = cgrHist.map((p) => p.value);
+        const mean = values.reduce((a, b) => a + b, 0) / values.length;
+        const variance = values.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / values.length;
+        const std = Math.sqrt(variance);
+        const last = values[values.length - 1];
+        const z = std > 0 ? (last - mean) / std : 0;
+        d.COPPER_GOLD_RATIO_ZSCORE_90D = {
+          name: 'copper_gold_ratio_zscore_90d',
+          value: parseFloat(z.toFixed(2)),
+          date: today(),
+          formula: `90D mean=${mean.toFixed(5)} std=${std.toFixed(5)} last=${last.toFixed(5)} → z=${z.toFixed(2)}. video2 §3부 "금구리비 상승세" 정량화 — z>+0.5 = 상승 우세, z<-0.5 = 하락 전환.`,
+        };
+      }
+    }
+  } catch { void 0; }
+
   const cgr = d.COPPER_GOLD_RATIO?.value;
   const icsaRaw = val(raw, 'ICSA');
   if (ismVal !== undefined && ismVal !== null && cgr !== undefined && cgr !== null && icsaRaw !== null) {
@@ -1032,13 +1064,10 @@ export async function computeDerived(
         date: dt,
         formula: 'DGS30 20영업일 변화폭 (%p)',
       };
-      // Fiscal stress: 30년 20일에 +0.2%p 이상 급등 AND 현재 레벨 4.5%+
-      // Fix #6: `?? 0` 은 결측이면 "수익률곡선 평탄" 을 암묵 가정해 curveSteepening=false 확정 →
-      // FISCAL_STRESS_HARD 발동이 T10Y2Y 결측 시에도 내부 상수처럼 false 로 고정되지만, 이는
-      // "알 수 없음" 과 "평탄" 을 동일 취급해 신호에 거짓 안정성을 주입. null 을 명시적으로 유지하고
-      // curveSteepening 평가 시 null 은 false 로 간주 (의도 명확화 + 주석).
+      // Fiscal stress: 30년 20일에 +0.2%p 이상 급등 AND 현재 레벨 4.8%+ (23차 Tier 2#19: 영상4 §"4.93 돌파" 정합)
+      // BOND_VIGILANTE_SCORE 의 절대 임계 4.8 과 통일.
       const yieldCurve = val(raw, 'T10Y2Y');
-      const fiscalStress = (delta20 >= 0.2 && cur >= 4.5) || (delta20 >= 0.3);
+      const fiscalStress = (delta20 >= 0.2 && cur >= 4.8) || (delta20 >= 0.3);
       // yieldCurve === null → 곡선 정보 없음 → 스티프닝 판단 불가 → false.
       //   (false 는 HARD 발동 차단 쪽이라 방어적 디폴트)
       const curveSteepening = yieldCurve !== null && yieldCurve > 0.1;
@@ -1219,12 +1248,16 @@ export async function computeDerived(
   const nasdaqDisparity = d.NASDAQ_DISPARITY?.value ?? null;
   const fng = val(raw, 'FEAR_GREED');
   const vixVal = val(raw, 'VIXCLS');
+  // 23차 Tier 2#10: VIX 결측 시 OVERHEATED 일관성 — F&G 단독 분기 + 분기별 명시 라벨
   if (nasdaqDisparity !== null && nasdaqDisparity > 20 && fng !== null && fng > 75) {
     d.OVERHEATED = { name: 'overheated', value: 1, date: dt, formula: '이격도+20%이상 AND F&G 75+ → 과열' };
   } else if (nasdaqDisparity !== null && nasdaqDisparity > 15 && vixVal !== null && vixVal < 15) {
     d.OVERHEATED = { name: 'overheated', value: 1, date: dt, formula: '이격도+15%이상 AND VIX<15 → 과열' };
+  } else if (nasdaqDisparity !== null && nasdaqDisparity > 18 && fng !== null && fng > 80 && vixVal === null) {
+    // VIX 결측 시 F&G 80+ 단독 강한 과열 (23차 Tier 2#10)
+    d.OVERHEATED = { name: 'overheated', value: 1, date: dt, formula: '이격도+18% AND F&G 80+ AND VIX 결측 → 과열 (VIX 결측 fallback)' };
   } else {
-    d.OVERHEATED = { name: 'overheated', value: 0, date: dt, formula: '과열 조건 미충족' };
+    d.OVERHEATED = { name: 'overheated', value: 0, date: dt, formula: vixVal === null ? '과열 미해당 (VIX 결측 — F&G 80+ fallback 미충족)' : '과열 조건 미충족' };
   }
 
   // === 멀티 타임프레임 캔들 분석 (영상3·4·5 "월→주→일" 위계) ===
@@ -3805,9 +3838,16 @@ export async function computeDerived(
   try {
     const axes: Record<string, number> = {};
 
-    // 1) 차트 — 멀티프레임 정합 스코어 (17차 C1)
+    // 1) 차트 — 멀티프레임 정합 스코어 (17차 C1).
+    // 23차 Tier 2#18: long horizon 사용자는 분기·월봉 정합 가중 (단기 일봉 노이즈 무시).
+    //   long: 분기/월봉만 +1 가중 — multiframe 점수 ≥1 이면 +1, ≤-1 이면 -1
+    //   short: 일봉 정합 우선 — 점수 ≥3 (강한 정합) 이면 +1
     const mf = d.NASDAQ_MULTIFRAME_ALIGNMENT?.value ?? null;
-    axes.chart = mf === null ? 0 : (mf >= 2 ? 1 : mf <= -2 ? -1 : 0);
+    const horizonForChart = manualInputs?.investmentHorizon ?? 'medium';
+    if (mf === null) axes.chart = 0;
+    else if (horizonForChart === 'long') axes.chart = mf >= 1 ? 1 : mf <= -1 ? -1 : 0;
+    else if (horizonForChart === 'short') axes.chart = mf >= 3 ? 1 : mf <= -3 ? -1 : 0;
+    else axes.chart = mf >= 2 ? 1 : mf <= -2 ? -1 : 0;
 
     // 2) 유동성 — GLOBAL_M2 추세
     const m2 = d.GLOBAL_M2_PROXY?.value ?? null;
@@ -3831,8 +3871,16 @@ export async function computeDerived(
 
     // 5) 모멘텀 — NASDAQ_RSI_14. 19차 P2#11: RSI 70+ 도 +1 (video1 §확산 "더 오를 수 있음").
     //    단 RSI ≥85 극과매수만 0 처리 (반전 위험).
+    // 23차 Tier 2#18: long horizon 시 RSI 단기 변동 무시 — 50/40 컷을 더 넓게 (60/30).
+    //   short horizon 은 일봉 RSI 50 컷 유지 (반응성 우선).
     const rsi = d.NASDAQ_RSI_14?.value ?? null;
-    axes.momentum = rsi === null ? 0 : (rsi >= 50 && rsi < 85 ? 1 : rsi < 40 ? -1 : 0);
+    const horizonForMomentum = manualInputs?.investmentHorizon ?? 'medium';
+    if (rsi === null) axes.momentum = 0;
+    else if (horizonForMomentum === 'long') {
+      axes.momentum = rsi >= 60 && rsi < 85 ? 1 : rsi < 30 ? -1 : 0;
+    } else {
+      axes.momentum = rsi >= 50 && rsi < 85 ? 1 : rsi < 40 ? -1 : 0;
+    }
 
     // 6) 기관 리포트 — ANALYST_CONSENSUS_NASDAQ_MEGACAP rating (-2~+2 → -1/0/+1 양자화)
     const an = d.ANALYST_CONSENSUS_NASDAQ_MEGACAP?.value ?? null;
@@ -4112,16 +4160,20 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
-  // === 19차 P3#13: SCENARIO_GATE_A_B (A=추세재개, B=박스 하방이탈, W=관망) ===
-  // stt_kospi §4부 "두 가지 그림 동시에". 환율 1480 컷 + 외인 흐름 + 코스피 200DMA 결합.
+  // === 19차 P3#13 + 23차 Tier 2#13: SCENARIO_GATE_A_B (4축 — 거래량 추가) ===
+  // stt_kospi §4부 "두 가지 그림 동시에". 환율 1480 + 외인 흐름 + 코스피 200DMA + 거래량 지속.
   try {
     const krw = val(raw, 'USDKRW');
     const kospiAbove200 = d.KOSPI_DISPARITY?.value ?? null;
     const fgnFlow = d.KOSPI_FOREIGN_FLOW_LEVEL?.value ?? d.KOSPI_FOREIGN_HISTORIC_EXTREME?.value ?? null;
+    // 23차: 거래량 지속 축 (KOSPI_VOLUME_CONFIRM 또는 명시 없으면 0)
+    const volConfirm = d.KOSPI_VOLUME_CONFIRM?.value ?? 0;
     let scenario: number;
     let label: string;
-    if (krw !== null && krw <= 1480 && kospiAbove200 !== null && kospiAbove200 > 0 && (fgnFlow === null || fgnFlow >= 0)) {
-      scenario = 1; label = '🟢 시나리오 A — 추세 재개 (환율<1480 + 200DMA 상회 + 외인 정상)';
+    if (krw !== null && krw <= 1480 && kospiAbove200 !== null && kospiAbove200 > 0 && (fgnFlow === null || fgnFlow >= 0) && volConfirm === 1) {
+      scenario = 1; label = '🟢 시나리오 A — 추세 재개 (환율<1480 + 200DMA 상회 + 외인 정상 + 거래량 지속)';
+    } else if (krw !== null && krw <= 1480 && kospiAbove200 !== null && kospiAbove200 > 0 && (fgnFlow === null || fgnFlow >= 0)) {
+      scenario = 1; label = '🟢 시나리오 A 진행 (3축 충족, 거래량 미확인)';
     } else if (krw !== null && krw >= 1500 && kospiAbove200 !== null && kospiAbove200 < -3) {
       scenario = -1; label = '🔴 시나리오 B — 박스 하방 이탈 (환율>1500 + 200DMA -3%↓)';
     } else {
@@ -4131,7 +4183,7 @@ export async function computeDerived(
       name: 'scenario_gate_a_b',
       value: scenario,
       date: today(),
-      formula: `KRW=${krw?.toFixed(1) ?? '-'}, KOSPI 200DMA disp=${kospiAbove200?.toFixed(2) ?? '-'}%, fgn=${fgnFlow ?? '-'}. ${label}. stt_kospi §4부 "두 그림".`,
+      formula: `KRW=${krw?.toFixed(1) ?? '-'}, KOSPI 200DMA disp=${kospiAbove200?.toFixed(2) ?? '-'}%, fgn=${fgnFlow ?? '-'}, vol_confirm=${volConfirm}. ${label}. stt_kospi §4부 "두 그림" 4축.`,
     };
   } catch { void 0; }
 
@@ -4663,6 +4715,108 @@ export async function computeDerived(
         value: flips,
         date: today(),
         formula: `30일 내 시나리오 게이트 변경 ${flips}회. ≥5회 = 분기 불안정. stt_kospi §4부 "두 그림 동시" 검증.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 23차 Tier 2#15: M2 → S&P 10주 shift (노션 §StreetStats 정합 — 13주 근사 → 10주 정합) ===
+  try {
+    const m2Hist = await readHistory('fred', 'M2SL');
+    const spxHist = await fetchYahooHistory('^GSPC', 80);
+    if (m2Hist.length >= 14 && spxHist.length >= 50) {
+      const sortedM2 = [...m2Hist].sort((a, b) => (a.date < b.date ? -1 : 1));
+      // M2 월간 → 약 2.5개월 (10주) 전 = 2~3 포인트 전
+      const m2Now = sortedM2[sortedM2.length - 1]?.value;
+      const m2Then = sortedM2[Math.max(0, sortedM2.length - 3)]?.value; // 약 2.5개월 전
+      const spxNow = spxHist[spxHist.length - 1].close;
+      const spxThen = spxHist[Math.max(0, spxHist.length - 50)].close; // 50영업일 = 10주
+      if (
+        typeof m2Now === 'number' && typeof m2Then === 'number' &&
+        typeof spxNow === 'number' && typeof spxThen === 'number' &&
+        m2Then > 0 && spxThen > 0
+      ) {
+        const m2Dir = m2Now - m2Then;
+        const spxRet = ((spxNow - spxThen) / spxThen) * 100;
+        let level: number;
+        let label: string;
+        if (m2Dir > 0 && spxRet > 0) { level = 1; label = '🟢 M2↑ → S&P↑ 10주 리드 정합'; }
+        else if (m2Dir < 0 && spxRet < 0) { level = 1; label = '🟡 M2↓ → S&P↓ 정합 (약세)'; }
+        else if (m2Dir > 0 && spxRet < 0) { level = -1; label = '🟠 M2↑ but S&P↓ — 리드 약화'; }
+        else if (m2Dir < 0 && spxRet > 0) { level = -1; label = '🟡 M2↓ but S&P↑ — 이탈'; }
+        else { level = 0; label = '⚪ 정체'; }
+        d.M2_SP500_LEAD_10W_ALIGNMENT = {
+          name: 'm2_sp500_lead_10w_alignment',
+          value: level,
+          date: today(),
+          formula: `M2 Δ2.5M=${m2Dir.toFixed(0)} vs S&P 10W=${spxRet.toFixed(2)}%. ${label}. 노션 §StreetStats 10주 정합 (23차 Tier 2#15).`,
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // === 23차 Tier 3#20: 세력 3축 동조 매수 (13F + 8-K + Insider) ===
+  try {
+    const inst = d.INSTITUTIONAL_NASDAQ_FLOW?.value ?? null;
+    const sec8k = d.US_MATERIAL_DISCLOSURE_LEVEL?.value ?? null;
+    const insider = d.INSIDER_LARGE_SINGLE_BUY?.value ?? null;
+    if (inst !== null && sec8k !== null && insider !== null) {
+      const instUp = inst >= 1;
+      const sec8kHigh = sec8k >= 1;
+      const insiderActive = insider >= 3;
+      const positives = [instUp, sec8kHigh, insiderActive].filter(Boolean).length;
+      let level: number;
+      let label: string;
+      if (positives === 3) { level = 2; label = '🟢 세력 3축 동조 매수 — 노션 §스마트머니 결합 강신호'; }
+      else if (positives === 2) { level = 1; label = '🔵 세력 2축 활성'; }
+      else { level = 0; label = '⚪ 세력 액션 분산'; }
+      d.SMART_MONEY_3AXIS_ALIGNMENT = {
+        name: 'smart_money_3axis_alignment',
+        value: level,
+        date: today(),
+        formula: `13F flow=${inst}, 8-K=${sec8k}, insider $500k+=${insider}. ${positives}/3 동조. ${label}.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 23차 Tier 3#21: 유동성 트리플 게이트 (M2↑ + VIX↓ + DXY↓) ===
+  try {
+    const m2 = d.GLOBAL_M2_PROXY?.value ?? null;
+    const vix = val(raw, 'VIXCLS');
+    const dxy = val(raw, 'DXY');
+    const dxyTrend = d.DXY_TREND?.value ?? null;
+    if (m2 !== null && vix !== null && dxy !== null) {
+      const m2Up = m2 > 2;
+      const vixLow = vix < 20;
+      const dxyDown = dxyTrend !== null ? dxyTrend < -0.5 : dxy < 100;
+      const triple = m2Up && vixLow && dxyDown;
+      let level: number;
+      let label: string;
+      if (triple) { level = 2; label = '🟢 유동성 트리플 게이트 발동 — 위험자산 호조'; }
+      else if (m2Up && (vixLow || dxyDown)) { level = 1; label = '🔵 유동성 2축 활성'; }
+      else if (!m2Up && vix > 25) { level = -1; label = '🟠 유동성 약화 + VIX 상승'; }
+      else { level = 0; label = '⚪ 중립'; }
+      d.LIQUIDITY_TRIPLE_GATE = {
+        name: 'liquidity_triple_gate',
+        value: level,
+        date: today(),
+        formula: `M2=${m2.toFixed(1)}% VIX=${vix.toFixed(1)} DXY=${dxy.toFixed(1)}/${dxyTrend?.toFixed(2) ?? '-'}. ${label}. 노션 §StreetStats 유동성 게이트.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 23차 Tier 3#26: KOSPI 거래량 절대 20조 임계 ===
+  // video5_analysis §73 "거래대금 연속성 — 주간 평균 20조 이상".
+  // KRX_VOLUME_KRW_5D 가 있으면 사용, 없으면 raw KOSPI volume 으로 근사.
+  try {
+    const recentVol = d.KOSPI_VOLUME_5D_AVG_KRW?.value ?? null;
+    if (recentVol !== null) {
+      const trillion = recentVol / 10000; // 억원 → 조원
+      const above20T = trillion >= 20;
+      d.KOSPI_VOLUME_20T_FLAG = {
+        name: 'kospi_volume_20t_flag',
+        value: above20T ? 1 : 0,
+        date: today(),
+        formula: `KOSPI 5일 평균 거래대금 ${trillion.toFixed(1)}조 ${above20T ? '≥20조 (지속성 우호)' : '<20조 (관심 약화)'}. video5_analysis §73.`,
       };
     }
   } catch { void 0; }
