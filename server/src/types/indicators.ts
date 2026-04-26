@@ -136,6 +136,8 @@ export interface UserProfile {
     etfInflowTheme?: string;
     // 21차 Phase 2#11: 지정학 카운트다운 이벤트 (이름 + 목표일)
     geopoliticalCountdown?: Array<{ event: string; targetDate: string }>;
+    // ★ 29차 P1-D #11: KOSPI Forward PER 수동 입력 (자동 fetch 어려움)
+    kospiForwardPER?: number | null;
   };
 }
 

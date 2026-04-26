@@ -427,6 +427,17 @@ function nasdaqSignal(
   const chaseWarning = dv(derived, 'NASDAQ_CHASE_WARNING');
   if (chaseWarning === 1) overheatFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
 
+  // ★ === 29차 P1-D #11: NASDAQ_FORWARD_PER overheat / met 가산 ===
+  // video6 §05:54 "PER 25+ 멀티플 과열 / 12 이하 매수 우호".
+  const fwdPER = dv(derived, 'NASDAQ_FORWARD_PER');
+  if (fwdPER !== null && fwdPER >= 25) {
+    overheatFlags.push(`PER ${fwdPER.toFixed(1)}+ 멀티플 과열 (video6 §"좋은 가격")`);
+  }
+  if (fwdPER !== null && fwdPER <= 12) {
+    reasons.push(`✓ PER ${fwdPER.toFixed(1)} ≤ 12 매수 우호 (video6 §05:54)`);
+    met += 1;
+  }
+
   // ★ === 29차 P1-C #7+#8+#10: NASDAQ 차트 패턴 overheat 가산 ===
   const wkBearAtSupport = dv(derived, 'NASDAQ_WEEKLY_BEAR_STREAK_AT_SUPPORT');
   if (wkBearAtSupport !== null && wkBearAtSupport >= 2) {
@@ -1268,6 +1279,35 @@ function kospiSignal(
     volumeConfirm === 1 ? 1 : 0,
     (fxLevel !== null && fxLevel >= 1) ? 1 : 0,
   ].reduce((a, b) => a + b, 0);
+
+  // ★ === 29차 P1-D #12: KOSPI_MONTHLY_BEAR_COVER_FLAG ===
+  // stt_kospi §03:28 "직전 월봉 음봉 5%+ 후 현재 월봉이 직전 시가 회복 = 매수 신호".
+  const monthlyCover = dv(derived, 'KOSPI_MONTHLY_BEAR_COVER_FLAG');
+  if (monthlyCover === 1) {
+    reasons.push('✓ 월봉 회복 (직전 음봉 5%+ → 현재 월봉 시가 돌파, stt_kospi §03:28)');
+    met += 1;
+  }
+
+  // ★ === 29차 P1-D #13: KOSPI_FOREIGN_STREAK_DAYS + OVERSELL_30T ===
+  // stt_kospi §3-1 "외국인 5일+ 연속 매수 = 추세 복귀 / 60D 누적 -30조 = 공황 매도".
+  const foreignStreakDays = dv(derived, 'KOSPI_FOREIGN_STREAK_DAYS');
+  if (foreignStreakDays !== null && foreignStreakDays >= 5) {
+    reasons.push(`✓ 외국인 ${foreignStreakDays}일 연속 순매수 (stt_kospi §3-1 "추세 복귀")`);
+    met += 1;
+  }
+  const oversell30T = dv(derived, 'KOSPI_FOREIGN_OVERSELL_30T_FLAG');
+  if (oversell30T === 1) {
+    reasons.push('✓ 외국인 60D 누적 -30조 매도 — 반발 후보 (stt_kospi §3-1)');
+    met += 1;
+  }
+
+  // ★ === 29차 P1-D #14: KRW_FX_REVERSAL_TRIGGER ===
+  // stt_kospi §11:39 "환율 1480↓ 5일 연속 + 외인 복귀 streak ≥+5 = 환율 반전 + 외인 복귀 정합".
+  const fxReversal = dv(derived, 'KRW_FX_REVERSAL_TRIGGER');
+  if (fxReversal === 1) {
+    reasons.push('✓ 환율 반전 + 외인 복귀 정합 (stt_kospi §11:39)');
+    met += 1;
+  }
 
   // ★ === 29차 P1-B #5: KOSPI_RECOVERY_3AXIS_LEVEL gate 강화 ===
   // stt_kospi §05:35 "3축 동시 + 연속일수 = 진짜 추세 전환".

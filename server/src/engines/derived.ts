@@ -113,6 +113,8 @@ export async function computeDerived(
     etfInflowTheme?: string;
     // 21차 Phase 2#11: 지정학 카운트다운 이벤트
     geopoliticalCountdown?: Array<{ event: string; targetDate: string }>;
+    // 29차 P1-D #11: KOSPI Forward PER 수동 입력
+    kospiForwardPER?: number | null;
   },
 ): Promise<Record<string, DerivedIndicator>> {
   const d: Record<string, DerivedIndicator> = {};
@@ -6276,6 +6278,121 @@ export async function computeDerived(
         formula: `${detected ? '🔴 쌍봉 감지' : '⚪ 미감지'}. ${detail}. video3 §13:38 "이중천정".`,
       };
     }
+  } catch { void 0; }
+
+  // ★ === 29차 P1-D #11: NASDAQ_FORWARD_PER + KOSPI_FORWARD_PER ===
+  //   video6 §05:54 "PER 25+ 멀티플 과열 / 12 이하 매수 우호".
+  //   NASDAQ: ^NDX → ^IXIC → QQQ 순서로 forwardPE 시도.
+  //   KOSPI: 자동 fetch 어려워 manualInputs.kospiForwardPER 폴백.
+  try {
+    const { fetchYahooForwardPE } = await import('../collectors/yahoo');
+    const ndxResult = await fetchYahooForwardPE(['^NDX', '^IXIC', 'QQQ']).catch(() => null);
+    if (ndxResult !== null) {
+      const per = ndxResult.forwardPE;
+      let level: number;
+      let label: string;
+      if (per >= 25) { level = -1; label = `🔴 PER ${per.toFixed(1)} ≥ 25 멀티플 과열 (video6 §"좋은 가격")`; }
+      else if (per <= 12) { level = 1; label = `🟢 PER ${per.toFixed(1)} ≤ 12 매수 우호`; }
+      else { level = 0; label = `⚪ PER ${per.toFixed(1)} 정상 구간`; }
+      d.NASDAQ_FORWARD_PER = {
+        name: 'nasdaq_forward_per',
+        value: per,
+        date: today(),
+        formula: `${ndxResult.ticker} forwardPE = ${per.toFixed(2)}, level=${level}. ${label}. video6 §05:54.`,
+      };
+      // raw 호환 표기
+      raw.PER_NASDAQ = { code: 'PER_NASDAQ', value: per, date: today(), source: 'YAHOO' };
+    }
+  } catch { void 0; }
+  try {
+    const kospiPER = manualInputs?.kospiForwardPER ?? null;
+    if (kospiPER !== null && Number.isFinite(kospiPER)) {
+      let level: number;
+      let label: string;
+      if (kospiPER >= 25) { level = -1; label = `🔴 PER ${kospiPER.toFixed(1)} ≥ 25 멀티플 과열`; }
+      else if (kospiPER <= 12) { level = 1; label = `🟢 PER ${kospiPER.toFixed(1)} ≤ 12 매수 우호`; }
+      else { level = 0; label = `⚪ PER ${kospiPER.toFixed(1)} 정상 구간`; }
+      d.KOSPI_FORWARD_PER = {
+        name: 'kospi_forward_per',
+        value: kospiPER,
+        date: today(),
+        formula: `manual PER ${kospiPER.toFixed(2)}, level=${level}. ${label}. video6 §05:54.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P1-D #12: KOSPI_MONTHLY_BEAR_COVER_FLAG ===
+  //   stt_kospi §03:28 "직전 월봉 음봉 5%+ 후 현재 월봉이 직전 시가 회복 = 매수 신호".
+  try {
+    const monthlyKospi = await fetchYahooOHLC('^KS11', 365 * 2, '1mo');
+    if (monthlyKospi.length >= 2) {
+      const prev = monthlyKospi[monthlyKospi.length - 2];
+      const cur = monthlyKospi[monthlyKospi.length - 1];
+      const prevBear = prev.close < prev.open;
+      const prevDownPct = prev.open > 0 ? Math.abs(prev.close - prev.open) / prev.open * 100 : 0;
+      const recoverFlag = prevBear && prevDownPct >= 5 && cur.close > prev.open;
+      d.KOSPI_MONTHLY_BEAR_COVER_FLAG = {
+        name: 'kospi_monthly_bear_cover_flag',
+        value: recoverFlag ? 1 : 0,
+        date: today(),
+        formula: `직전 월봉 ${prev.open.toFixed(0)}→${prev.close.toFixed(0)} (${prevBear ? '음봉' : '양봉'}, ${prevDownPct.toFixed(2)}%) / 현재 월봉 close ${cur.close.toFixed(0)} > prev open ${prev.open.toFixed(0)} = ${cur.close > prev.open}. flag=${recoverFlag ? 1 : 0}. stt_kospi §03:28.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P1-D #13: KOSPI_FOREIGN_STREAK_DAYS + KOSPI_FOREIGN_OVERSELL_30T_FLAG ===
+  //   stt_kospi §3-1 "외국인 5일+ 연속 매수 = 추세 복귀 / 60D 누적 -30조 = 공황 매도".
+  try {
+    const buyStreak = d.KOSPI_FOREIGN_BUY_STREAK?.value ?? 0;
+    const sellStreak = d.KOSPI_FOREIGN_SELL_STREAK?.value ?? 0;
+    const signedStreak = buyStreak > 0 ? buyStreak : (sellStreak > 0 ? -sellStreak : 0);
+    d.KOSPI_FOREIGN_STREAK_DAYS = {
+      name: 'kospi_foreign_streak_days',
+      value: signedStreak,
+      date: today(),
+      formula: `signed streak = ${signedStreak} (buy=${buyStreak}, sell=${sellStreak}). stt_kospi §3-1 "5일+ 연속 = 추세".`,
+    };
+    // 60D 누적 매도 공황 — 일별 외국인 net 적립.
+    // krx-flow.ts 의 summary 가 이미 net20D 만 제공. summary.days(20D) 의 실시간 추가 + history-store('derived','KOSPI_FOREIGN_NET_DAILY') 누적으로 60D 윈도우 산출.
+    let net60D: number | null = null;
+    try {
+      const flowDaysRaw = await fetchKrxInvestorFlow('KOSPI');
+      // 모든 fetched 일자 history-store 에 upsert (안전 적립).
+      for (const fd of flowDaysRaw) {
+        await writeHistoryPoint('derived', 'KOSPI_FOREIGN_NET_DAILY', fd.foreign, fd.date);
+      }
+      const dailyHist = await readHistory('derived', 'KOSPI_FOREIGN_NET_DAILY').catch(() => [] as Array<{date:string; value:number}>);
+      const last60 = dailyHist.slice(-60).map((p) => p.value);
+      if (last60.length > 0) {
+        net60D = last60.reduce((s, v) => s + v, 0);
+      }
+    } catch { void 0; }
+    const oversellFlag = (net60D !== null && net60D <= -300000) ? 1 : 0; // 30조 = 300,000 억
+    d.KOSPI_FOREIGN_OVERSELL_30T_FLAG = {
+      name: 'kospi_foreign_oversell_30t_flag',
+      value: oversellFlag,
+      date: today(),
+      formula: `60D 누적 외국인 순매수 ${net60D !== null ? Math.round(net60D/10000)+'조' : 'n/a'} ≤ -30조 ? ${oversellFlag === 1 ? '🔴 공황 매도' : '⚪ 미발동'}. stt_kospi §3-1.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P1-D #14: KRW_FX_REVERSAL_TRIGGER ===
+  //   stt_kospi §11:39 "환율 1480↓ 5일 연속 + 외인 복귀 streak ≥+5 = 환율 반전 + 외인 복귀 정합".
+  try {
+    const usdkrwHist = await readHistory('yahoo', 'USDKRW').catch(() => [] as Array<{date:string; value:number}>);
+    let fx5DOk = 0;
+    if (usdkrwHist.length >= 5) {
+      const last5 = usdkrwHist.slice(-5).map((p) => p.value);
+      fx5DOk = last5.every((v) => v <= 1480) ? 1 : 0;
+    }
+    const buyStreak = d.KOSPI_FOREIGN_BUY_STREAK?.value ?? 0;
+    const flag = (fx5DOk === 1 && buyStreak >= 5) ? 1 : 0;
+    d.KRW_FX_REVERSAL_TRIGGER = {
+      name: 'krw_fx_reversal_trigger',
+      value: flag,
+      date: today(),
+      formula: `USDKRW 5일 연속 ≤1480 = ${fx5DOk}, 외인 buyStreak ${buyStreak}≥5 = ${buyStreak >= 5}. flag=${flag}. stt_kospi §11:39 "환율 반전 + 외인 복귀".`,
+    };
   } catch { void 0; }
 
   return d;

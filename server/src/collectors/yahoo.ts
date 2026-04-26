@@ -292,3 +292,34 @@ export async function fetchYahooOHLC(
   log.warn({ symbol, days, interval, error: serializeError(lastError) }, 'yahoo OHLC fetch failed');
   return [];
 }
+
+/**
+ * ★ 29차 P1-D #11: Yahoo Finance defaultKeyStatistics.forwardPE 수집.
+ *   ticker 우선순위로 시도 (^NDX, ^IXIC, QQQ 등 ETF proxy fallback).
+ *   crumb 인증 필요. 실패 시 null.
+ */
+export async function fetchYahooForwardPE(tickers: string[]): Promise<{ ticker: string; forwardPE: number } | null> {
+  const { getYahooCrumb, invalidateYahooCrumb } = await import('../utils/yahoo-auth');
+  for (const ticker of tickers) {
+    try {
+      const auth = await getYahooCrumb();
+      if (!auth) return null;
+      const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=defaultKeyStatistics,summaryDetail&crumb=${encodeURIComponent(auth.crumb)}`;
+      const { data } = await axios.get(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json', Cookie: auth.cookie },
+        timeout: 10000,
+      });
+      const dks = data?.quoteSummary?.result?.[0]?.defaultKeyStatistics;
+      const sd = data?.quoteSummary?.result?.[0]?.summaryDetail;
+      const fpeRaw = dks?.forwardPE?.raw ?? dks?.forwardPE ?? sd?.forwardPE?.raw ?? sd?.forwardPE;
+      if (typeof fpeRaw === 'number' && Number.isFinite(fpeRaw) && fpeRaw > 0) {
+        return { ticker, forwardPE: parseFloat(fpeRaw.toFixed(2)) };
+      }
+    } catch (error: any) {
+      if (error?.response?.status === 401) invalidateYahooCrumb();
+      log.warn({ ticker, error: serializeError(error) }, 'yahoo forwardPE fetch failed');
+    }
+    await new Promise((rs) => setTimeout(rs, 150));
+  }
+  return null;
+}
