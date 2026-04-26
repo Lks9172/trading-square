@@ -3483,21 +3483,26 @@ export async function computeDerived(
     else if (above200 === 1 && disp !== null && disp >= 15) dailyOk = 0; // 과열 근접
     else if (above200 === 0 && disp !== null && disp > -20) dailyOk = 0; // 분할매수 구간
     else if (above200 === 0 && disp !== null && disp <= -20) dailyOk = -1;
-    const score = monthlyOk + weeklyOk + dailyOk;
+    // 20차 E2: 분기봉(quarterly) 축 추가. video3·video2·stt_kospi §"연→반기→분기→월→주→일" 정합.
+    // 분기봉 윗꼬리 ≥40% = 분기 매도 우세 → 분기 축 -1, 아니면 +1.
+    const quarterWick = d.KOSPI_QUARTERLY_UPPER_WICK_PCT?.value ?? null;
+    const quarterlyOk = quarterWick === null ? 0 : (quarterWick >= 40 ? -1 : 1);
+    const score = monthlyOk + weeklyOk + dailyOk + quarterlyOk;
     let label: string;
-    if (score >= 3) label = '완전 정합 상승 (월/주/일 모두 강세)';
+    if (score >= 3) label = '완전 정합 상승 (분기/월/주/일 모두 강세)';
     else if (score >= 1) label = '혼재-상승 기조';
     else if (score >= -1) label = '중립';
     else if (score >= -3) label = '혼재-약세 기조';
-    else label = '구조적 약세 (3프레임 동시 경고)';
+    else label = '구조적 약세 (4프레임 동시 경고)';
     d.NASDAQ_MULTIFRAME_ALIGNMENT = {
       name: 'nasdaq_multiframe_alignment',
       value: score,
       date: today(),
       formula:
+        `분기 ${quarterlyOk === 1 ? '정상' : quarterlyOk === -1 ? '윗꼬리' : 'n/a'}[${quarterlyOk}] + ` +
         `월봉 ${monthlyOk === 1 ? '정상' : monthlyOk === -1 ? '소진' : 'n/a'}[${monthlyOk}] + ` +
         `주봉 ${weeklyOk === 1 ? '정상' : weeklyOk === -1 ? '반전' : 'n/a'}[${weeklyOk}] + ` +
-        `일봉 ${dailyOk === 1 ? '200DMA 위' : dailyOk === 0 ? '분할매수/과열근접' : '깊은 하락'}[${dailyOk}] = ${score} → ${label}. video3 §차트 순서.`,
+        `일봉 ${dailyOk === 1 ? '200DMA 위' : dailyOk === 0 ? '분할매수/과열근접' : '깊은 하락'}[${dailyOk}] = ${score} → ${label}. video3 §"연→반기→분기→월→주→일".`,
     };
   } catch { /* skip */ }
 
@@ -3810,9 +3815,17 @@ export async function computeDerived(
     const policyDir = raw.POLICY_DIRECTION?.value ?? null;
     axes.policy = policyDir === null ? 0 : (policyDir > 0 ? 1 : policyDir < 0 ? -1 : 0);
 
-    // 4) 지정학 — HORMUZ_CHAIN_SCORE 역방향 (악화=axis down)
+    // 4) 지정학 — HORMUZ_CHAIN_SCORE 역방향 (악화=axis down).
+    // 20차 A: video4 §6:23 "단기 부정 / 장기 우호" — long horizon 사용자는 부호 반전.
     const geo = d.HORMUZ_CHAIN_SCORE?.value ?? null;
-    axes.geo = geo === null ? 0 : (geo <= 0 ? 1 : geo >= 2 ? -1 : 0);
+    const horizon = manualInputs?.investmentHorizon ?? 'medium';
+    if (geo === null) axes.geo = 0;
+    else if (horizon === 'long') {
+      // 장기: geo 악화는 단기에 약세지만 금리인하 명분으로 우호 → 약하게만 음수
+      axes.geo = geo <= 0 ? 1 : geo >= 2 ? 0 : 0; // 단기 위험을 장기에선 무시
+    } else {
+      axes.geo = geo <= 0 ? 1 : geo >= 2 ? -1 : 0;
+    }
 
     // 5) 모멘텀 — NASDAQ_RSI_14. 19차 P2#11: RSI 70+ 도 +1 (video1 §확산 "더 오를 수 있음").
     //    단 RSI ≥85 극과매수만 0 처리 (반전 위험).
@@ -4454,6 +4467,26 @@ export async function computeDerived(
       date: today(),
       formula: `≥$500k 단일 매수 ${lb}건 24h. top amounts: $${(ins?.largeBuyTopAmounts ?? []).slice(0, 3).map((a) => Math.round(a / 1000) + 'k').join(', ') || '-'}. 노션 §OpenInsider.`,
     };
+  } catch { void 0; }
+
+  // === 20차 노션 A5: TradingEconomics stream 신선도 + 24h 카운트 ===
+  try {
+    const { fetchTeStreamLatest } = await import('../collectors/te-stream');
+    const te = await fetchTeStreamLatest();
+    if (te) {
+      d.TE_STREAM_MINUTES_AGO = {
+        name: 'te_stream_minutes_ago',
+        value: te.minutesAgo,
+        date: today(),
+        formula: `TE stream 최신 "${te.latestHeadline.slice(0, 60)}..." (${te.minutesAgo}분 전, 24h ${te.count24h}건). 노션 §전세계 경제 뉴스.`,
+      };
+      d.TE_STREAM_COUNT_24H = {
+        name: 'te_stream_count_24h',
+        value: te.count24h,
+        date: today(),
+        formula: `TE stream 24h 헤드라인 ${te.count24h}건. 폭증 시 매크로 노이즈 강함.`,
+      };
+    }
   } catch { void 0; }
 
   // === 19차 P3#16: KCIF 최신 토픽 라벨 ===

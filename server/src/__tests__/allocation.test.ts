@@ -137,4 +137,56 @@ describe('computeAllocation', () => {
     const sum = Object.values(result.allocations).reduce((a, b) => a + b, 0);
     expect(sum).toBe(100);
   });
+
+  it('disables korea allocation when includeKR=false', () => {
+    const signals = makeSignals({ KOSPI: 'BUY' });
+    const result = computeAllocation(
+      'NEUTRAL',
+      60,
+      signals,
+      makeDerived({}),
+      makeRaw({}),
+      'long',
+      undefined,
+      { leverageEnabled: true, includeKR: false },
+    );
+    expect(result.allocations.korea).toBe(0);
+    expect(result.allocations.cash).toBeGreaterThan(0);
+  });
+
+  it('disables leverage allocation when leverageEnabled=false', () => {
+    const signals = makeSignals({ LEVERAGE: 'BUY' });
+    const result = computeAllocation(
+      'PANIC_BUT_OK',
+      30,
+      signals,
+      makeDerived({}),
+      makeRaw({}),
+      'long',
+      undefined,
+      { leverageEnabled: false, includeKR: true },
+    );
+    expect(result.leverageAllowed).toBe(false);
+    expect(result.allocations.leverage).toBe(0);
+    expect(result.allocations.nasdaq).toBeGreaterThan(0);
+  });
+
+  it('returns explanation with signal and defense adjustments when requested', () => {
+    const signals = makeSignals({ NASDAQ: 'STRONG_BUY', GOLD: 'BUY' });
+    const result = computeAllocation(
+      'RISK_ON',
+      80,
+      signals,
+      makeDerived({ OVERHEATED: 1 }),
+      makeRaw({}),
+      'long',
+      undefined,
+      { leverageEnabled: true, includeKR: true },
+      { includeExplanation: true },
+    );
+    expect(result.explanation?.signalAdjustments.some((item) => item.asset === 'NASDAQ')).toBe(true);
+    expect(result.explanation?.defenseMode).toBe('overheated');
+    expect(result.explanation?.adjustments.some((item) => item.step === 'defense-mode')).toBe(true);
+    expect(result.explanation?.finalAllocations).toEqual(result.allocations);
+  });
 });

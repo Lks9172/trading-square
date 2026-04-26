@@ -307,12 +307,15 @@ export function computeAllocation(
     derived.BOND_VIGILANTE_WARNING?.value === 1;
   const fiscalStressHard = derived.FISCAL_STRESS_HARD?.value === 1;
   const overheated = derived.OVERHEATED?.value === 1;
+  // 20차 E3: GOLDILOCKS_ZONE = -1 (recession 신호) — fiscal/overheated 외 추가 방어 모드.
+  const goldilocksRecession = derived.GOLDILOCKS_ZONE?.value === -1;
 
-  type DefenseMode = 'fiscal-hard' | 'fiscal' | 'overheated' | 'none';
+  type DefenseMode = 'fiscal-hard' | 'fiscal' | 'overheated' | 'goldilocks-bad' | 'none';
   const defenseMode: DefenseMode =
     fiscalStressHard ? 'fiscal-hard' :
     fiscalStress     ? 'fiscal' :
     overheated       ? 'overheated' :
+    goldilocksRecession ? 'goldilocks-bad' :
                        'none';
   if (explanation) {
     explanation.defenseMode = defenseMode;
@@ -366,6 +369,27 @@ export function computeAllocation(
     explanation?.adjustments.push({
       step: 'defense-mode',
       detail: 'defenseMode=overheated -> shifted risk assets into cash/gold',
+      mode: defenseMode,
+      amount: actual,
+    });
+  } else if (defenseMode === 'goldilocks-bad') {
+    // 20차 E3: GOLDILOCKS_ZONE = -1 — recession 신호. 위험자산 -10 → cash/gold 이관.
+    // fiscal/overheated 만큼 강하지 않지만 일반 모드보다 보수적.
+    const reduceKeys = ['nasdaq', 'leverage', 'korea', 'emerging'];
+    const available = reduceKeys.reduce((s, k) => s + (base[k] || 0), 0);
+    const desired = 10;
+    const actual = Math.min(available, desired);
+    if (available > 0 && actual > 0) {
+      for (const k of reduceKeys) {
+        const v = base[k] || 0;
+        base[k] = Math.max(0, v - (v / available) * actual);
+      }
+    }
+    base.cash = (base.cash || 0) + actual * 0.7;
+    base.gold = (base.gold || 0) + actual * 0.3;
+    explanation?.adjustments.push({
+      step: 'defense-mode',
+      detail: 'defenseMode=goldilocks-bad -> recession 신호로 위험자산 -10',
       mode: defenseMode,
       amount: actual,
     });

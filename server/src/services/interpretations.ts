@@ -309,6 +309,16 @@ export function interpretDerived(
   }
   // 19차 신규
   // 20차 신규
+  if (key === 'TE_STREAM_MINUTES_AGO') {
+    if (value <= 30) return '🟢 TE 헤드라인 30분 이내 — 시장 정보 즉시성';
+    if (value >= 360) return '🟡 TE 헤드라인 6시간+ 공백';
+    return null;
+  }
+  if (key === 'TE_STREAM_COUNT_24H') {
+    if (value >= 40) return '🔴 TE 24h 헤드라인 40건+ — 매크로 노이즈 폭증';
+    if (value >= 20) return '🟡 TE 24h 헤드라인 20-40건';
+    return null;
+  }
   if (key === 'KOSPI_QUARTERLY_UPPER_WICK_PCT') {
     if (value >= 80) return '🔴 분기봉 윗꼬리 80%+ — stt_kospi §1부 "위로 찔렀다 내려옴" 강한 매도 흔적';
     if (value >= 40) return '🟠 분기봉 윗꼬리 40%+ — 매도 우세 흔적';

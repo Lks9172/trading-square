@@ -15,8 +15,7 @@
  */
 
 import { SystemSnapshot } from '../types/indicators';
-import { readInvestmentPlan } from './investment-plan';
-import { appendTradeLog } from './investment-plan';
+import { readInvestmentPlan, appendTradeLog, readRecentTradeLog } from './investment-plan';
 
 export interface WeeklyReport {
   generatedAt: string;
@@ -95,11 +94,65 @@ export function buildWeeklyReport(snapshot: SystemSnapshot): WeeklyReport {
   };
 }
 
+// 20차 D1: 7일간 복기 빈도 + 24h impulsive trade 감지
+export interface PlanDiscipline {
+  reviewsLast7d: number;
+  reviewWarning: string | null;
+  impulsiveTrades24h: number;
+  impulsiveWarning: string | null;
+}
+
+export async function computePlanDiscipline(): Promise<PlanDiscipline> {
+  const log = await readRecentTradeLog(200);
+  const cutoff7d = Date.now() - 7 * 86400000;
+  const cutoff24h = Date.now() - 86400000;
+  const reviews7d = log.filter((e) => {
+    const t = new Date(e.ts).getTime();
+    return Number.isFinite(t) && t >= cutoff7d && (e.kind === 'observation' || e.kind === 'user_action');
+  });
+  // impulsive: 24h 내 동일 자산에 reverse trade (buy→sell→buy)
+  const recent24h = log.filter((e) => {
+    const t = new Date(e.ts).getTime();
+    return Number.isFinite(t) && t >= cutoff24h;
+  });
+  const byAsset = new Map<string, string[]>();
+  for (const e of recent24h) {
+    if (!e.asset || !e.to) continue;
+    if (!byAsset.has(e.asset)) byAsset.set(e.asset, []);
+    byAsset.get(e.asset)!.push(e.to);
+  }
+  let impulsive = 0;
+  for (const [, trail] of byAsset.entries()) {
+    if (trail.length < 3) continue;
+    // 단순 휴리스틱: 같은 자산에 3+ 변경
+    impulsive++;
+  }
+  return {
+    reviewsLast7d: reviews7d.length,
+    reviewWarning: reviews7d.length === 0
+      ? '⚠️ 7일간 복기 0회 — 노션 §"복기하고 공부" 정합 위반'
+      : reviews7d.length < 3
+        ? '🟡 7일간 복기 < 3회 — 빈도 부족'
+        : null,
+    impulsiveTrades24h: impulsive,
+    impulsiveWarning: impulsive >= 1
+      ? `⚠️ 24h 내 ${impulsive}개 자산에서 빈번한 변경 — 노션 §"성급한 매매" 가드`
+      : null,
+  };
+}
+
 /** 현재 allocation vs InvestmentPlan 규칙 비교 — 위반 목록 반환 */
 export async function detectRuleViolations(snapshot: SystemSnapshot): Promise<string[]> {
   const plan = await readInvestmentPlan();
   const alloc = snapshot.allocation?.allocations || {};
   const violations: string[] = [];
+
+  // 20차 D1: 복기 빈도 + impulsive 가드 통합
+  try {
+    const discipline = await computePlanDiscipline();
+    if (discipline.reviewWarning) violations.push(discipline.reviewWarning);
+    if (discipline.impulsiveWarning) violations.push(discipline.impulsiveWarning);
+  } catch { /* skip */ }
 
   const leverage = alloc.leverage ?? 0;
   if (leverage > plan.leverageMaxPct) {

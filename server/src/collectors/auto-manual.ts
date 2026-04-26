@@ -2,27 +2,100 @@ import axios from 'axios';
 import XLSX from 'xlsx';
 import { readHistory } from '../state/history-store';
 import { fetchFredHistory } from './fred';
+import { childLogger, serializeError } from '../services/logger';
+import { readSourceCacheWithin, writeSourceCache } from '../services/source-cache';
+import {
+  deriveCBBuyingFromSeries,
+  derivePolicyDirectionFromSeries,
+  ManualInputsState,
+} from '../services/policy-inputs';
 
-interface AutoManualInputs {
-  policyDirection: number;
-  geoRisk: number;
-  cbBuying: boolean;
-  ismPmi: number | null;
+const log = childLogger({ module: 'collector.auto-manual' });
+
+type AutoManualInputs = ManualInputsState;
+
+const GPR_CACHE_KEY = 'auto-manual-gpr';
+const GPR_STALE_MS = 30 * 24 * 60 * 60 * 1000;
+const ISM_OFFICIAL_CACHE_KEY = 'auto-manual-ism-official';
+const ISM_OFFICIAL_FRESH_MS = 20 * 24 * 60 * 60 * 1000;
+const ISM_OFFICIAL_STALE_MS = 45 * 24 * 60 * 60 * 1000;
+
+function getFredHistoryFreshnessMs(seriesId: string): number {
+  if (['ICSA'].includes(seriesId)) return 10 * 24 * 60 * 60 * 1000;
+  if (['INDPRO', 'PAYEMS'].includes(seriesId)) return 45 * 24 * 60 * 60 * 1000;
+  return 7 * 24 * 60 * 60 * 1000;
+}
+
+async function fetchFredHistoryWithFallback(seriesId: string, apiKey: string, limit: number) {
+  const hist = await readHistory('fred', seriesId);
+  if (hist.length > 0) {
+    const latestDateMs = new Date(hist[hist.length - 1].date).getTime();
+    const freshnessMs = getFredHistoryFreshnessMs(seriesId);
+    if (Number.isFinite(latestDateMs) && Date.now() - latestDateMs <= freshnessMs) {
+      return hist
+        .slice(-limit)
+        .reverse()
+        .map((point) => ({
+          code: seriesId,
+          value: point.value,
+          date: point.date,
+          source: 'FRED' as const,
+        }));
+    }
+  }
+
+  try {
+    return await fetchFredHistory(seriesId, apiKey, limit);
+  } catch (error) {
+    if (!hist.length) {
+      throw error;
+    }
+    const fallback = hist
+      .slice(-limit)
+      .reverse()
+      .map((point) => ({
+        code: seriesId,
+        value: point.value,
+        date: point.date,
+        source: 'FRED' as const,
+      }));
+    log.warn(
+      {
+        seriesId,
+        limit,
+        fallbackCount: fallback.length,
+        latestDate: fallback[0]?.date ?? null,
+        error: serializeError(error),
+      },
+      'auto input fred history fetch failed, using stored history fallback',
+    );
+    return fallback;
+  }
 }
 
 async function fetchGPR(): Promise<number> {
-  const url = 'https://www.matteoiacoviello.com/gpr_files/data_gpr_daily_recent.xls';
-  const { data } = await axios.get(url, { responseType: 'arraybuffer', timeout: 30000 });
-  const wb = XLSX.read(data, { type: 'buffer' });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+  try {
+    const url = 'https://www.matteoiacoviello.com/gpr_files/data_gpr_daily_recent.xls';
+    const { data } = await axios.get(url, { responseType: 'arraybuffer', timeout: 30000 });
+    const wb = XLSX.read(data, { type: 'buffer' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-  const gprColIdx = 2;
-  const lastRows = rows.slice(-30).filter((r) => typeof r[gprColIdx] === 'number');
-  if (!lastRows.length) return 100;
+    const gprColIdx = 2;
+    const lastRows = rows.slice(-30).filter((r) => typeof r[gprColIdx] === 'number');
+    if (!lastRows.length) return 100;
 
-  const avg = lastRows.reduce((sum, r) => sum + r[gprColIdx], 0) / lastRows.length;
-  return avg;
+    const avg = lastRows.reduce((sum, r) => sum + r[gprColIdx], 0) / lastRows.length;
+    await writeSourceCache(GPR_CACHE_KEY, { value: avg });
+    return avg;
+  } catch (error) {
+    const cached = await readSourceCacheWithin<{ value: number }>(GPR_CACHE_KEY, GPR_STALE_MS);
+    if (cached) {
+      log.warn({ ageMs: cached.ageMs, updatedAt: cached.updatedAt, error: serializeError(error) }, 'gpr fetch failed, serving cached value');
+      return cached.value.value;
+    }
+    throw error;
+  }
 }
 
 function gprToGeoRisk(gpr: number): number {
@@ -35,61 +108,17 @@ function gprToGeoRisk(gpr: number): number {
 
 async function computePolicyDirection(apiKey: string): Promise<number> {
   const [effrHistory, t10y2yHistory, icsaHistory] = await Promise.all([
-    fetchFredHistory('EFFR', apiKey, 60),
-    fetchFredHistory('T10Y2Y', apiKey, 10),
-    fetchFredHistory('ICSA', apiKey, 10),
+    fetchFredHistoryWithFallback('EFFR', apiKey, 60),
+    fetchFredHistoryWithFallback('T10Y2Y', apiKey, 10),
+    fetchFredHistoryWithFallback('ICSA', apiKey, 10),
   ]);
-
-  if (effrHistory.length < 30) return 0;
-
-  const recent = effrHistory.slice(0, 10);
-  const older = effrHistory.slice(20, 30);
-  const recentAvg = recent.reduce((s, p) => s + p.value, 0) / recent.length;
-  const olderAvg = older.reduce((s, p) => s + p.value, 0) / older.length;
-  const effrDelta = recentAvg - olderAvg;
-
-  const yieldCurve = t10y2yHistory.length > 0 ? t10y2yHistory[0].value : 0;
-
-  // ICSA(신규 실업수당) 추세: 증가 = 고용 악화 = 정책 완화 압력
-  let icsaPressure = 0;
-  if (icsaHistory.length >= 8) {
-    const icsaRecent = icsaHistory.slice(0, 4).reduce((s, p) => s + p.value, 0) / 4;
-    const icsaOlder = icsaHistory.slice(4, 8).reduce((s, p) => s + p.value, 0) / 4;
-    const delta = (icsaRecent - icsaOlder) / icsaOlder;
-    if (delta > 0.05) icsaPressure = 1;
-    else if (delta > 0.02) icsaPressure = 0.5;
-    else if (delta < -0.02) icsaPressure = -0.5;
-  }
-
-  let score = 0;
-  if (effrDelta < -0.3) score = 2;
-  else if (effrDelta < -0.1) score = 1;
-  else if (effrDelta > 0.3 && yieldCurve < -0.5) score = -2;
-  else if (effrDelta > 0.1) score = -1;
-
-  score += icsaPressure;
-  return Math.max(-2, Math.min(2, Math.round(score)));
+  return derivePolicyDirectionFromSeries(effrHistory, t10y2yHistory, icsaHistory);
 }
 
 async function detectCBBuying(): Promise<boolean> {
   const goldHistory = await readHistory('yahoo', 'GOLD');
   const dxyHistory = await readHistory('yahoo', 'DXY');
-
-  if (goldHistory.length < 60 || dxyHistory.length < 60) return true;
-
-  const goldRecent = goldHistory.slice(-20);
-  const goldOlder = goldHistory.slice(-60, -40);
-  const goldRecentAvg = goldRecent.reduce((s, p) => s + p.value, 0) / goldRecent.length;
-  const goldOlderAvg = goldOlder.reduce((s, p) => s + p.value, 0) / goldOlder.length;
-  const goldUp = goldRecentAvg > goldOlderAvg * 1.02;
-
-  const dxyRecent = dxyHistory.slice(-20);
-  const dxyOlder = dxyHistory.slice(-60, -40);
-  const dxyRecentAvg = dxyRecent.reduce((s, p) => s + p.value, 0) / dxyRecent.length;
-  const dxyOlderAvg = dxyOlder.reduce((s, p) => s + p.value, 0) / dxyOlder.length;
-  const dxyStrongOrFlat = dxyRecentAvg >= dxyOlderAvg * 0.98;
-
-  return goldUp && dxyStrongOrFlat;
+  return deriveCBBuyingFromSeries([...goldHistory].reverse(), [...dxyHistory].reverse());
 }
 
 /**
@@ -104,6 +133,19 @@ async function fetchISMFromInvesting(): Promise<{ value: number; asOf: string } 
   const UA =
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
   try {
+    const freshCached = await readSourceCacheWithin<{ value: number; asOf: string }>(
+      ISM_OFFICIAL_CACHE_KEY,
+      ISM_OFFICIAL_FRESH_MS,
+    );
+    if (freshCached) {
+      log.info({
+        ageMs: freshCached.ageMs,
+        updatedAt: freshCached.updatedAt,
+        asOf: freshCached.value.asOf,
+      }, 'ism official source-fresh cache hit');
+      return freshCached.value;
+    }
+
     const { data: html } = await axios.get<string>(
       'https://www.investing.com/economic-calendar/ism-manufacturing-pmi-173',
       {
@@ -122,8 +164,15 @@ async function fetchISMFromInvesting(): Promise<{ value: number; asOf: string } 
     if (!m) return null;
     const value = parseFloat(m[2]);
     if (!Number.isFinite(value) || value < 20 || value > 80) return null;
-    return { value, asOf: m[1] };
-  } catch {
+    const parsed = { value, asOf: m[1] };
+    await writeSourceCache(ISM_OFFICIAL_CACHE_KEY, parsed);
+    return parsed;
+  } catch (error) {
+    const cached = await readSourceCacheWithin<{ value: number; asOf: string }>(ISM_OFFICIAL_CACHE_KEY, ISM_OFFICIAL_STALE_MS);
+    if (cached) {
+      log.warn({ ageMs: cached.ageMs, updatedAt: cached.updatedAt, error: serializeError(error) }, 'ism official fetch failed, serving cached value');
+      return cached.value;
+    }
     return null;
   }
 }
@@ -137,9 +186,9 @@ async function fetchISMFromInvesting(): Promise<{ value: number; asOf: string } 
 async function fetchISMProxy(apiKey: string): Promise<number | null> {
   try {
     const [indproHist, icsaHist, payemsHist] = await Promise.all([
-      fetchFredHistory('INDPRO', apiKey, 6),
-      fetchFredHistory('ICSA', apiKey, 10),
-      fetchFredHistory('PAYEMS', apiKey, 6),
+      fetchFredHistoryWithFallback('INDPRO', apiKey, 6),
+      fetchFredHistoryWithFallback('ICSA', apiKey, 10),
+      fetchFredHistoryWithFallback('PAYEMS', apiKey, 6),
     ]);
 
     if (indproHist.length < 3) return null;
@@ -182,6 +231,7 @@ async function fetchISMProxy(apiKey: string): Promise<number | null> {
 }
 
 export async function computeAutoManualInputs(apiKey: string): Promise<AutoManualInputs> {
+  const startedAt = Date.now();
   const [gpr, policyDirection, cbBuying, ismOfficial, ismProxy] = await Promise.allSettled([
     fetchGPR(),
     computePolicyDirection(apiKey),
@@ -197,6 +247,26 @@ export async function computeAutoManualInputs(apiKey: string): Promise<AutoManua
   } else if (ismProxy.status === 'fulfilled') {
     ismPmi = ismProxy.value;
   }
+
+  if (gpr.status === 'rejected') log.warn({ input: 'geoRisk', error: serializeError(gpr.reason) }, 'auto input source failed');
+  if (policyDirection.status === 'rejected') log.warn({ input: 'policyDirection', error: serializeError(policyDirection.reason) }, 'auto input source failed');
+  if (cbBuying.status === 'rejected') log.warn({ input: 'cbBuying', error: serializeError(cbBuying.reason) }, 'auto input source failed');
+  if (ismOfficial.status === 'rejected') log.warn({ input: 'ismOfficial', error: serializeError(ismOfficial.reason) }, 'auto input source failed');
+  if (ismProxy.status === 'rejected') log.warn({ input: 'ismProxy', error: serializeError(ismProxy.reason) }, 'auto input source failed');
+
+  log.info({
+    durationMs: Date.now() - startedAt,
+    geoRisk: gpr.status === 'fulfilled' ? gprToGeoRisk(gpr.value) : 2,
+    policyDirection: policyDirection.status === 'fulfilled' ? policyDirection.value : 0,
+    cbBuying: cbBuying.status === 'fulfilled' ? cbBuying.value : true,
+    ismPmi,
+    ismSource:
+      ismOfficial.status === 'fulfilled' && ismOfficial.value
+        ? 'official'
+        : ismProxy.status === 'fulfilled' && ismProxy.value !== null
+          ? 'proxy'
+          : 'default-null',
+  }, 'auto manual inputs computed');
 
   return {
     geoRisk: gpr.status === 'fulfilled' ? gprToGeoRisk(gpr.value) : 2,

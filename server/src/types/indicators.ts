@@ -111,7 +111,7 @@ export interface AllocationPlan {
       after?: number;
       mode?: string;
     }>;
-    defenseMode: 'fiscal-hard' | 'fiscal' | 'overheated' | 'none';
+    defenseMode: 'fiscal-hard' | 'fiscal' | 'overheated' | 'goldilocks-bad' | 'none';
     preNormalize: Record<string, number>;
     finalAllocations: Record<string, number>;
   };

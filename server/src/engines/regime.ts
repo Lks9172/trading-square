@@ -301,6 +301,14 @@ export function classifyRegime(
     regime = 'CAUTION';
   }
 
+  // 20차 E3: GOLDILOCKS_ZONE = -1 (recession 진입 가능성) AND score >= 55 인 경우
+  // RISK_ON 으로 분류되면 안 된다. video4 §매크로 신호등 정합 — 빨간불 영역에서 RISK_ON 차단.
+  const goldilocks = dv(derived, 'GOLDILOCKS_ZONE');
+  if (goldilocks === -1 && (regime === 'RISK_ON' || regime === 'NEUTRAL')) {
+    overrides.push('GOLDILOCKS_ZONE=-1 (recession 신호) -> 최소 CAUTION 강등');
+    regime = 'CAUTION';
+  }
+
   // Fix #4: CREDIT_STRESS_FLAG 소비.
   // HY OAS ≥ 600bp 또는 HYG/IEF z ≤ -2 발동 시 신용시장 스트레스.
   // RISK_ON 은 위험을 감내하는 판단이므로 크레딧 경보가 울리면 NEUTRAL 로 강등.
