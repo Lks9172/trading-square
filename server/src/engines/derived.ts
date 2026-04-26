@@ -4499,10 +4499,10 @@ export async function computeDerived(
 
   // === 21차 P2#10: KOSPI_YEARLY_LOWER_WICK_PCT ===
   // stt_kospi §"계단에 짐 한번 내려놓고" — 연봉 아래꼬리 / 전체폭 비율.
-  // 5% 미만 = 매수 누적 미소화 → 추가 조정 우려.
+  // 5% 미만 = 매수 누적 미소화 → 추가 조정 우려. 200일 이상이면 산출 (year 부분).
   try {
     const ksHist = await fetchYahooHistory('^KS11', 280);
-    if (ksHist.length >= 250) {
+    if (ksHist.length >= 200) {
       const closes = ksHist.map((h) => h.close);
       const yearStart = closes[0];
       const yearMin = Math.min(...closes);
