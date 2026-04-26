@@ -43,7 +43,7 @@ interface Props {
     components: Record<string, number>;
   };
   // 20차 D: 핵심 지표 prominent 노출
-  derived?: Record<string, { value: number | null; interpretation?: string }>;
+  derived?: Record<string, { value: number | null; interpretation?: string; formula?: string }>;
 }
 
 export function RegimeHeader({ regime, derived }: Props) {
@@ -73,6 +73,19 @@ export function RegimeHeader({ regime, derived }: Props) {
           <div className="text-[10px] sm:text-xs text-[var(--muted)]">/ 100</div>
         </div>
       </div>
+
+      {/* 22차 P1#4: 운영자 한마디 회전 인용 (노션 §전하는 말 9단락) */}
+      {(() => {
+        const formula = derived?.OPERATOR_PHILOSOPHY_QUOTE_INDEX?.formula ?? '';
+        const m = formula.match(/오늘의 운영자 한마디: "([^"]+)"/);
+        const short = m ? m[1] : null;
+        if (!short) return null;
+        return (
+          <p className="text-xs text-amber-300/80 italic mb-3" title={formula}>
+            💬 {short} — 자산제곱
+          </p>
+        );
+      })()}
 
       {/* 20차: 핵심 게이지 prominent */}
       <div className="flex flex-wrap gap-2 mb-3">

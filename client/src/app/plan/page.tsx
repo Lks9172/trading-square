@@ -54,6 +54,10 @@ export default async function PlanPage() {
 
   const conviction = snapshot?.derived?.CONVICTION_SCORE_7AXIS?.value ?? null;
   const trancheUsed = snapshot?.meta?.profile?.manualInputs?.trancheUsedPct;
+  // 22차 P1#4: 운영자 한마디 — derived formula 에서 short 추출
+  const quoteFormula = snapshot?.derived?.OPERATOR_PHILOSOPHY_QUOTE_INDEX?.formula ?? '';
+  const shortMatch = quoteFormula.match(/오늘의 운영자 한마디: "([^"]+)"/);
+  const operatorQuote = shortMatch ? { short: shortMatch[1], full: shortMatch[1] } : null;
 
   return (
     <main className="flex-1 p-4 md:p-6 max-w-6xl mx-auto w-full">
@@ -64,6 +68,7 @@ export default async function PlanPage() {
         weeklyText={weeklyData?.text || ''}
         convictionScore={conviction}
         trancheUsedPct={trancheUsed}
+        operatorQuote={operatorQuote}
       />
     </main>
   );

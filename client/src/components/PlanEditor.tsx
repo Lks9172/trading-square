@@ -60,6 +60,8 @@ interface Props {
   // 19차 신규
   convictionScore?: number | null;          // CONVICTION_SCORE_7AXIS (-7~+7)
   trancheUsedPct?: number;
+  // 22차 P1#4: 운영자 한마디 회전
+  operatorQuote?: { short: string; full: string } | null;
 }
 
 // 21차 Phase 1#7: 외부 링크 6대 카테고리로 재구조화 — 노션 카테고리 정합.
@@ -72,15 +74,17 @@ interface LinkGroup {
 const EXTERNAL_LINK_GROUPS: LinkGroup[] = [
   {
     title: '🏛️ 자산제곱 본가 (운영자 시그니처)',
-    hint: '노션 §실전투자 적용 — 운영자 본인 자료',
+    hint: '노션 §실전투자 적용 — 운영자 본인 자료. 비공개 자료실 입장 조건은 운영자 Threads 게시물에서 확인 (본 시스템과는 무관).',
     links: [
       // 21차 P2#17: Threads .net → .com (Meta 도메인 전환 정합)
+      { label: '💬 평생 무료 프로젝트방 (텔레그램)', url: 'https://t.me/+2Qw1cAZTm8FjMGNl' },
       { label: 'Threads @asset.x2', url: 'https://www.threads.com/@asset.x2' },
       { label: '자산제곱 유동성 대시보드', url: 'https://liquidity-dashboard-rho.vercel.app/' },
       { label: '자산제곱 지정학 지도', url: 'https://assetx2-geomap.vercel.app/' },
       { label: '🔒 100명 비공개 자료실', url: 'https://www.threads.com/@asset.x2' },
       { label: '🔒 핵심 전략 구독 자료', url: 'https://naver.me/FxC5ffqp' },
-      { label: '🛒 따뜻한 제곱몰 (MALL²)', url: 'https://www.threads.com/@asset.x2' },
+      // 22차 P1#7: MALL² URL 정정 (Threads → 실제 notion sub-page)
+      { label: '🛒 따뜻한 제곱몰 (MALL²)', url: 'https://resilient-parade-ca9.notion.site/MALL-2e3234508a8980be87b6e9cefae4b203?source=copy_link' },
     ],
   },
   {
@@ -104,6 +108,7 @@ const EXTERNAL_LINK_GROUPS: LinkGroup[] = [
       { label: 'Fidelity Korea Insights', url: 'https://www.fidelity.co.kr/insights/' },
       { label: 'TradingEconomics', url: 'https://tradingeconomics.com/' },
       { label: 'Investing 캘린더 (KR)', url: 'https://kr.investing.com/economic-calendar/' },
+      { label: 'StreetStats M2 vs S&P500', url: 'https://streetstats.finance/liquidity/money/' },
     ],
   },
   {
@@ -153,7 +158,7 @@ const LENSES = [
   { key: 'momentum', label: '⑦ 모멘텀 (MACD / 52W Hi / 멀티프레임)' },
 ];
 
-export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, convictionScore, trancheUsedPct }: Props) {
+export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, convictionScore, trancheUsedPct, operatorQuote }: Props) {
   const [plan, setPlan] = useState<InvestmentPlan | null>(initialPlan);
   const [log, setLog] = useState<TradeLogEntry[]>(initialLog);
   const [savingPlan, setSavingPlan] = useState(false);
@@ -212,9 +217,15 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
         <p className="text-sm text-slate-400 mt-1">
           video1 §5부 — "시스템이 있으면 심리 싸움에서 이길 수 있다"
         </p>
-        {/* 20차 노션 §전하는말 철학 인용 */}
-        <p className="text-xs text-slate-500 mt-1 italic">
-          "투자는 바둑 — 큰 흐름 먼저. 복기하고 공부하면서 실력을 쌓아야 한다." — 노션 §전하는 말
+        {/* 22차 P1#4: 운영자 9단락 회전 인용 (노션 §전하는 말) */}
+        {operatorQuote && (
+          <p className="text-xs text-amber-300/80 mt-1 italic" title={operatorQuote.full}>
+            💬 {operatorQuote.short} — 자산제곱
+          </p>
+        )}
+        {/* 22차 P2#21: 노션 §실전 투자 템플릿 정합 캡션 */}
+        <p className="text-[10px] text-slate-500 mt-1">
+          본 페이지는 노션 §"자산제곱 실전 투자 템플릿"의 디지털 구현체입니다.
         </p>
         {/* 19차 P2#12: 확신 점수 표시 + 미달 시 게이트 경고 */}
         {typeof convictionScore === 'number' && (

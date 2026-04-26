@@ -92,6 +92,16 @@ export function ConvictionPanel({ derived }: Props) {
   const insiderLarge = derived.INSIDER_LARGE_SINGLE_BUY;
   const naveEco = derived.NAVER_ECONOMY_REPORT_DAYS_AGO;
   const ddCrisis = derived.NASDAQ_DRAWDOWN_CRISIS_LEVEL;
+  // 21차 신규
+  const ksLowerWick = derived.KOSPI_YEARLY_LOWER_WICK_PCT;
+  const dcaStag = derived.DCA_STAGE_STAGNATION_COUNT;
+  const krNews = derived.KR_NEWS_TOTAL_COUNT_24H;
+  const krNewsFresh = derived.KR_NEWS_FRESHNESS_MINUTES;
+  const portHoldings = derived.PORTFOLIO_HOLDINGS_TOTAL_PCT;
+  // 22차 신규
+  const regimeFwdRet = derived.REGIME_FORWARD_RETURN_90D_AVG;
+  const sigHitRate = derived.NASDAQ_SIGNAL_HIT_RATE_30D;
+  const scenarioFlips = derived.SCENARIO_TRANSITION_FLIPS_30D;
 
   const ddayKeys = [
     ['POWELL_SPEECH_DDAY', 'Powell 발언'],
@@ -120,7 +130,8 @@ export function ConvictionPanel({ derived }: Props) {
   })();
 
   const convVal = typeof conv?.value === 'number' ? conv.value : 0;
-  const convAccent = convVal >= 5 ? 'border-emerald-700 bg-emerald-950/30' : convVal >= 3 ? 'border-cyan-700 bg-cyan-950/30' : convVal <= -3 ? 'border-red-700 bg-red-950/30' : 'border-slate-700';
+  // 22차 P2#16: RegimeHeader 색상 일관성 통일 — cyan → green/blue 계열로 정합
+  const convAccent = convVal >= 5 ? 'border-green-600 bg-green-950/40' : convVal >= 3 ? 'border-green-700 bg-green-950/20' : convVal <= -3 ? 'border-red-600 bg-red-950/40' : 'border-slate-700';
   const levAccent = lev3?.value === 1 ? 'border-fuchsia-600 bg-fuchsia-950/30' : 'border-slate-700';
   const scenAccent = scenario?.value === 1 ? 'border-emerald-700 bg-emerald-950/30' : scenario?.value === -1 ? 'border-red-700 bg-red-950/30' : 'border-yellow-700 bg-yellow-950/20';
 
@@ -131,6 +142,9 @@ export function ConvictionPanel({ derived }: Props) {
         <span className="text-[10px] text-slate-500">video1+4 §확신 / 노션 §대시보드 정합</span>
       </div>
 
+      {/* 22차 P1#6: 모바일 대응 — collapsible 6영역. 첫 영역만 default open */}
+      <details open className="mb-3">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">⭐ 핵심 (확신·레버리지·시나리오)</summary>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* 1) 핵심 통합 게이지 */}
         <Card title="🎯 7축 확신 점수" accent={convAccent}>
@@ -170,7 +184,12 @@ export function ConvictionPanel({ derived }: Props) {
           </div>
           <div className="text-[11px] text-slate-400 mt-1">{scenario?.interpretation || 'stt_kospi §4부 "두 그림"'}</div>
         </Card>
+      </div>
+      </details>
 
+      <details className="mb-3">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">🌍 매크로 (채권/유동성/금리)</summary>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* 2) 매크로 / 채권 / 유동성 */}
         <Card title="🚦 골디락스 신호등 (FFR-R*)">
           <div>{neutralRate?.interpretation || fmt(neutralRate)}</div>
@@ -181,7 +200,12 @@ export function ConvictionPanel({ derived }: Props) {
         <Card title="💧 M2 → S&P 13W 정합">
           <div>{m2Align?.interpretation || fmt(m2Align)}</div>
         </Card>
+      </div>
+      </details>
 
+      <details className="mb-3">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">📈 패턴·자산 구조 (금/은/구리)</summary>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* 3) 패턴 / 자산 구조 */}
         <Card title="🥇 금 장기 컵앤핸들">
           <div>{goldCup?.interpretation || fmt(goldCup)}</div>
@@ -192,7 +216,12 @@ export function ConvictionPanel({ derived }: Props) {
         <Card title="🛢️ 호르무즈 unwind → 반도체">
           <div>{hormuzUnwind?.interpretation || fmt(hormuzUnwind)}</div>
         </Card>
+      </div>
+      </details>
 
+      <details className="mb-3">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">⚠️ NASDAQ 위험 (윗꼬리·페이크아웃·헬륨)</summary>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* 4) NASDAQ 위험 */}
         <Card title="📉 윗꼬리 매도세">
           <div>{wickLevel?.interpretation || fmt(wickLevel)}</div>
@@ -203,7 +232,12 @@ export function ConvictionPanel({ derived }: Props) {
         <Card title="🤖 헬륨 / AI 반도체 병목">
           <div>{helium?.interpretation || fmt(helium)}</div>
         </Card>
+      </div>
+      </details>
 
+      <details className="mb-3">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">🇰🇷 한국 시장 (외인·과열·공시)</summary>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* 5) 한국 시장 */}
         <Card title="🇰🇷 외인 ATM화 비율">
           <div>{fxDev?.interpretation || (typeof fxDev?.value === 'number' ? `${fxDev.value}배` : '—')}</div>
@@ -215,7 +249,21 @@ export function ConvictionPanel({ derived }: Props) {
         <Card title="🇰🇷 DART 주요공시">
           <div>{krDisc?.interpretation || fmt(krDisc)}</div>
         </Card>
+        <Card title="🇰🇷 KOSPI 연봉 아래꼬리">
+          <div>{ksLowerWick?.interpretation || (typeof ksLowerWick?.value === 'number' ? `${ksLowerWick.value}%` : '—')}</div>
+        </Card>
+        <Card title="🇰🇷 한국 매크로 뉴스">
+          <div>{krNews?.interpretation || (typeof krNews?.value === 'number' ? `${krNews.value}건/24h` : '—')}</div>
+          {typeof krNewsFresh?.value === 'number' && (
+            <div className="text-[10px] text-slate-500 mt-0.5">최신 {krNewsFresh.value}분 전</div>
+          )}
+        </Card>
+      </div>
+      </details>
 
+      <details className="mb-3">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">⏱️ 시계열·확률·DCA</summary>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* 6) 시계열 정합 */}
         <Card title="🧭 시계열 정합">
           <div>{horizonAlign?.value === 1 ? '🟢 정합' : horizonAlign?.value === -1 ? '🟠 불일치' : '⚪ 관망'}</div>
@@ -227,13 +275,32 @@ export function ConvictionPanel({ derived }: Props) {
           <Stat label="hike 25bp" value={fmt(hikeProb, '%')} />
         </Card>
         <Card title="📰 메가캡 EPS 서프라이즈">
-          <Stat label="평균 surprise" value={fmt(earnSurp, '%')} />
-          <Stat label="beat ratio" value={fmt(earnBeat, '%')} />
+          <Stat label="평균 서프라이즈" value={fmt(earnSurp, '%')} />
+          <Stat label="beat 비율" value={fmt(earnBeat, '%')} />
           <Stat label="다음 D-day" value={fmt(earnDday, '일')} />
         </Card>
+        {/* 22차 P2#8: regime forward return + 신호 적중률 + 시나리오 flips */}
+        <Card title="📊 레짐 90D 기대 수익">
+          <div>{regimeFwdRet?.interpretation || (typeof regimeFwdRet?.value === 'number' ? `${regimeFwdRet.value}%` : '—')}</div>
+        </Card>
+        <Card title="🎯 BUY 신호 30D 적중률">
+          <div>{sigHitRate?.interpretation || (typeof sigHitRate?.value === 'number' ? `${sigHitRate.value}%` : '—')}</div>
+        </Card>
+        <Card title="🔁 시나리오 30일 전환수">
+          <div>{scenarioFlips?.interpretation || (typeof scenarioFlips?.value === 'number' ? `${scenarioFlips.value}회` : '—')}</div>
+        </Card>
+        <Card title="⏳ DCA 분할 정체">
+          <div>{dcaStag?.interpretation || (typeof dcaStag?.value === 'number' ? `${dcaStag.value}건` : '—')}</div>
+        </Card>
+        <Card title="📊 보유 합계">
+          <div>{portHoldings?.interpretation || (typeof portHoldings?.value === 'number' ? `${portHoldings.value}%` : '—')}</div>
+        </Card>
       </div>
+      </details>
 
       {/* 20차 신규 — 분기/반기봉 + Trump + 부채 + 디커플링 + 트러스 + paradox + retail-inst */}
+      <details className="mb-3">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">🔬 20차 신규 (분기봉·트럼프·디커플링·트러스·역설·괴리)</summary>
       <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card title="📈 KOSPI 분기봉 윗꼬리">
           <div>{ksQuarterWick?.interpretation || (typeof ksQuarterWick?.value === 'number' ? `${ksQuarterWick.value}%` : '—')}</div>
@@ -241,22 +308,22 @@ export function ConvictionPanel({ derived }: Props) {
         <Card title="📈 KOSPI 반기봉 윗꼬리">
           <div>{ksHalfWick?.interpretation || (typeof ksHalfWick?.value === 'number' ? `${ksHalfWick.value}%` : '—')}</div>
         </Card>
-        <Card title="🇺🇸 Trump 어젠다 압력">
+        <Card title="🇺🇸 트럼프 어젠다 압력">
           <div>{trumpPress?.interpretation || `${fmt(trumpPress)}/4`}</div>
         </Card>
-        <Card title="💰 미국 부채 trajectory">
+        <Card title="💰 미국 부채 궤적">
           <div>{debtTraj?.interpretation || fmt(debtTraj)}</div>
         </Card>
-        <Card title="💸 유동성 ↔ 위험자산 전이">
+        <Card title="💸 유동성→위험자산 전이">
           <div>{liqRiskTrans?.interpretation || fmt(liqRiskTrans)}</div>
         </Card>
         <Card title="📊 30Y 3주 변화 (트러스)">
           <div>{dgs303w?.interpretation || (typeof dgs303w?.value === 'number' ? `${dgs303w.value >= 0 ? '+' : ''}${dgs303w.value}bp` : '—')}</div>
         </Card>
-        <Card title="🥇 Gold 지정학 paradox">
-          <div>{goldParadox?.interpretation || (goldParadox?.value === 1 ? '🟠 paradox 활성' : '⚪ 미발동')}</div>
+        <Card title="🥇 금-지정학 역설">
+          <div>{goldParadox?.interpretation || (goldParadox?.value === 1 ? '🟠 역설 활성' : '⚪ 미발동')}</div>
         </Card>
-        <Card title="👥 Retail vs Inst 디버전스">
+        <Card title="👥 개인-기관 괴리">
           <div>{retailInst?.interpretation || fmt(retailInst)}</div>
         </Card>
         <Card title="📰 SEC 8-K 미국 공시">
@@ -273,9 +340,12 @@ export function ConvictionPanel({ derived }: Props) {
           <div>{ddCrisis?.interpretation || fmt(ddCrisis)}</div>
         </Card>
       </div>
+      </details>
 
       {/* 스마트머니 통합 */}
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <details className="mb-3">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">🐳 스마트머니</summary>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <Card title="🐋 13F 2인+ 공유">
           <div className="text-xl font-bold">{fmt(consTop)}</div>
           <div className="text-[11px] text-slate-400">3인+ 강 합의: {fmt(consStrong)}</div>
@@ -288,15 +358,17 @@ export function ConvictionPanel({ derived }: Props) {
           <div className="text-xl font-bold">{dip?.value === 1 ? '🟢 ON' : '⚪ OFF'}</div>
           <div className="text-[11px] text-slate-400">{dip?.interpretation || ''}</div>
         </Card>
-        <Card title="🎯 애널리스트 목표가 upside">
+        <Card title="🎯 애널리스트 목표가 상승여력">
           <div className="text-xl font-bold">{fmt(upside, '%')}</div>
           <div className="text-[11px] text-slate-400">{upside?.interpretation || ''}</div>
         </Card>
       </div>
+      </details>
 
       {/* D-day 캘린더 */}
-      <div className="mt-4">
-        <div className="text-xs font-semibold text-slate-300 mb-2">📅 발언자 / 기관 D-day</div>
+      <details>
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">📅 발언자 / 기관 D-day</summary>
+      <div className="mt-2">
         <div className="flex flex-wrap gap-2">
           {ddayKeys.map(([k, label]) => {
             const v = derived[k]?.value;
@@ -310,6 +382,7 @@ export function ConvictionPanel({ derived }: Props) {
           })}
         </div>
       </div>
+      </details>
     </div>
   );
 }

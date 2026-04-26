@@ -20,6 +20,7 @@ import { LensPanel } from "./LensPanel";
 import { OptionsVolatilityPanel } from "./OptionsVolatilityPanel";
 import { SentimentPanel } from "./SentimentPanel";
 import { ConvictionPanel } from "./ConvictionPanel";
+import { Onboarding } from "./Onboarding";
 import { formatKstDateTime } from "@/lib/format";
 
 interface Props {
@@ -130,6 +131,14 @@ export function Dashboard({ snapshot }: Props) {
       <StalenessPanel staleness={currentSnapshot?.meta?.staleness} />
 
       <IndicatorPanel raw={currentSnapshot.raw} derived={currentSnapshot.derived} />
+
+      {/* 22차 P2#25: footer 영구 메시지 (노션 §전하는 말) */}
+      <footer className="text-center text-xs text-slate-500 italic py-4 mt-6 border-t border-slate-800">
+        — 우린 함께 웃자 (자산제곱)
+      </footer>
+
+      {/* 22차 P1#5: 첫 방문 onboarding 모달 + 우상단 ? 버튼 */}
+      <Onboarding />
     </div>
   );
 }
