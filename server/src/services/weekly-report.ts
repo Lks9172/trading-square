@@ -199,6 +199,21 @@ export async function detectRuleViolations(snapshot: SystemSnapshot): Promise<st
   if (dd !== undefined && dd < -plan.stopLossPct) {
     violations.push(`⚠️ NASDAQ ATH 대비 ${dd}% > 손절 기준 -${plan.stopLossPct}% (계획 재점검 필요)`);
   }
+
+  // 22차 P2#10 + P1#2: 권고 vs 사용자 currentHoldings drift ≥10%p 위반
+  const holdings = plan.currentHoldings;
+  if (holdings) {
+    const drifts: Array<[string, number]> = [];
+    for (const [k, v] of Object.entries(alloc)) {
+      const userPct = (holdings as Record<string, number | undefined>)[k] ?? 0;
+      const drift = Math.abs((v ?? 0) - userPct);
+      if (drift >= 10) drifts.push([k, drift]);
+    }
+    if (drifts.length > 0) {
+      const top = drifts.sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, d]) => `${k} ${d.toFixed(0)}%p`).join(', ');
+      violations.push(`⚠️ Portfolio drift ≥10%p — ${top} (권고 vs 실제 보유 차이, video1 §"비중 기준")`);
+    }
+  }
   return violations;
 }
 
@@ -246,6 +261,15 @@ export async function autoLogSnapshotDelta(
 /** Telegram 전송용 포맷 */
 export function formatWeeklyReportText(report: WeeklyReport): string {
   const lines: string[] = [];
+  // 22차 P2#24: 운영자 한마디 회전 헤더
+  try {
+    // 동적 import 에러는 무시 (formatWeeklyReportText 는 동기 함수라 require)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getDailyQuote } = require('./operator-quotes');
+    const q = getDailyQuote();
+    lines.push(`💬 ${q.short} — 자산제곱`);
+    lines.push('');
+  } catch { /* skip */ }
   lines.push(`📊 MacroSquare Weekly Report (${report.period.from} ~ ${report.period.to})`);
   lines.push('');
   lines.push(`🎯 레짐: *${report.regime.current}* (score ${report.regime.score})`);
@@ -275,5 +299,8 @@ export function formatWeeklyReportText(report: WeeklyReport): string {
     lines.push('🚨 계획 규칙 위반:');
     for (const v of report.ruleViolations) lines.push(`  • ${v}`);
   }
+  // 22차 P2#25: footer 영구 메시지
+  lines.push('');
+  lines.push('— 우린 함께 웃자 (자산제곱)');
   return lines.join('\n');
 }

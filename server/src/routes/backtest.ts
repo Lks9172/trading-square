@@ -339,4 +339,124 @@ router.get('/portfolio', async (req: Request, res: Response) => {
   }
 });
 
+// 22차 P1#1: 사용자 plan walk-forward 백테스트.
+// InvestmentPlan 의 horizon / leverageMaxPct / monthlyDCA_KRW / stopLossPct / profitTakeTargetPct
+// 을 입력으로 받아, 과거 N년 NASDAQ 일별 데이터에 룰 적용해 가상 포트폴리오 시뮬레이션.
+//
+// 단순화 가정:
+// - 단일 자산 NASDAQ 만 시뮬레이션 (멀티자산은 future)
+// - DCA: 매월 첫 영업일 monthlyDCA_KRW 만큼 매수
+// - stop-loss: 평균진입가 -stopLossPct% 이탈 시 보유 50% 매도
+// - take-profit: 평균진입가 +profitTakeTargetPct% 도달 시 보유 50% 매도 (1회)
+// - 시작 자본: totalCapitalKRW (없으면 10_000_000 default)
+//
+// 라이브 NASDAQ 가격 vs 가상 포트폴리오 가치 시계열 + Sharpe/MDD/CAGR 반환.
+router.get('/user-plan', async (req: Request, res: Response) => {
+  try {
+    const yearsParam = parseInt(String(req.query.years || '3'), 10);
+    const years = Math.min(Math.max(1, yearsParam), 5);
+    const days = years * 252;
+    const { readInvestmentPlan } = await import('../services/investment-plan');
+    const plan = await readInvestmentPlan();
+    const initialCapital = plan.totalCapitalKRW ?? 10_000_000;
+    const monthlyDCA = plan.monthlyDCA_KRW ?? 0;
+    const stopLossPct = plan.stopLossPct ?? 15;
+    const takePct = plan.profitTakeTargetPct ?? 25;
+    const ndaqHist = await (await import('../collectors/yahoo')).fetchYahooHistory('^IXIC', days + 30);
+    if (ndaqHist.length < days * 0.7) {
+      res.status(503).json({ error: 'Insufficient NASDAQ history' });
+      return;
+    }
+    const slice = ndaqHist.slice(-days);
+    let cash = initialCapital;
+    let units = 0;          // NASDAQ 가상 보유 단위 (KRW 환산 단순화 — close 가 USD 지수지만 비례 가상화)
+    let avgEntry = 0;
+    let totalCost = 0;
+    let takeProfitDone = false;
+    let stopLossDone = false;
+    const equityCurve: Array<{ date: string; value: number }> = [];
+    let lastMonth = '';
+    for (let i = 0; i < slice.length; i++) {
+      const { date, close } = slice[i];
+      const month = date.slice(0, 7);
+      // 1) DCA 매월 첫 영업일
+      if (month !== lastMonth && cash >= monthlyDCA && monthlyDCA > 0) {
+        const buyAmt = Math.min(cash, monthlyDCA);
+        const newUnits = buyAmt / close;
+        totalCost += buyAmt;
+        units += newUnits;
+        avgEntry = units > 0 ? totalCost / units : 0;
+        cash -= buyAmt;
+        lastMonth = month;
+      }
+      // 2) stop-loss
+      if (units > 0 && avgEntry > 0 && !stopLossDone) {
+        if (close < avgEntry * (1 - stopLossPct / 100)) {
+          const sellUnits = units * 0.5;
+          cash += sellUnits * close;
+          units -= sellUnits;
+          stopLossDone = true;
+        }
+      }
+      // 3) take-profit
+      if (units > 0 && avgEntry > 0 && !takeProfitDone) {
+        if (close >= avgEntry * (1 + takePct / 100)) {
+          const sellUnits = units * 0.5;
+          cash += sellUnits * close;
+          units -= sellUnits;
+          takeProfitDone = true;
+        }
+      }
+      const equity = cash + units * close;
+      equityCurve.push({ date, value: parseFloat(equity.toFixed(0)) });
+    }
+    // 메트릭 산출
+    const startVal = equityCurve[0]?.value ?? initialCapital;
+    const endVal = equityCurve[equityCurve.length - 1]?.value ?? initialCapital;
+    const returnPct = ((endVal - startVal) / startVal) * 100;
+    let peak = startVal;
+    let maxDD = 0;
+    const dailyRets: number[] = [];
+    for (let i = 0; i < equityCurve.length; i++) {
+      const v = equityCurve[i].value;
+      if (v > peak) peak = v;
+      const dd = ((v - peak) / peak) * 100;
+      if (dd < maxDD) maxDD = dd;
+      if (i > 0 && equityCurve[i - 1].value > 0) {
+        dailyRets.push((v - equityCurve[i - 1].value) / equityCurve[i - 1].value);
+      }
+    }
+    const meanRet = dailyRets.length > 0 ? dailyRets.reduce((a, b) => a + b, 0) / dailyRets.length : 0;
+    const variance = dailyRets.length > 0
+      ? dailyRets.reduce((s, r) => s + Math.pow(r - meanRet, 2), 0) / dailyRets.length : 0;
+    const std = Math.sqrt(variance);
+    const sharpe = std > 0 ? (meanRet * 252) / (std * Math.sqrt(252)) : 0;
+    const cagr = years > 0 ? (Math.pow(1 + returnPct / 100, 1 / years) - 1) * 100 : returnPct;
+    res.json({
+      years,
+      plan: {
+        horizon: plan.horizon,
+        initialCapitalKRW: initialCapital,
+        monthlyDCA_KRW: monthlyDCA,
+        stopLossPct,
+        profitTakeTargetPct: takePct,
+        leverageMaxPct: plan.leverageMaxPct,
+      },
+      equityCurve: equityCurve.filter((_, i) => i % Math.max(1, Math.floor(equityCurve.length / 200)) === 0),
+      metrics: {
+        return_pct: parseFloat(returnPct.toFixed(2)),
+        max_drawdown_pct: parseFloat(maxDD.toFixed(2)),
+        sharpe: parseFloat(sharpe.toFixed(2)),
+        cagr_pct: parseFloat(cagr.toFixed(2)),
+        annual_volatility_pct: parseFloat((std * Math.sqrt(252) * 100).toFixed(2)),
+        final_value_krw: parseFloat(endVal.toFixed(0)),
+        stop_loss_triggered: stopLossDone,
+        take_profit_triggered: takeProfitDone,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'User plan backtest failed' });
+  }
+});
+
 export default router;

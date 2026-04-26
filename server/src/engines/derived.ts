@@ -4561,6 +4561,112 @@ export async function computeDerived(
     };
   } catch { void 0; }
 
+  // === 22차 P1#4: 운영자 §전하는 말 9단락 회전 인덱스 ===
+  try {
+    const { getDailyQuote } = await import('../services/operator-quotes');
+    const q = getDailyQuote();
+    d.OPERATOR_PHILOSOPHY_QUOTE_INDEX = {
+      name: 'operator_philosophy_quote_index',
+      value: q.index,
+      date: today(),
+      formula: `오늘의 운영자 한마디: "${q.short}". 노션 §전하는 말 9단락 회전.`,
+    };
+  } catch { void 0; }
+
+  // === 22차 P2#8: REGIME_FORWARD_RETURN 분포 (90D NASDAQ regime별) ===
+  // video2 §1부 "이 구간에서 역사적으로 이런 일이 벌어졌으니까".
+  // 현재 regime 기준 과거 동일 regime 진입 후 90영업일 NASDAQ 평균 수익률 산출.
+  try {
+    const { readHistory } = await import('../state/history-store');
+    const regimeHist = await readHistory('computed', 'REGIME_LABEL');
+    const nasdaqHist = await fetchYahooHistory('^IXIC', 800);
+    if (regimeHist.length >= 100 && nasdaqHist.length >= 200) {
+      const currentRegime = String(regimeHist[regimeHist.length - 1].value ?? '');
+      const closesByDate = new Map(nasdaqHist.map((h) => [h.date, h.close]));
+      // regime entry 시점 (직전 regime ≠ 현재) 모두 찾고 90일 후 수익률 평균
+      const returns: number[] = [];
+      for (let i = 1; i < regimeHist.length - 90; i++) {
+        const r = String(regimeHist[i].value ?? '');
+        const prev = String(regimeHist[i - 1].value ?? '');
+        if (r === currentRegime && prev !== currentRegime) {
+          const startDate = regimeHist[i].date;
+          const endIdx = Math.min(regimeHist.length - 1, i + 90);
+          const endDate = regimeHist[endIdx].date;
+          const startClose = closesByDate.get(startDate);
+          const endClose = closesByDate.get(endDate);
+          if (typeof startClose === 'number' && typeof endClose === 'number' && startClose > 0) {
+            returns.push(((endClose - startClose) / startClose) * 100);
+          }
+        }
+      }
+      if (returns.length >= 2) {
+        const avg = returns.reduce((a, b) => a + b, 0) / returns.length;
+        const sorted = [...returns].sort((a, b) => a - b);
+        const median = sorted[Math.floor(sorted.length / 2)];
+        d.REGIME_FORWARD_RETURN_90D_AVG = {
+          name: 'regime_forward_return_90d_avg',
+          value: parseFloat(avg.toFixed(2)),
+          date: today(),
+          formula: `${currentRegime} 진입 후 90D NASDAQ 평균 수익률 ${avg.toFixed(2)}% (median ${median.toFixed(2)}%, n=${returns.length}). video2 §1부 "역사 통계".`,
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // === 22차 P2#9: SIGNAL_HIT_RATE_30D (NASDAQ BUY/STRONG_BUY 직후 30영업일 양수 비율) ===
+  try {
+    const { readHistory } = await import('../state/history-store');
+    const sigHist = await readHistory('computed', 'NASDAQ_SIGNAL_LABEL');
+    const nasdaqHist = await fetchYahooHistory('^IXIC', 600);
+    if (sigHist.length >= 50 && nasdaqHist.length >= 100) {
+      const closesByDate = new Map(nasdaqHist.map((h) => [h.date, h.close]));
+      let wins = 0;
+      let total = 0;
+      for (let i = 1; i < sigHist.length - 30; i++) {
+        const r = String(sigHist[i].value ?? '');
+        const prev = String(sigHist[i - 1].value ?? '');
+        if ((r === 'BUY' || r === 'STRONG_BUY') && prev !== r) {
+          const sd = sigHist[i].date;
+          const ed = sigHist[Math.min(sigHist.length - 1, i + 30)].date;
+          const sc = closesByDate.get(sd);
+          const ec = closesByDate.get(ed);
+          if (typeof sc === 'number' && typeof ec === 'number' && sc > 0) {
+            total++;
+            if (ec > sc) wins++;
+          }
+        }
+      }
+      if (total >= 3) {
+        const pct = (wins / total) * 100;
+        d.NASDAQ_SIGNAL_HIT_RATE_30D = {
+          name: 'nasdaq_signal_hit_rate_30d',
+          value: parseFloat(pct.toFixed(1)),
+          date: today(),
+          formula: `BUY/STRONG_BUY 30일 후 양수 수익률 ${wins}/${total} = ${pct.toFixed(1)}%. video1 §확률 "공이 멈추는 순간".`,
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // === 22차 P1#2: SCENARIO_TRANSITION_HISTORY (30일간 A↔B flip 횟수) ===
+  try {
+    const { readHistory } = await import('../state/history-store');
+    const scHist = await readHistory('computed', 'SCENARIO_GATE_A_B');
+    if (scHist.length >= 30) {
+      const recent = scHist.slice(-30);
+      let flips = 0;
+      for (let i = 1; i < recent.length; i++) {
+        if (recent[i].value !== recent[i - 1].value) flips++;
+      }
+      d.SCENARIO_TRANSITION_FLIPS_30D = {
+        name: 'scenario_transition_flips_30d',
+        value: flips,
+        date: today(),
+        formula: `30일 내 시나리오 게이트 변경 ${flips}회. ≥5회 = 분기 불안정. stt_kospi §4부 "두 그림 동시" 검증.`,
+      };
+    }
+  } catch { void 0; }
+
   // === 21차 P2#20: 한국 거시 뉴스 RSS (한경 글로벌마켓 / sedaily 증권) ===
   try {
     const { fetchKrNewsHeadlines } = await import('../collectors/kr-news');

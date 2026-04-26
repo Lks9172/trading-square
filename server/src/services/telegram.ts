@@ -44,6 +44,47 @@ let previousOverallSignal: string = '';
 let lastRegimeChangeAt = 0;
 const REGIME_COOLDOWN_MS = 60 * 60 * 1000;
 
+// 22차 P2#11+P2#12: 알림 등급 + quietHours.
+// quietHours 환경변수 형식: "HH-HH" (KST). 예: "22-7" → 22시~익일 7시 quiet.
+// quiet 시 INFO/WARN 은 큐잉 없이 무시, CRITICAL 만 통과. 기본값 비활성.
+export type NotificationLevel = 'INFO' | 'WARN' | 'CRITICAL';
+function isQuietHourKST(level: NotificationLevel): boolean {
+  if (level === 'CRITICAL') return false;
+  const range = process.env.QUIET_HOURS_KST;
+  if (!range) return false;
+  const m = range.match(/^(\d{1,2})-(\d{1,2})$/);
+  if (!m) return false;
+  const start = parseInt(m[1], 10);
+  const end = parseInt(m[2], 10);
+  const now = new Date();
+  const kst = new Date(now.getTime() + (9 * 60 - now.getTimezoneOffset()) * 60000);
+  const h = kst.getHours();
+  if (start <= end) return h >= start && h < end;
+  return h >= start || h < end;
+}
+
+// 22차 P2#13: scheduled refresh 실패 누적 카운터 + 5회 연속 실패 escalation
+let consecutiveRefreshFailures = 0;
+export function recordRefreshSuccess(): void {
+  consecutiveRefreshFailures = 0;
+}
+export async function recordRefreshFailure(reason: string): Promise<void> {
+  consecutiveRefreshFailures++;
+  if (consecutiveRefreshFailures >= 5) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    if (token && chatId) {
+      try {
+        await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+          chat_id: chatId,
+          text: `🚨 [CRITICAL] MacroSquare 5회 연속 snapshot refresh 실패\n사유: ${reason.slice(0, 200)}\n시각: ${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`,
+        }, { timeout: 10000, httpsAgent: ipv4Agent });
+        consecutiveRefreshFailures = 0; // 알림 후 reset (재발생 시 다시 카운트)
+      } catch { /* 알림 실패 무시 */ }
+    }
+  }
+}
+
 const REGIME_COMPONENT_LABELS: Record<string, string> = {
   vix: 'VIX',
   yieldCurve: '수익률곡선',
@@ -229,6 +270,13 @@ export async function checkAndNotify(
   }
 
   if (messages.length === 0 && allocChanges.length === 0) return;
+
+  // 22차 P2#11+P2#12: quietHours 적용 — regime 변경/신호 변경은 WARN, allocChanges 만 있으면 INFO
+  const level: NotificationLevel = (messages.some((m) => m.includes('국면 변경') || m.includes('신호 변경'))) ? 'WARN' : 'INFO';
+  if (isQuietHourKST(level)) {
+    console.log(`[quiet-hours] ${level} suppressed`);
+    return;
+  }
 
   const header = `⏰ MacroSquare 알림\n${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`;
 

@@ -330,6 +330,28 @@ export function interpretDerived(
     if (value >= 7) return '🟡 네이버 투자정보 7일+ 공백';
     return null;
   }
+  // 22차 신규
+  if (key === 'OPERATOR_PHILOSOPHY_QUOTE_INDEX') {
+    return null; // formula 에 short 인용이 이미 들어가있음
+  }
+  if (key === 'REGIME_FORWARD_RETURN_90D_AVG') {
+    if (value >= 10) return '🟢 동일 레짐 진입 후 90D 평균 +10%+ — 강한 historical 우위';
+    if (value >= 0) return '🟢 동일 레짐 진입 후 90D 평균 양수';
+    if (value <= -5) return '🔴 동일 레짐 진입 후 90D 평균 -5%↓ — 방어 우선';
+    return null;
+  }
+  if (key === 'NASDAQ_SIGNAL_HIT_RATE_30D') {
+    if (value >= 70) return '🟢 BUY 신호 30D 적중률 70%+ — video1 §확률 우호';
+    if (value >= 50) return '🟡 BUY 신호 30D 적중률 50%+';
+    if (value <= 30) return '🔴 BUY 신호 적중률 < 30% — 임계 재검토 필요';
+    return null;
+  }
+  if (key === 'SCENARIO_TRANSITION_FLIPS_30D') {
+    if (value >= 5) return '🟠 시나리오 게이트 30일 5회+ 전환 — 분기 불안정';
+    if (value >= 2) return '🟡 시나리오 게이트 전환 진행';
+    return null;
+  }
+
   if (key === 'KR_NEWS_TOTAL_COUNT_24H') {
     if (value >= 50) return '🔴 한국 매크로 뉴스 24h 50건+ — 노이즈 폭증';
     if (value >= 20) return '🟡 한국 매크로 뉴스 활발';

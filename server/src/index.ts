@@ -17,7 +17,7 @@ import apiRouter from './routes/api';
 import backtestRouter from './routes/backtest';
 import { DEFAULT_PROFILE, getSnapshot } from './state/cache';
 import { ensureBackfill, refreshComputedHistories, appendDailyData } from './state/history-store';
-import { checkAndNotify, sendStartupSnapshot, sendWeeklyReportText } from './services/telegram';
+import { checkAndNotify, sendStartupSnapshot, sendWeeklyReportText, recordRefreshSuccess, recordRefreshFailure } from './services/telegram';
 import { buildWeeklyReport, detectRuleViolations, formatWeeklyReportText } from './services/weekly-report';
 import { startTelegramCommandPoller } from './services/telegram-commands';
 import { logger, serializeError } from './services/logger';
@@ -61,6 +61,7 @@ async function runScheduledRefresh(triggeredBy: string): Promise<void> {
     logger.info({ triggeredBy }, 'scheduled snapshot refresh started');
     const snapshot = await getSnapshot(DEFAULT_PROFILE, true);
     await checkAndNotify(snapshot.signals, snapshot.regime, snapshot.allocation);
+    recordRefreshSuccess(); // 22차 P2#13
     logger.info({
       triggeredBy,
       regime: snapshot.regime.regime,
@@ -69,6 +70,7 @@ async function runScheduledRefresh(triggeredBy: string): Promise<void> {
     }, 'scheduled snapshot refresh completed');
   } catch (error) {
     logger.error({ triggeredBy, error: serializeError(error) }, 'scheduled snapshot refresh failed');
+    await recordRefreshFailure(`${triggeredBy}: ${(error as Error)?.message || 'unknown'}`);
   }
 }
 

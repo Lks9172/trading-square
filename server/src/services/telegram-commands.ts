@@ -99,7 +99,16 @@ async function handleSignal(asset: string): Promise<string> {
 
 async function handlePlan(): Promise<string> {
   const plan = await readInvestmentPlan();
-  return `🧭 My Plan\n시계열: ${plan.horizon}\n목표: 연 ${plan.targetReturnAnnualPct}%\n최대 MDD: ${plan.maxDrawdownTolerancePct}%\n레버리지 상한: ${plan.leverageMaxPct}%\n익절: ${plan.profitTakeTargetPct}% / 손절: ${plan.stopLossPct}%\n월 DCA: ${plan.monthlyDCA_KRW.toLocaleString('ko-KR')}원\n업데이트: ${plan.updatedAt}`;
+  let holdingsText = '';
+  if (plan.currentHoldings) {
+    const items = Object.entries(plan.currentHoldings).filter(([, v]) => typeof v === 'number' && v > 0);
+    if (items.length > 0) {
+      holdingsText = `\n\n📊 현재 보유: ${items.map(([k, v]) => `${k} ${v}%`).join(' / ')}`;
+    }
+  }
+  let capitalText = '';
+  if (plan.totalCapitalKRW) capitalText = `\n총 자본: ${plan.totalCapitalKRW.toLocaleString('ko-KR')} KRW`;
+  return `🧭 My Plan\n시계열: ${plan.horizon}\n목표: 연 ${plan.targetReturnAnnualPct}%\n최대 MDD: ${plan.maxDrawdownTolerancePct}%\n레버리지 상한: ${plan.leverageMaxPct}%\n익절: ${plan.profitTakeTargetPct}% / 손절: ${plan.stopLossPct}%\n월 DCA: ${plan.monthlyDCA_KRW.toLocaleString('ko-KR')}원${capitalText}${holdingsText}\n업데이트: ${plan.updatedAt}`;
 }
 
 async function handleWeekly(): Promise<string> {
@@ -125,12 +134,44 @@ async function handleCommand(text: string): Promise<string> {
       return handlePlan();
     case '/weekly':
       return handleWeekly();
+    case '/log':
+      // 22차 P2#18: /log <asset> <BUY|SELL> <qty?> <notes?> — 즉시 trade-log 기록
+      if (!args[0] || !args[1]) return '사용법: /log <ASSET> <BUY|SELL> [qty] [notes]';
+      return handleLog(args[0], args[1], args.slice(2).join(' '));
     case '/help':
     case '/start':
-      return 'MacroSquare bot\n/status — 현재 레짐+신호\n/signal <ASSET> — 자산 상세\n/plan — 내 계획\n/weekly — 주간 리포트 전송';
+      return 'MacroSquare bot\n/status — 현재 레짐+신호\n/signal <ASSET> — 자산 상세\n/plan — 내 계획 (보유비중 포함)\n/weekly — 주간 리포트 전송\n/log <ASSET> <BUY|SELL> [qty] [notes] — Trade Log 즉시 기록';
     default:
       return '';
   }
+}
+
+// 22차 P2#18: telegram /log 핸들러 — 시스템 권고 vs 사용자 행동 자동 비교
+async function handleLog(asset: string, action: string, notes?: string): Promise<string> {
+  const upperAction = action.toUpperCase();
+  if (!/^(BUY|SELL|REDUCE|ADD|EXIT|TRIM)$/.test(upperAction)) {
+    return `❓ action 은 BUY/SELL/REDUCE/ADD/EXIT/TRIM 중 하나`;
+  }
+  const snap = await getSnapshot(DEFAULT_PROFILE, false);
+  const sig = snap.signals?.find((s) => s.asset === asset.toUpperCase());
+  const sysSignal = sig?.signal;
+  const userBuy = /BUY|ADD/i.test(upperAction);
+  const userSell = /SELL|EXIT|REDUCE|TRIM/i.test(upperAction);
+  const sysBuy = sysSignal === 'BUY' || sysSignal === 'STRONG_BUY';
+  const sysSell = sysSignal === 'SELL' || sysSignal === 'REDUCE';
+  let against = false;
+  if ((userSell && sysBuy) || (userBuy && sysSell)) against = true;
+  const { appendTradeLog } = await import('./investment-plan');
+  await appendTradeLog({
+    kind: 'user_action',
+    asset: asset.toUpperCase(),
+    to: upperAction,
+    notes: notes || `telegram /log`,
+    againstSystemRecommendation: against,
+    context: { regimeAtAction: snap.regime?.regime, signalAtAction: sysSignal },
+  });
+  const flag = against ? '🔴 시스템 권고와 반대' : '🟢 시스템 권고 정합';
+  return `✅ Trade Log 기록 완료\n${asset.toUpperCase()} ${upperAction}\n시스템: ${sysSignal || '-'} (${snap.regime?.regime})\n${flag}`;
 }
 
 async function pollOnce(): Promise<void> {
