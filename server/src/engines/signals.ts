@@ -630,6 +630,23 @@ function nasdaqSignal(
     }
   }
 
+  // ★ === 29차 P3-A #5: JGB_10Y_LEVEL — 캐리 트레이드 unwind 위험 ===
+  // video6 §04:28 "일본 금리 체크" — JGB ↑ 시 NASDAQ 보조 -0.5.
+  const jgbLvl = dv(derived, 'JGB_10Y_LEVEL');
+  if (jgbLvl !== null) {
+    if (jgbLvl <= -2) {
+      // -1 met 차감 (가점이 아니라 헤드윈드 인식)
+      met = Math.max(0, met - 1);
+      const reason = `⚠️ JGB10Y ≥1.5% — 엔 캐리 unwind 강 (NASDAQ 위험, video6 §04:28, met -1)`;
+      unmetReasons.push(reason);
+    } else if (jgbLvl === -1) {
+      const reason = `⚠️ JGB10Y ≥1.0% — 캐리 unwind 위험 (video6 §04:28, 보조)`;
+      unmetReasons.push(reason);
+    } else if (jgbLvl === 1) {
+      reasons.push('✓ JGB10Y < 0.5% — 캐리 우호 (video6 §04:28, 보조)');
+    }
+  }
+
   // ★ === 29차 P1-A #3: INVESTMENT_TRIPLE_GATE_SCORE — STRONG_BUY 게이트 정합성 ===
   // video6 §04:48 "펀더 × 매크로 × 차트 3축 일치" — 3축 스코어 ≥0.66 시 STRONG_BUY 통과,
   // <0 시 STRONG_BUY → BUY 강등, ≤-0.33 시 STRONG_BUY 차단 + BUY → HOLD 강등.
@@ -854,6 +871,28 @@ function goldSignal(
     reasons.push('✓ CB 12M 금 매입 ≥1000톤 — 3년 연속 트렌드 (video2 §05:38)');
   } else if (cbTonnage === -1) {
     unmetReasons.push('⚠️ CB 12M 금 매입 <800톤 — 구조적 매수 둔화 (video2 §05:38)');
+  }
+
+  // ★ === 29차 P3-A #1: FX_RESERVE_USD_RATIO — 탈달러 시 금 우호 가산 ===
+  // video2 §09:04 "탈달러 71% → 58% 20년".
+  const fxResUsd = dv(derived, 'FX_RESERVE_USD_RATIO');
+  if (fxResUsd !== null && fxResUsd >= 2) {
+    score += 2; maxScore += 2;
+    reasons.push('✓ FX_RESERVE_USD_RATIO ≤55% — 탈달러 가속 강 (video2 §09:04, +2)');
+  } else if (fxResUsd === 1) {
+    score += 1; maxScore += 1;
+    reasons.push('✓ FX_RESERVE_USD_RATIO ≤60% — 탈달러 진행 (video2 §09:04, +1)');
+  } else if (fxResUsd === -1) {
+    unmetReasons.push('⚠️ FX_RESERVE_USD_RATIO ≥65% — 달러 패권 회복 (video2 §09:04)');
+  }
+
+  // ★ === 29차 P3-A #6: DXY_12M_YOY 단독 (보조) ===
+  const dxy12m = dv(derived, 'DXY_12M_YOY');
+  if (dxy12m === 1) {
+    score += 0.5; maxScore += 0.5;
+    reasons.push('✓ DXY 12M YoY ≤-5% — 약달러 우호 (video2, +0.5)');
+  } else if (dxy12m === -1) {
+    unmetReasons.push('⚠️ DXY 12M YoY ≥+5% — 강달러 위협 (video2)');
   }
 
   // ★ === 29차 P1-B #6: GOLD_AXIS_GATE_FLAG — HEADWIND 시 지정학 단독 매수 차단 ===

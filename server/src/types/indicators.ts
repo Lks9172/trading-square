@@ -144,6 +144,20 @@ export interface UserProfile {
     kospiPBR?: number | null;
     // ★ 29차 P2-C #18: KOSPI 합산 ROE 수동 입력
     kospiROE?: number | null;
+    // ★ 29차 P3-A #1: IMF COFER USD 비중 (분기 데이터)
+    fxReserveUsdRatio?: number | null;
+    // ★ 29차 P3-A #3: ICI MMF 전체 (조달러)
+    mmfTotalTrillion?: number | null;
+    // ★ 29차 P3-A #5: JGB 10Y 수익률 (%)
+    jgb10y?: number | null;
+    // ★ 29차 P3-B #7: 한국 가계부채 GDP 비율 (%)
+    krHouseholdDebtPctGdp?: number | null;
+    // ★ 29차 P3-B #7: 한국 CPI YoY (%)
+    krCpi?: number | null;
+    // ★ 29차 P3-E #28: KRX 연기금 5D 누적 (조원, 옵션)
+    krxPensionFlow5DTrillion?: number | null;
+    // ★ 29차 P3-E #29: KRX 공매도 잔고 비율 (%)
+    krxShortInterestPct?: number | null;
   };
 }
 

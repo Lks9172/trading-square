@@ -120,6 +120,16 @@ export async function computeDerived(
     // 29차 P2-C #17/18
     kospiPBR?: number | null;
     kospiROE?: number | null;
+    // 29차 P3-A
+    fxReserveUsdRatio?: number | null;
+    mmfTotalTrillion?: number | null;
+    jgb10y?: number | null;
+    // 29차 P3-B
+    krHouseholdDebtPctGdp?: number | null;
+    krCpi?: number | null;
+    // 29차 P3-E
+    krxPensionFlow5DTrillion?: number | null;
+    krxShortInterestPct?: number | null;
   },
 ): Promise<Record<string, DerivedIndicator>> {
   const d: Record<string, DerivedIndicator> = {};
@@ -7692,6 +7702,164 @@ export async function computeDerived(
         date: today(),
         formula: `KOSPI 5일 평균 거래대금 ${trillion.toFixed(1)}조 → tier=${tier}. ${label}. stt_kospi §"주간 평균 20조".`,
       };
+    }
+  } catch { void 0; }
+
+  // ============================================================
+  // ★★★ 29차 P3 (P3-A ~ P3-E) — 36건 추가 ★★★
+  // ============================================================
+
+  // ★ === 29차 P3-A #1: FX_RESERVE_USD_RATIO (IMF COFER) ===
+  // video2 §09:04 "탈달러 — 71% → 58%, 20년 -15%p".
+  // manualInputs.fxReserveUsdRatio (분기 데이터, 사용자 입력 채널).
+  try {
+    const ratio = manualInputs?.fxReserveUsdRatio ?? null;
+    if (ratio !== null) {
+      let level: number;
+      let label: string;
+      if (ratio <= 55) { level = 2; label = `🟢🟢 ${ratio.toFixed(1)}% ≤ 55 (탈달러 가속, 금 우호 +2)`; }
+      else if (ratio <= 60) { level = 1; label = `🟢 ${ratio.toFixed(1)}% ≤ 60 (탈달러 진행)`; }
+      else if (ratio >= 65) { level = -1; label = `🔴 ${ratio.toFixed(1)}% ≥ 65 (달러 패권 회복)`; }
+      else { level = 0; label = `⚪ ${ratio.toFixed(1)}% (60-65)`; }
+      d.FX_RESERVE_USD_RATIO = {
+        name: 'fx_reserve_usd_ratio',
+        value: level,
+        date: today(),
+        formula: `IMF COFER USD 비중 ${ratio.toFixed(1)}% → level=${level}. ${label}. video2 §09:04 "탈달러 71%→58% 20년".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P3-A #2: BTC_GOLD_HEGEMONY_INDEX ===
+  // video2 §07:58-09:00 — 미국 BTC 전략비축 vs 중국 PBOC 금 보유량.
+  // BTC ratio ↑ + 중국 금 ↓ → -1 (달러 패권 회복) / BTC ratio ↓ + 중국 금 ↑ → +1 (탈달러 가속).
+  try {
+    let btcAxis = 0;
+    let btcLabel = '?';
+    try {
+      const btcHist = await fetchYahooHistory('BTC-USD', 200);
+      if (btcHist.length >= 100) {
+        const btcRecent = btcHist.slice(-30).reduce((s, p) => s + p.close, 0) / 30;
+        const btcPrior = btcHist.slice(-180, -90).reduce((s, p) => s + p.close, 0) / 90;
+        const btcRet = btcPrior > 0 ? (btcRecent - btcPrior) / btcPrior * 100 : 0;
+        if (btcRet >= 10) { btcAxis = 1; btcLabel = `BTC +${btcRet.toFixed(1)}% (강세)`; }
+        else if (btcRet <= -10) { btcAxis = -1; btcLabel = `BTC ${btcRet.toFixed(1)}% (약세)`; }
+        else { btcLabel = `BTC ${btcRet.toFixed(1)}% (횡보)`; }
+      }
+    } catch { void 0; }
+    const cbGold = d.CB_GOLD_TONNAGE_TREND?.value ?? null;
+    let goldAxis = 0;
+    let goldLabel = '?';
+    if (cbGold !== null) {
+      if (cbGold >= 1) { goldAxis = 1; goldLabel = `중국 금 ${cbGold} (매입 가속)`; }
+      else if (cbGold <= -1) { goldAxis = -1; goldLabel = `중국 금 ${cbGold} (매입 둔화)`; }
+      else { goldLabel = `중국 금 ${cbGold} (중립)`; }
+    }
+    // BTC ↑ + 중국 금 ↓ → -1 (달러 패권 회복)
+    // BTC ↓ + 중국 금 ↑ → +1 (탈달러 가속)
+    let hegemony = 0;
+    let hegLabel = '⚪ 중립';
+    if (btcAxis >= 1 && goldAxis <= -1) { hegemony = -1; hegLabel = '🔴 달러 패권 회복 (BTC↑ 중국 금↓)'; }
+    else if (btcAxis <= -1 && goldAxis >= 1) { hegemony = 1; hegLabel = '🟢 탈달러 가속 (BTC↓ 중국 금↑)'; }
+    d.BTC_GOLD_HEGEMONY_INDEX = {
+      name: 'btc_gold_hegemony_index',
+      value: hegemony,
+      date: today(),
+      formula: `${btcLabel} + ${goldLabel} → ${hegLabel}. video2 §07:58-09:00 "BTC 전략비축 vs PBOC 금".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P3-A #3: MMF_TOTAL_TIER ===
+  // 노션 assetx2-dashboard "MMF 5조 historic high".
+  // WRMFNS (retail 2.5T) + manualInputs.mmfTotalTrillion (ICI 전체 ~5T).
+  try {
+    const wrmfns = val(raw, 'WRMFNS') ?? null;        // 단위: $ Billions
+    const wrmfnsT = wrmfns !== null ? wrmfns / 1000 : null;
+    const iciTotalT = manualInputs?.mmfTotalTrillion ?? null;
+    const totalT = iciTotalT ?? (wrmfnsT !== null ? wrmfnsT * 2 : null); // ICI ≈ retail × 2 fallback
+    if (totalT !== null) {
+      let tier: number;
+      let label: string;
+      if (totalT >= 5) { tier = 1; label = `🟢 ${totalT.toFixed(2)}T ≥ 5 (historic high)`; }
+      else if (totalT >= 4.5) { tier = 0; label = `🟡 ${totalT.toFixed(2)}T (4.5-5)`; }
+      else if (totalT < 4) { tier = -1; label = `🔴 ${totalT.toFixed(2)}T < 4 (유동성 위축)`; }
+      else { tier = 0; label = `⚪ ${totalT.toFixed(2)}T (4-4.5)`; }
+      d.MMF_TOTAL_TIER = {
+        name: 'mmf_total_tier',
+        value: tier,
+        date: today(),
+        formula: `MMF 전체 ${totalT.toFixed(2)}T (출처: ${iciTotalT !== null ? 'ICI 사용자입력' : 'WRMFNS×2 fallback'}) → tier=${tier}. ${label}. 노션 §assetx2-dashboard "MMF 5조 historic high".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P3-A #4: RRP_EXHAUSTION_PCT ===
+  // 노션 assetx2-dashboard "RRP 99% 고갈".
+  // RRPONTSYD raw + peak (history 자동 detect 또는 2022-23 peak 2.5T 하드코딩).
+  try {
+    const rrpCur = val(raw, 'RRPONTSYD') ?? null;     // 단위: $ Billions
+    let rrpPeak: number | null = null;
+    try {
+      const rrpHist = await readHistory('fred', 'RRPONTSYD');
+      if (rrpHist.length > 0) {
+        rrpPeak = rrpHist.reduce((mx, p) => p.value > mx ? p.value : mx, 0);
+      }
+    } catch { void 0; }
+    if (rrpPeak === null || rrpPeak < 2000) rrpPeak = 2500; // 하드코딩 2.5T peak
+    if (rrpCur !== null && rrpPeak > 0) {
+      const exhaustion = (rrpPeak - rrpCur) / rrpPeak * 100;
+      const flag = exhaustion >= 95 ? 1 : 0;
+      d.RRP_EXHAUSTION_PCT = {
+        name: 'rrp_exhaustion_pct',
+        value: parseFloat(exhaustion.toFixed(1)),
+        date: today(),
+        formula: `RRP ${rrpCur.toFixed(0)}B / peak ${rrpPeak.toFixed(0)}B → 고갈 ${exhaustion.toFixed(1)}%${flag === 1 ? ' (≥95% TGA 보충 임박)' : ''}. 노션 §assetx2-dashboard "RRP 99% 고갈".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P3-A #5: JGB_10Y_LEVEL ===
+  // video6 §04:28 "일본 금리 체크" — 캐리 트레이드 unwind 위험.
+  // manualInputs.jgb10y (사용자 입력) — FRED/BoJ fetch 어려움.
+  try {
+    const jgb = manualInputs?.jgb10y ?? null;
+    if (jgb !== null) {
+      let level: number;
+      let label: string;
+      if (jgb >= 1.5) { level = -2; label = `🔴🔴 JGB10Y ${jgb.toFixed(2)}% ≥ 1.5 (캐리 unwind 강)`; }
+      else if (jgb >= 1.0) { level = -1; label = `🔴 JGB10Y ${jgb.toFixed(2)}% ≥ 1.0 (캐리 unwind 위험)`; }
+      else if (jgb < 0.5) { level = 1; label = `🟢 JGB10Y ${jgb.toFixed(2)}% < 0.5 (캐리 우호)`; }
+      else { level = 0; label = `⚪ JGB10Y ${jgb.toFixed(2)}%`; }
+      d.JGB_10Y_LEVEL = {
+        name: 'jgb_10y_level',
+        value: level,
+        date: today(),
+        formula: `JGB 10Y ${jgb.toFixed(2)}% → level=${level}. ${label}. video6 §04:28 "일본 금리 체크".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P3-A #6: DXY_12M_YOY (단독 노출) ===
+  // video2 §"중앙은행 매수 proxy (b)" — DXY 12M YoY 변화율 단독 derived.
+  try {
+    const dxyHist = await fetchYahooHistory('DX-Y.NYB', 380);
+    if (dxyHist.length >= 250) {
+      const cur = dxyHist[dxyHist.length - 1].close;
+      const past = dxyHist[Math.max(0, dxyHist.length - 252)].close;
+      if (past > 0) {
+        const yoy = (cur - past) / past * 100;
+        let level: number;
+        let label: string;
+        if (yoy <= -5) { level = 1; label = `🟢 DXY 12M ${yoy.toFixed(1)}% ≤ -5 (약달러 우호)`; }
+        else if (yoy >= 5) { level = -1; label = `🔴 DXY 12M ${yoy.toFixed(1)}% ≥ +5 (강달러 위협)`; }
+        else { level = 0; label = `⚪ DXY 12M ${yoy.toFixed(1)}%`; }
+        d.DXY_12M_YOY = {
+          name: 'dxy_12m_yoy',
+          value: level,
+          date: today(),
+          formula: `DXY 12M YoY: ${past.toFixed(2)} → ${cur.toFixed(2)} = ${yoy >= 0 ? '+' : ''}${yoy.toFixed(2)}% → level=${level}. ${label}. video2 §"중앙은행 매수 proxy (b)".`,
+        };
+      }
     }
   } catch { void 0; }
 
