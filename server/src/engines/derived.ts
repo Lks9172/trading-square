@@ -5916,15 +5916,23 @@ export async function computeDerived(
     } else {
       fundLabel = '펀더 데이터 결측 → 0';
     }
-    // (b) 매크로 축 — REGIME 은 derived 가 아닌 cache.ts 후 단계에서 계산되므로 raw history-store 에서 latest signal:REGIME 읽기.
+    // (b) 매크로 축 — REGIME 은 derived 가 아닌 cache.ts 후 단계에서 계산되므로 raw history-store 에서 latest signal:REGIME_LABEL (numeric code) 읽기.
     let macroAxis: number = 0;
     let macroLabel: string;
     let regimeStr: string | null = null;
     try {
-      const regimeHist = await readHistory('signal', 'REGIME').catch(() => [] as Array<{date:string; value:number; meta?:any}>);
-      if (regimeHist.length > 0) {
-        const last = regimeHist[regimeHist.length - 1] as any;
-        regimeStr = (last.meta?.regime ?? last.regime ?? null) as string | null;
+      const regimeLabelHist = await readHistory('signal', 'REGIME_LABEL').catch(() => [] as Array<{date:string; value:number}>);
+      if (regimeLabelHist.length > 0) {
+        const lastCode = regimeLabelHist[regimeLabelHist.length - 1].value;
+        // history-store regimeValue 매핑 역변환
+        if (lastCode === 100) regimeStr = 'RISK_ON';
+        else if (lastCode === 80) regimeStr = 'NEUTRAL';
+        else if (lastCode === 60) regimeStr = 'CAUTION';
+        else if (lastCode === 40) regimeStr = 'CORRECTION';
+        else if (lastCode === 30) regimeStr = 'STAGFLATION';
+        else if (lastCode === 20) regimeStr = 'PANIC_BUT_OK';
+        else if (lastCode === 10) regimeStr = 'BOND_VIGILANTE';
+        else if (lastCode === 0) regimeStr = 'RECESSION_RISK';
       }
     } catch { void 0; }
     if (regimeStr === 'RISK_ON' || regimeStr === 'NEUTRAL' || regimeStr === 'PANIC_BUT_OK') {
@@ -6198,7 +6206,8 @@ export async function computeDerived(
   //   bias=+1 (50DMA > 200DMA), match=가격 50DMA -3~-8%, confirms=가격 > 200DMA.
   //   정배열 + match + confirms → +1 / 역배열 + match → -1.
   try {
-    const dailyHistHP = await fetchYahooHistory('^IXIC', 250);
+    // calendar days ~ trading days * 1.45 (주말/공휴일 보정). 200 trading days 보장 위해 320 calendar days.
+    const dailyHistHP = await fetchYahooHistory('^IXIC', 320);
     if (dailyHistHP.length >= 200) {
       const closes = dailyHistHP.map((p) => p.close);
       const last = closes[closes.length - 1];
@@ -6455,10 +6464,17 @@ export async function computeDerived(
   try {
     let regimeStr: string | null = null;
     try {
-      const regimeHist = await readHistory('signal', 'REGIME').catch(() => [] as Array<{date:string; value:number; meta?:any}>);
-      if (regimeHist.length > 0) {
-        const last = regimeHist[regimeHist.length - 1] as any;
-        regimeStr = (last.meta?.regime ?? last.regime ?? null) as string | null;
+      const regimeLabelHist = await readHistory('signal', 'REGIME_LABEL').catch(() => [] as Array<{date:string; value:number}>);
+      if (regimeLabelHist.length > 0) {
+        const lastCode = regimeLabelHist[regimeLabelHist.length - 1].value;
+        if (lastCode === 100) regimeStr = 'RISK_ON';
+        else if (lastCode === 80) regimeStr = 'NEUTRAL';
+        else if (lastCode === 60) regimeStr = 'CAUTION';
+        else if (lastCode === 40) regimeStr = 'CORRECTION';
+        else if (lastCode === 30) regimeStr = 'STAGFLATION';
+        else if (lastCode === 20) regimeStr = 'PANIC_BUT_OK';
+        else if (lastCode === 10) regimeStr = 'BOND_VIGILANTE';
+        else if (lastCode === 0) regimeStr = 'RECESSION_RISK';
       }
     } catch { void 0; }
     const expected: Record<string, string[]> = {
