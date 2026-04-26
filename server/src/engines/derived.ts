@@ -8344,6 +8344,92 @@ export async function computeDerived(
     };
   } catch { void 0; }
 
+  // ★ === 29차 P3-E #28: KRX_PENSION_FUND_FLOW ===
+  // krx-flow.ts pension 분리 가능 — 5일 +1조 → +1 가점.
+  try {
+    let pensionT: number | null = null;
+    let source = 'manualInputs';
+    const manualPension = manualInputs?.krxPensionFlow5DTrillion ?? null;
+    if (manualPension !== null) {
+      pensionT = manualPension;
+    } else {
+      try {
+        const days = await fetchKrxInvestorFlow('KOSPI', new Date());
+        const summary = summarizeInvestorFlow('KOSPI', days);
+        if (summary && summary.pensionNet5D !== undefined) {
+          pensionT = summary.pensionNet5D / 10000; // 억원 → 조원
+          source = 'KRX live';
+        }
+      } catch { void 0; }
+    }
+    if (pensionT !== null) {
+      let level: number;
+      let label: string;
+      if (pensionT >= 1) { level = 1; label = `🟢 연기금 5D +${pensionT.toFixed(2)}조 ≥ +1 (KOSPI 보조 +1)`; }
+      else if (pensionT <= -1) { level = -1; label = `🔴 연기금 5D ${pensionT.toFixed(2)}조 ≤ -1 (매도 압력)`; }
+      else { level = 0; label = `⚪ 연기금 5D ${pensionT.toFixed(2)}조`; }
+      d.KRX_PENSION_FUND_FLOW = {
+        name: 'krx_pension_fund_flow',
+        value: level,
+        date: today(),
+        formula: `KRX 연기금 5D 누적 ${pensionT.toFixed(2)}조 (출처: ${source}). ${label}. 노션 §KRX 투자자별.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P3-E #29: KRX_SHORT_INTEREST_LEVEL ===
+  // video6 §06:31 "공매도 잔고 ≥ 3% → 숏스퀴즈".
+  try {
+    const shortPct = manualInputs?.krxShortInterestPct ?? null;
+    if (shortPct !== null) {
+      let level: number;
+      let label: string;
+      if (shortPct >= 5) { level = 2; label = `🟢🟢 공매도 ${shortPct.toFixed(1)}% ≥ 5% (강 숏스퀴즈)`; }
+      else if (shortPct >= 3) { level = 1; label = `🟢 공매도 ${shortPct.toFixed(1)}% ≥ 3% (숏스퀴즈 후보)`; }
+      else { level = 0; label = `⚪ 공매도 ${shortPct.toFixed(1)}%`; }
+      d.KRX_SHORT_INTEREST_LEVEL = {
+        name: 'krx_short_interest_level',
+        value: level,
+        date: today(),
+        formula: `KRX 공매도 잔고 ${shortPct.toFixed(2)}% → level=${level}. ${label}. video6 §06:31 "공매도 ≥ 3% → 숏스퀴즈".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P3-E #30: EARNINGS_SURPRISE_AGGREGATE_FLAG ===
+  // video4 §06 + 노션 §실적 캘린더 — 메가캡 7 평균 surprise rate.
+  try {
+    const { fetchEarningsSurprises } = await import('../collectors/earnings');
+    const agg = await fetchEarningsSurprises();
+    if (agg !== null) {
+      const avg = agg.avgSurprisePct;
+      let flag: number;
+      let label: string;
+      if (avg >= 5) { flag = 1; label = `🟢 메가캡 평균 +${avg.toFixed(1)}% ≥ 5% (NASDAQ 우호)`; }
+      else if (avg <= -5) { flag = -1; label = `🔴 메가캡 평균 ${avg.toFixed(1)}% ≤ -5% (NASDAQ 위협)`; }
+      else { flag = 0; label = `⚪ 메가캡 평균 ${avg.toFixed(1)}%`; }
+      d.EARNINGS_SURPRISE_AGGREGATE_FLAG = {
+        name: 'earnings_surprise_aggregate_flag',
+        value: flag,
+        date: today(),
+        formula: `메가캡 ${agg.totalCount}/7 평균 surprise ${avg.toFixed(2)}%, beat ${agg.beatCount}/miss ${agg.missCount}. ${label}. video4 §06 + 노션 §실적 캘린더.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P3-E #32: KOSPI_VOLUME_TIER_15T_LOW_FLAG (P2-E 보강) ===
+  // 노션 "주간 거래대금 15조 이하 = 약세" — 별도 flag 분리.
+  try {
+    const volTier = d.KOSPI_VOLUME_TIER?.value ?? null;
+    const flag = volTier === -1 ? 1 : 0;
+    d.KOSPI_VOLUME_TIER_15T_LOW_FLAG = {
+      name: 'kospi_volume_tier_15t_low_flag',
+      value: flag,
+      date: today(),
+      formula: `KOSPI_VOLUME_TIER=${volTier} → ${flag ? '🔴 < 15조 약세 flag' : '⚪ ≥ 15조'}. 노션 "주간 거래대금 15조 이하 = 약세".`,
+    };
+  } catch { void 0; }
+
   // ★ === 29차 P3-D #27: STRATEGY_VS_HOLD_DELTA ===
   // video1 §03:43 "전략 A buy&hold 의 inferiority" — 백테스트 alpha 노출.
   // 단순화: 최근 1년 NASDAQ 가격이 ATH 대비 -10% 이상 떨어졌다가 회복했는지로 alpha 발생 가능성 추정.

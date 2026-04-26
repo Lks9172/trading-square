@@ -30,6 +30,13 @@ export interface DomesticReportsLatest {
   marketInfo?: { latestDate: string; daysAgo: number; title?: string };
   investInfo?: { latestDate: string; daysAgo: number; title?: string };
   economy?: { latestDate: string; daysAgo: number; title?: string };
+  // ★ 29차 P3-E #31: 6대 증권사 RSS 확장 — 신한/KB/우리/미래에셋/하나/삼성
+  shinhan?: { latestDate: string; daysAgo: number; title?: string };
+  kbsec?: { latestDate: string; daysAgo: number; title?: string };
+  woori?: { latestDate: string; daysAgo: number; title?: string };
+  mirae?: { latestDate: string; daysAgo: number; title?: string };
+  hana?: { latestDate: string; daysAgo: number; title?: string };
+  samsung?: { latestDate: string; daysAgo: number; title?: string };
   fetchedAt: string;
 }
 
@@ -37,6 +44,13 @@ const LISTS = [
   { key: 'marketInfo', url: 'https://finance.naver.com/research/market_info_list.naver' },
   { key: 'investInfo', url: 'https://finance.naver.com/research/invest_list.naver' },
   { key: 'economy', url: 'https://finance.naver.com/research/economy_list.naver' },
+  // ★ 29차 P3-E #31: 노션 추천 6기관 — naver finance 의 증권사별 리포트 페이지로 보강.
+  { key: 'shinhan', url: 'https://finance.naver.com/research/company_list.naver?keyword=&brokerCode=003&searchType=&writeFromDate=&writeToDate=&itemCode=&x=0&y=0' },
+  { key: 'kbsec', url: 'https://finance.naver.com/research/company_list.naver?keyword=&brokerCode=016&searchType=&writeFromDate=&writeToDate=&itemCode=&x=0&y=0' },
+  { key: 'woori', url: 'https://finance.naver.com/research/company_list.naver?keyword=&brokerCode=023&searchType=&writeFromDate=&writeToDate=&itemCode=&x=0&y=0' },
+  { key: 'mirae', url: 'https://finance.naver.com/research/company_list.naver?keyword=&brokerCode=017&searchType=&writeFromDate=&writeToDate=&itemCode=&x=0&y=0' },
+  { key: 'hana', url: 'https://finance.naver.com/research/company_list.naver?keyword=&brokerCode=028&searchType=&writeFromDate=&writeToDate=&itemCode=&x=0&y=0' },
+  { key: 'samsung', url: 'https://finance.naver.com/research/company_list.naver?keyword=&brokerCode=036&searchType=&writeFromDate=&writeToDate=&itemCode=&x=0&y=0' },
 ] as const;
 
 function daysBetween(a: Date, b: Date): number {

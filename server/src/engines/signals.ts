@@ -668,6 +668,15 @@ function nasdaqSignal(
     reasons.push(`✓ yearly pin bar 다음 해 양봉 ${(pinRate * 100).toFixed(0)}% (참조 통계, video3 §09:09 "100%")`);
   }
 
+  // ★ === 29차 P3-E #30: EARNINGS_SURPRISE_AGGREGATE_FLAG ===
+  const earningsAgg = dv(derived, 'EARNINGS_SURPRISE_AGGREGATE_FLAG');
+  if (earningsAgg === 1) {
+    met += 1;
+    reasons.push('✓ 메가캡 평균 surprise ≥+5% — NASDAQ 우호 (video4 §06)');
+  } else if (earningsAgg === -1) {
+    unmetReasons.push('⚠️ 메가캡 평균 surprise ≤-5% — NASDAQ 위협 (video4 §06)');
+  }
+
   // ★ === 29차 P3-D #22: EVENT_DAY_VOLATILITY_GUARD — 신규 매수 보류 ===
   const eventGuard = dv(derived, 'EVENT_DAY_VOLATILITY_GUARD');
   if (eventGuard === 1) {
@@ -1743,6 +1752,24 @@ function kospiSignal(
     reasons.push('✓ 추경 효과 반영 시점 도달 (D+180 경과, stt_kospi §10:30)');
   } else if (fiscalProg !== null && fiscalProg >= 0.5) {
     reasons.push('🟡 추경 효과 절반 진입 (보조, stt_kospi §10:30)');
+  }
+
+  // ★ === 29차 P3-E #28: KRX_PENSION_FUND_FLOW — 연기금 5D +1조 가점 ===
+  const pensionFlow = dv(derived, 'KRX_PENSION_FUND_FLOW');
+  if (pensionFlow === 1) {
+    met += 1;
+    reasons.push('✓ KRX 연기금 5D ≥ +1조 — 안정적 매수 기반 (보조)');
+  } else if (pensionFlow === -1) {
+    unmetReasons.push('⚠️ KRX 연기금 5D ≤ -1조 — 매도 압력 (보조)');
+  }
+
+  // ★ === 29차 P3-E #29: KRX_SHORT_INTEREST_LEVEL — 숏스퀴즈 후보 ===
+  const shortLvl = dv(derived, 'KRX_SHORT_INTEREST_LEVEL');
+  if (shortLvl === 2) {
+    met += 1;
+    reasons.push('✓ 공매도 ≥5% — 강 숏스퀴즈 후보 (video6 §06:31)');
+  } else if (shortLvl === 1) {
+    reasons.push('✓ 공매도 ≥3% — 숏스퀴즈 후보 (video6 §06:31, 보조)');
   }
 
   // ★ === 29차 P3-C #20: KOSPI_UNCHARTED_TERRITORY_FLAG — 심리 불안 경고 ===
