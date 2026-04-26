@@ -708,6 +708,49 @@ function goldSignal(
 
   const pct = (score / maxScore) * 100;
 
+  // ★ === 29차 P2-A #1: GOLD_PANIC_BUY_TRIGGER 가산 ===
+  // video2 §04:27 "공황 초기엔 금도 같이 빠진다 — 거시환경 우호면 그때가 매수 기회".
+  const goldPanicBuy = dv(derived, 'GOLD_PANIC_BUY_TRIGGER');
+  if (goldPanicBuy === 1) {
+    score += 1; maxScore += 1; metCount += 1;
+    reasons.push('✓ 공황 초기 동반 하락 매수 (video2 §04:27)');
+  }
+
+  // ★ === 29차 P2-A #2: GOLD_PINBAR_SEQUENCE — overheat flag ===
+  // video2 §20:01-20:43 "윗·아래꼬리 핀바 연속 = 천장 경계".
+  const goldPinbar = dv(derived, 'GOLD_PINBAR_SEQUENCE');
+  if (goldPinbar === 1) {
+    unmetReasons.push('⚠️ 핀바 연속 시퀀스 — 방향 혼란 박스권 (video2 §20:01)');
+  }
+
+  // ★ === 29차 P2-A #3: GOLD_WEDGE_PATTERN ===
+  // video2 §22:24-22:41 "쐐기 — 상단/하단 추세선 한 점 수렴".
+  const goldWedge = dv(derived, 'GOLD_WEDGE_PATTERN');
+  if (goldWedge === 1) {
+    score += 1; maxScore += 1;
+    reasons.push('✓ 쐐기 상단 돌파 (video2 §22:24)');
+  } else if (goldWedge === -1) {
+    unmetReasons.push('⚠️ 쐐기 하단 이탈 (video2 §22:24)');
+  }
+
+  // ★ === 29차 P2-A #4: GOLD_BREAK_VOLUME_CONFIRM ===
+  // video2 §25:21-25:42 "거래량 없이 빠지면 가짜 이탈".
+  const goldBreakVol = dv(derived, 'GOLD_BREAK_VOLUME_CONFIRM');
+  if (goldBreakVol === 1) {
+    score += 0.5; maxScore += 0.5;
+    reasons.push('✓ 박스권 break 거래량 확인 (video2 §25:21)');
+  } else if (goldBreakVol === -1) {
+    unmetReasons.push('⚠️ 박스권 break — 거래량 미확인 (가짜 이탈, video2 §25:21)');
+  }
+
+  // ★ === 29차 P2-A #5: GOLD_DXY_DECOUPLE ===
+  // video2 §04:54-04:57 "달러 강한데 금이 안 빠지면 = 구조적 수요".
+  const goldDxyDecouple = dv(derived, 'GOLD_DXY_DECOUPLE');
+  if (goldDxyDecouple === 1) {
+    score += 1; maxScore += 1; metCount += 1;
+    reasons.push('✓ DXY 강세 + 금 상승 디커플 — 구조적 수요 (video2 §04:54)');
+  }
+
   // ★ === 29차 P1-B #6: GOLD_AXIS_GATE_FLAG — HEADWIND 시 지정학 단독 매수 차단 ===
   // video2 §10:48 "1·2순위 (실질금리·DXY) NG 시 추격 금지".
   // gateFlag = -1 (HEADWIND) AND 지정학(rank4) 단독 우호 시 reason 가산 (실제 강등은 baseSignal 결정 후 override 단계에서).

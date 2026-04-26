@@ -6524,6 +6524,220 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
+  // ★ === 29차 P2-A #1: GOLD_PANIC_BUY_TRIGGER ===
+  // video2 §04:27 "공황 초기엔 금도 같이 빠진다 — 거시환경 우호면 그때가 매수 기회".
+  // 식: VIX(raw) ≥ 30 AND GOLD 20D 수익률 < -7% AND REAL_YIELD_TREND < 0 → 3축 모두 → +1.
+  try {
+    const vixCur = val(raw, 'VIXCLS');
+    let gold20DRet: number | null = null;
+    try {
+      const g = await fetchYahooHistory('GC=F', 25);
+      if (g.length >= 20) {
+        const g0 = g[g.length - 20].close;
+        const g1 = g[g.length - 1].close;
+        if (g0 > 0) gold20DRet = ((g1 - g0) / g0) * 100;
+      }
+    } catch { void 0; }
+    const ryTrend = d.REAL_YIELD_TREND?.value ?? null;
+    let level = 0;
+    const axes: string[] = [];
+    if (vixCur !== null && vixCur >= 30) axes.push(`VIX ${vixCur.toFixed(1)} ≥ 30`);
+    if (gold20DRet !== null && gold20DRet < -7) axes.push(`GOLD 20D ${gold20DRet.toFixed(1)}% < -7%`);
+    if (ryTrend !== null && ryTrend < 0) axes.push(`REAL_YIELD_TREND ${ryTrend.toFixed(3)} < 0`);
+    if (vixCur !== null && vixCur >= 30 && gold20DRet !== null && gold20DRet < -7 && ryTrend !== null && ryTrend < 0) level = 1;
+    d.GOLD_PANIC_BUY_TRIGGER = {
+      name: 'gold_panic_buy_trigger',
+      value: level,
+      date: today(),
+      formula: `${axes.length}/3 축 충족 [${axes.join(' | ')}] → ${level === 1 ? '🟢 공황 동반 하락 매수 기회' : '⚪ 미충족'}. video2 §04:27 "공황 초기엔 금도 같이 빠진다".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-A #2: GOLD_PINBAR_SEQUENCE ===
+  // video2 §20:01-20:43 "윗꼬리·아래꼬리 핀바 연속 = 천장 경계".
+  // 60일 → 주봉 환산 후 직전 2주 윗꼬리 핀바 + 직후 1주 아래꼬리 핀바 페어 검출.
+  // 윗꼬리/실체 ≥ 1.5 = 윗꼬리 핀바, 아래꼬리/실체 ≥ 1.5 = 아래꼬리 핀바.
+  try {
+    const goldOHLC = await fetchYahooOHLC('GC=F', 60, '1wk');
+    let level = 0;
+    let detail = '데이터 부족';
+    if (goldOHLC.length >= 3) {
+      const last3 = goldOHLC.slice(-3);
+      const isUpperPin = (c: typeof last3[0]): boolean => {
+        const body = Math.abs(c.close - c.open);
+        if (body <= 0) return false;
+        const upper = c.high - Math.max(c.open, c.close);
+        return upper / body >= 1.5;
+      };
+      const isLowerPin = (c: typeof last3[0]): boolean => {
+        const body = Math.abs(c.close - c.open);
+        if (body <= 0) return false;
+        const lower = Math.min(c.open, c.close) - c.low;
+        return lower / body >= 1.5;
+      };
+      // 직전 2주 윗꼬리 + 직후 1주 아래꼬리 = 페어 매치
+      const w0 = last3[0]; const w1 = last3[1]; const w2 = last3[2];
+      const upper2 = isUpperPin(w0) && isUpperPin(w1);
+      const lower1 = isLowerPin(w2);
+      if (upper2 && lower1) {
+        level = 1;
+        detail = `🟡 직전 2주 윗꼬리 핀바 + 직후 1주 아래꼬리 핀바 페어 — 방향 혼란 박스권 진입`;
+      } else {
+        detail = `미매치 (직전 2주 윗꼬리=${upper2}, 직후 1주 아래꼬리=${lower1})`;
+      }
+    }
+    d.GOLD_PINBAR_SEQUENCE = {
+      name: 'gold_pinbar_sequence',
+      value: level,
+      date: today(),
+      formula: `${detail}. video2 §20:01-20:43 "윗·아래꼬리 핀바 연속 = 천장 경계".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-A #3: GOLD_WEDGE_PATTERN ===
+  // video2 §22:24-22:41 "쐐기 — 상단/하단 추세선 한 점 수렴".
+  // 30일 high 추세선 + 30일 low 추세선, 두 기울기 부호 반대 (수렴) AND 수렴 시점 30일 이내.
+  // 가격 상단 돌파 → +1, 하단 이탈 → -1, 내부 → 0.
+  try {
+    const goldDailyOHLC = await fetchYahooOHLC('GC=F', 60, '1d');
+    let level = 0;
+    let detail = '데이터 부족';
+    if (goldDailyOHLC.length >= 30) {
+      const recent30 = goldDailyOHLC.slice(-30);
+      // linear regression of highs and lows
+      const xs = recent30.map((_, i) => i);
+      const highs = recent30.map((c) => c.high);
+      const lows = recent30.map((c) => c.low);
+      const linReg = (xs: number[], ys: number[]): { slope: number; intercept: number } => {
+        const n = xs.length;
+        const xMean = xs.reduce((s, v) => s + v, 0) / n;
+        const yMean = ys.reduce((s, v) => s + v, 0) / n;
+        let num = 0; let den = 0;
+        for (let i = 0; i < n; i++) {
+          num += (xs[i] - xMean) * (ys[i] - yMean);
+          den += (xs[i] - xMean) ** 2;
+        }
+        const slope = den > 0 ? num / den : 0;
+        return { slope, intercept: yMean - slope * xMean };
+      };
+      const hReg = linReg(xs, highs);
+      const lReg = linReg(xs, lows);
+      // 두 기울기 부호 반대 → 수렴
+      const converging = hReg.slope * lReg.slope < 0;
+      // 수렴 시점 = (intercept_l - intercept_h) / (slope_h - slope_l)
+      let convergeDays: number | null = null;
+      if (converging && Math.abs(hReg.slope - lReg.slope) > 1e-9) {
+        const xConv = (lReg.intercept - hReg.intercept) / (hReg.slope - lReg.slope);
+        convergeDays = xConv - (recent30.length - 1);
+      }
+      if (converging && convergeDays !== null && convergeDays > 0 && convergeDays <= 30) {
+        // 현재가 vs 추세선 평가
+        const curIdx = recent30.length - 1;
+        const upperLine = hReg.slope * curIdx + hReg.intercept;
+        const lowerLine = lReg.slope * curIdx + lReg.intercept;
+        const lastClose = recent30[curIdx].close;
+        if (lastClose > upperLine) { level = 1; detail = `🟢 상단 돌파 (${lastClose.toFixed(0)} > 상단 ${upperLine.toFixed(0)}, 수렴 D+${convergeDays.toFixed(0)})`; }
+        else if (lastClose < lowerLine) { level = -1; detail = `🔴 하단 이탈 (${lastClose.toFixed(0)} < 하단 ${lowerLine.toFixed(0)}, 수렴 D+${convergeDays.toFixed(0)})`; }
+        else { level = 0; detail = `⚪ 내부 (${lowerLine.toFixed(0)} < ${lastClose.toFixed(0)} < ${upperLine.toFixed(0)}, 수렴 D+${convergeDays.toFixed(0)})`; }
+      } else {
+        detail = `쐐기 미감지 (수렴=${converging}, 수렴일=${convergeDays?.toFixed(0) ?? 'N/A'})`;
+      }
+    }
+    d.GOLD_WEDGE_PATTERN = {
+      name: 'gold_wedge_pattern',
+      value: level,
+      date: today(),
+      formula: `${detail}. video2 §22:24-22:41 "쐐기 — 상단/하단 추세선 한 점 수렴".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-A #4: GOLD_BREAK_VOLUME_CONFIRM ===
+  // video2 §25:21-25:42 "거래량 없이 빠지면 가짜 이탈".
+  // 30일 박스권 high/low break 시점 검출 + break 일 거래량 vs 직전 20D 평균.
+  // ≥ 1.5x → confirm=1 (진짜) / < 1.5x → fakeout=-1 (가짜) / 0 = 박스권 내부.
+  try {
+    const goldHist = await fetchYahooHistory('GC=F', 35);
+    let level = 0;
+    let detail = '데이터 부족';
+    if (goldHist.length >= 30) {
+      const recent = goldHist.slice(-30);
+      const last = recent[recent.length - 1];
+      const prior29 = recent.slice(0, -1);
+      const priorHigh = Math.max(...prior29.map((p) => p.close));
+      const priorLow = Math.min(...prior29.map((p) => p.close));
+      // 직전 20D 평균 거래량
+      const last20Vols = recent.slice(-21, -1).map((p) => p.volume ?? 0).filter((v) => v > 0);
+      const avgVol = last20Vols.length > 0 ? last20Vols.reduce((s, v) => s + v, 0) / last20Vols.length : 0;
+      const todayVol = last.volume ?? 0;
+      const ratio = avgVol > 0 ? todayVol / avgVol : 0;
+      if (last.close > priorHigh) {
+        if (ratio >= 1.5) { level = 1; detail = `🟢 상단 돌파 + 거래량 ${ratio.toFixed(2)}x ≥ 1.5x (진짜)`; }
+        else { level = -1; detail = `🔴 상단 돌파 but 거래량 ${ratio.toFixed(2)}x < 1.5x (가짜)`; }
+      } else if (last.close < priorLow) {
+        if (ratio >= 1.5) { level = 1; detail = `🟢 하단 이탈 + 거래량 ${ratio.toFixed(2)}x ≥ 1.5x (진짜)`; }
+        else { level = -1; detail = `🔴 하단 이탈 but 거래량 ${ratio.toFixed(2)}x < 1.5x (가짜)`; }
+      } else {
+        detail = `⚪ 박스권 내부 (low ${priorLow.toFixed(0)} ≤ ${last.close.toFixed(0)} ≤ high ${priorHigh.toFixed(0)})`;
+      }
+    }
+    d.GOLD_BREAK_VOLUME_CONFIRM = {
+      name: 'gold_break_volume_confirm',
+      value: level,
+      date: today(),
+      formula: `${detail}. video2 §25:21-25:42 "거래량 없이 빠지면 가짜 이탈".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-A #5: GOLD_DXY_DECOUPLE ===
+  // video2 §04:54-04:57 "달러 강한데 금이 안 빠지면 = 구조적 수요 신호".
+  // DXY 20D return AND GOLD 20D return AND 60D 상관계수
+  // DXY > 0 (강세) AND GOLD > 0 (상승) AND 상관계수 ≥ -0.2 (정상은 -0.5 이하) → +1.
+  try {
+    const dxyHist60 = await fetchYahooHistory('DX-Y.NYB', 70);
+    const goldHist60 = await fetchYahooHistory('GC=F', 70);
+    let level = 0;
+    let detail = '데이터 부족';
+    if (dxyHist60.length >= 60 && goldHist60.length >= 60) {
+      const dxyR60 = dxyHist60.slice(-60);
+      const goldR60 = goldHist60.slice(-60);
+      const minLen = Math.min(dxyR60.length, goldR60.length);
+      const dxyR = dxyR60.slice(-minLen);
+      const goldR = goldR60.slice(-minLen);
+      // 20D 수익률
+      const dxy20Ret = dxyR.length >= 20 ? ((dxyR[dxyR.length - 1].close - dxyR[dxyR.length - 20].close) / dxyR[dxyR.length - 20].close) * 100 : null;
+      const gold20Ret = goldR.length >= 20 ? ((goldR[goldR.length - 1].close - goldR[goldR.length - 20].close) / goldR[goldR.length - 20].close) * 100 : null;
+      // 60D 일별 수익률 상관
+      const dxyRet: number[] = [];
+      const goldRet: number[] = [];
+      for (let i = 1; i < minLen; i++) {
+        dxyRet.push((dxyR[i].close - dxyR[i - 1].close) / dxyR[i - 1].close);
+        goldRet.push((goldR[i].close - goldR[i - 1].close) / goldR[i - 1].close);
+      }
+      const n = dxyRet.length;
+      const dxyMean = dxyRet.reduce((s, v) => s + v, 0) / n;
+      const goldMean = goldRet.reduce((s, v) => s + v, 0) / n;
+      let cov = 0; let dxyVar = 0; let goldVar = 0;
+      for (let i = 0; i < n; i++) {
+        cov += (dxyRet[i] - dxyMean) * (goldRet[i] - goldMean);
+        dxyVar += (dxyRet[i] - dxyMean) ** 2;
+        goldVar += (goldRet[i] - goldMean) ** 2;
+      }
+      const corr = dxyVar > 0 && goldVar > 0 ? cov / Math.sqrt(dxyVar * goldVar) : 0;
+      if (dxy20Ret !== null && dxy20Ret > 0 && gold20Ret !== null && gold20Ret > 0 && corr >= -0.2) {
+        level = 1;
+        detail = `🟢 DXY +${dxy20Ret.toFixed(2)}% + GOLD +${gold20Ret.toFixed(2)}% + corr ${corr.toFixed(2)} ≥ -0.2 → 구조적 수요`;
+      } else {
+        detail = `미충족: DXY 20D ${dxy20Ret?.toFixed(2) ?? '?'}%, GOLD 20D ${gold20Ret?.toFixed(2) ?? '?'}%, corr ${corr.toFixed(2)} (정상 ≤ -0.5)`;
+      }
+    }
+    d.GOLD_DXY_DECOUPLE = {
+      name: 'gold_dxy_decouple',
+      value: level,
+      date: today(),
+      formula: `${detail}. video2 §04:54-04:57 "달러 강한데 금이 안 빠지면 = 구조적 수요".`,
+    };
+  } catch { void 0; }
+
   return d;
 }
 
