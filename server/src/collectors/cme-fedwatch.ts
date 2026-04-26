@@ -117,8 +117,7 @@ async function fetchZqFront(): Promise<number | null> {
 }
 
 async function fetchTargetMid(): Promise<number | null> {
-  // FRED DFEDTARU (upper) + DFEDTARL (lower) 평균. derived 에 raw 로 들어와 있을 가능성도 있지만
-  // 여기서는 collectors 인덱스를 우회해 직접 history 로 접근.
+  // 우선 DFEDTARU/L 평균, 없으면 EFFR (effective rate, 항상 수집됨) fallback.
   try {
     const { readHistory } = await import('../state/history-store');
     const upper = await readHistory('fred', 'DFEDTARU');
@@ -126,6 +125,12 @@ async function fetchTargetMid(): Promise<number | null> {
     const u = upper.length > 0 ? upper[upper.length - 1].value : null;
     const l = lower.length > 0 ? lower[lower.length - 1].value : null;
     if (typeof u === 'number' && typeof l === 'number') return (u + l) / 2;
+    // Fallback: EFFR (effective rate). target mid 와 1-2bp 차이만 있어 ZQ 갭 계산에 거의 영향 없음.
+    const effr = await readHistory('fred', 'EFFR');
+    if (effr.length > 0) {
+      const v = effr[effr.length - 1].value;
+      if (typeof v === 'number') return v;
+    }
     return null;
   } catch {
     return null;
