@@ -5556,27 +5556,28 @@ export async function computeDerived(
 
   // === 28차 #1: NASDAQ_RISK_REWARD_RATIO (손익비) ===
   // video6 §"3일 30% 오른 주식 — 더 오를 폭 10% / 빠질 폭 30% = 1:3 손익비"
+  // fetchYahooHistory 는 거래일 기준 ~45일 / 100일 calendar request → ~65 거래일.
   try {
-    const nHist = await fetchYahooHistory('^IXIC', 65);
-    if (nHist.length >= 60) {
+    const nHist = await fetchYahooHistory('^IXIC', 100);
+    if (nHist.length >= 30) {
       const closes = nHist.map((h) => h.close);
       const last = closes[closes.length - 1];
       const ath30 = Math.max(...closes.slice(-30));
-      const low60 = Math.min(...closes.slice(-60));
+      const lowWindow = Math.min(60, closes.length);
+      const lowN = Math.min(...closes.slice(-lowWindow));
       const upside = Math.max(0, ath30 - last);
-      const downside = Math.max(0.01, last - low60);
+      const downside = Math.max(0.01, last - lowN);
       const rr = upside / downside;
-      let level: number;
       let label: string;
-      if (rr >= 3) { level = 2; label = `🟢 손익비 1:${rr.toFixed(1)} 우호`; }
-      else if (rr >= 1.5) { level = 1; label = `🔵 손익비 1:${rr.toFixed(1)} 양호`; }
-      else if (rr >= 0.5) { level = 0; label = `🟡 손익비 1:${rr.toFixed(2)} 균형`; }
-      else { level = -1; label = `🔴 손익비 1:${rr.toFixed(2)} 추격 위험 — video6 §"오를 폭 < 빠질 폭"`; }
+      if (rr >= 3) { label = `🟢 손익비 1:${rr.toFixed(1)} 우호`; }
+      else if (rr >= 1.5) { label = `🔵 손익비 1:${rr.toFixed(1)} 양호`; }
+      else if (rr >= 0.5) { label = `🟡 손익비 1:${rr.toFixed(2)} 균형`; }
+      else { label = `🔴 손익비 1:${rr.toFixed(2)} 추격 위험 — video6 §"오를 폭 < 빠질 폭"`; }
       d.NASDAQ_RISK_REWARD_RATIO = {
         name: 'nasdaq_risk_reward_ratio',
         value: parseFloat(rr.toFixed(2)),
         date: today(),
-        formula: `30D ATH ${ath30.toFixed(0)} - 현재 ${last.toFixed(0)} = upside ${upside.toFixed(0)} / 60D 저점 ${low60.toFixed(0)} → downside ${downside.toFixed(0)} = RR ${rr.toFixed(2)}. ${label}. video6 §손익비.`,
+        formula: `30D ATH ${ath30.toFixed(0)} - 현재 ${last.toFixed(0)} = upside ${upside.toFixed(0)} / ${lowWindow}D 저점 ${lowN.toFixed(0)} → downside ${downside.toFixed(0)} = RR ${rr.toFixed(2)}. ${label}. video6 §손익비.`,
       };
     }
   } catch { void 0; }
