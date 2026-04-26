@@ -138,6 +138,21 @@ export async function computeDerived(
       date: dt,
       formula: 'GOLD / SILVER',
     };
+    // 26차 P1#2: GSR 60-80 평균 대비 위치 (video2 §1부 "역사 평균 60~80")
+    // 절대 위치: <60 = 은 비싸 / 60-80 정상 / 80-100 금 강세 / >100 극단
+    const gsr = gold / silver;
+    let gsrPositionLabel: string;
+    let gsrPositionValue: number;
+    if (gsr < 60) { gsrPositionValue = -1; gsrPositionLabel = '🟢 은 강세 (GSR<60, 역사 평균 하단)'; }
+    else if (gsr <= 80) { gsrPositionValue = 0; gsrPositionLabel = '⚪ 역사 평균 60-80 구간 정상'; }
+    else if (gsr <= 100) { gsrPositionValue = 1; gsrPositionLabel = '🟡 금 우세 (GSR 80-100)'; }
+    else { gsrPositionValue = 2; gsrPositionLabel = '🔴 GSR 100+ 극단 (video2 §"코로나 130→은 150%" 사례 구간)'; }
+    d.GOLD_SILVER_RATIO_HISTORICAL_BAND = {
+      name: 'gold_silver_ratio_historical_band',
+      value: gsrPositionValue,
+      date: dt,
+      formula: `GSR=${gsr.toFixed(1)} → ${gsrPositionLabel}. video2 §1부 "역사 평균 60-80".`,
+    };
   }
 
   const copper = val(raw, 'COPPER');
@@ -148,6 +163,17 @@ export async function computeDerived(
       date: dt,
       formula: 'COPPER / GOLD',
     };
+    // 26차 P1#1: GOLD/COPPER 역방향 비율 — video2 §3부 "주식 시장 방향 미리 읽기"
+    // 코퍼가 비싸지면 (copper/gold ↑) 경기 회복 / 금이 비싸지면 (gold/copper ↑) 경기 둔화/위험 회피
+    if (copper > 0) {
+      const goldCopper = gold / copper;
+      d.GOLD_COPPER_RATIO = {
+        name: 'gold_copper_ratio',
+        value: parseFloat(goldCopper.toFixed(2)),
+        date: dt,
+        formula: `GOLD / COPPER = ${goldCopper.toFixed(2)}. video2 §3부 "코로나 고점 = 상단" — 상승 = 경기 둔화/위험 회피, 하락 = 경기 회복.`,
+      };
+    }
   }
 
   // === 구리-주식 방향 괴리 감지 (11차 2026-04) — video2 원문 정합 ===
@@ -1732,7 +1758,9 @@ export async function computeDerived(
             name: 'kospi_fx_elasticity_deviation',
             value: elasticityDeviation !== null ? parseFloat(elasticityDeviation.toFixed(2)) : null,
             date: summary.latestDate,
-            formula: '|실제20D외인순매도| / |기대매도(FX×3조)|. >1.5=과매도(반발후보), <0.5=과소매도',
+            // 26차 P1#3: video5_analysis "1배 정상 / 2배 과잉" 정합 명시.
+            // stt_kospi §3부 "환율 5% 상승 vs 외국인 60조 매도 = 12배 ATM화" 극단 사례 인용.
+            formula: '|실제20D외인순매도| / |기대매도(FX×3조)|. video5 §"1배 정상 / 2배 과잉" / stt_kospi §3부 "12배 ATM화 비정상". <0.5=과소매도, ≥1.5=과매도 반발 후보, ≥2=ATM 경고, ≥6=극단.',
           };
           // 기존 divergence 유지 (부호 포함 비율 — 방향성 확인용)
           const divergence = expectedSell !== 0 ? actualNet / expectedSell : 0;
@@ -4583,6 +4611,25 @@ export async function computeDerived(
   // 21차 신규 derived
   // ═══════════════════════════════════════════════════════════════════════
 
+  // === 26차 P1#4: USER_USD_CAPITAL_TOTAL — 사용자 USD 자본 추적 ===
+  // KRW + USD 보유 합계를 USD 환산 (USDKRW 활용). 권고 vs 실제 USD 격차 측정 기반.
+  try {
+    const { readInvestmentPlan } = await import('../services/investment-plan');
+    const plan = await readInvestmentPlan();
+    const usdkrwRate = val(raw, 'USDKRW') ?? 1400;
+    const krwInUSD = (plan.totalCapitalKRW ?? 0) / usdkrwRate;
+    const usdDirect = plan.totalCapitalUSD ?? 0;
+    const totalUSD = krwInUSD + usdDirect;
+    if (totalUSD > 0) {
+      d.USER_USD_CAPITAL_TOTAL = {
+        name: 'user_usd_capital_total',
+        value: parseFloat(totalUSD.toFixed(0)),
+        date: today(),
+        formula: `KRW ${(plan.totalCapitalKRW ?? 0).toLocaleString()} / ${usdkrwRate.toFixed(0)} = ${krwInUSD.toFixed(0)} USD + USD ${usdDirect.toLocaleString()} = total ${totalUSD.toFixed(0)} USD. 26차 P1#4.`,
+      };
+    }
+  } catch { void 0; }
+
   // === 21차 P1#2: PORTFOLIO_DRIFT (사용자 보유 vs 권장) ===
   // video1 §5부 "비중 기준 없으면 결국 그때그때 감정". InvestmentPlan.currentHoldings 와
   // 시스템 allocation 권고의 절대 차이 합 / 2 → drift % (동일 시 0, 완전 다름 시 100).
@@ -5314,6 +5361,150 @@ export async function computeDerived(
         value: level,
         date: today(),
         formula: `30Y Δ=${yield30Up.toFixed(2)}bp, DXY Δ=${dxyChangePct.toFixed(2)}%. ${label}. video4 §"미국이 불확실성의 근원" — 30Y↑+DXY↓ 동시 = 탈달러 구조 전환.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 26차 Phase 2 신규 (5~14)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // === Phase 2#5: US_DEBT_GDP_2031_PROJECTION ===
+  // video4 §10:20 IMF 2031 부채/GDP 140%. 현재 vs 2031 예상 trajectory.
+  try {
+    const debtGdp = val(raw, 'FEDERAL_DEBT_GDP') ?? null;
+    if (debtGdp !== null) {
+      // IMF 2031 = 140%. 현재값 → 2031 까지 연간 평균 변화율 추정 (약 6년 가정)
+      const projectedGap = 140 - debtGdp;
+      const yearsToIMFTarget = 6;
+      const annualPace = projectedGap / yearsToIMFTarget;
+      let level: number;
+      let label: string;
+      if (debtGdp >= 135) { level = 2; label = '🔴 IMF 2031 목표(140%) 임박 — 채권자경단 가속 위험'; }
+      else if (debtGdp >= 125) { level = 1; label = '🟠 2031 trajectory 진행 중'; }
+      else if (debtGdp >= 110) { level = 0; label = '🟡 trajectory 정상 범위'; }
+      else { level = -1; label = '🟢 부채 안정'; }
+      d.US_DEBT_GDP_2031_PROJECTION = {
+        name: 'us_debt_gdp_2031_projection',
+        value: level,
+        date: today(),
+        formula: `현재 부채/GDP=${debtGdp.toFixed(1)}% vs IMF 2031 목표 140% (gap ${projectedGap.toFixed(1)}%p, 연 ${annualPace.toFixed(1)}%p 페이스). ${label}. video4 §10:20.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === Phase 2#6: TRUMP_TAX_CUT_DEFICIT_PROJECTION ===
+  // video4 §10:11 트럼프 감세 10년 3.3조 추가 적자. 현재 적자 vs 누적 trajectory.
+  try {
+    const deficitGdp = val(raw, 'FEDERAL_DEFICIT_GDP') ?? null;
+    if (deficitGdp !== null) {
+      // 3.3조 / 10년 = 연 0.33조. 현재 GDP 약 27조 → 약 1.2%p / 년 추가 부담
+      const annualAddPctGdp = 1.2;
+      const projectedDeficitIn5Y = deficitGdp + annualAddPctGdp * 5;
+      let level: number;
+      let label: string;
+      if (deficitGdp >= 8) { level = 2; label = '🔴 적자 8%+ 이미 위험, 감세 누적 가속'; }
+      else if (deficitGdp >= 6) { level = 1; label = '🟠 적자 6-8% + 감세 trajectory 경계'; }
+      else { level = 0; label = '⚪ 정상 범위 (감세 누적 trajectory 모니터)'; }
+      d.TRUMP_TAX_CUT_DEFICIT_PROJECTION = {
+        name: 'trump_tax_cut_deficit_projection',
+        value: level,
+        date: today(),
+        formula: `현재 적자/GDP=${deficitGdp.toFixed(1)}% + 감세 10년 3.3조 (≈연 ${annualAddPctGdp}%p) → 5년 후 추정 ${projectedDeficitIn5Y.toFixed(1)}%. ${label}. video4 §10:11.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === Phase 2#7: 반도체 수출 300억 임계 — 데이터 소스 부재 시 manual 또는 KOSPI proxy ===
+  // stt_kospi §1부 "3월 사상 첫 300억 달러 돌파". 직접 raw 부재 — SOXX 30D 수익률을 proxy 로.
+  try {
+    const soxx = d.SECTOR_SOXX?.value ?? null;
+    if (soxx !== null) {
+      // SOXX 30D 강세 시 반도체 수출 우위 proxy
+      let level: number;
+      let label: string;
+      if (soxx >= 10) { level = 2; label = '🟢 반도체 모멘텀 강 (SOXX 30D ≥+10%, 수출 호조 proxy)'; }
+      else if (soxx >= 0) { level = 1; label = '🔵 반도체 양호'; }
+      else if (soxx >= -10) { level = 0; label = '🟡 반도체 둔화'; }
+      else { level = -1; label = '🟠 반도체 약세 (SOXX -10%↓)'; }
+      d.SEMI_EXPORT_PROXY_LEVEL = {
+        name: 'semi_export_proxy_level',
+        value: level,
+        date: today(),
+        formula: `SOXX 30D=${soxx.toFixed(1)}% (반도체 수출 proxy). ${label}. stt_kospi §1부 "300억 달러 돌파" 정합 시도 (직접 raw 부재).`,
+      };
+    }
+  } catch { void 0; }
+
+  // === Phase 2#8: GOLD_YEARLY_RETURN_HISTORICAL_RANK ===
+  // video2 §16:54 "1979 130% / 1973 90% 다음 역대 3위 73%".
+  try {
+    let gHist = await fetchYahooHistory('GLD', 1500);
+    if (gHist.length < 800) gHist = await fetchYahooHistory('GC=F', 1500);
+    if (gHist.length >= 252) {
+      const closes = gHist.map((h) => h.close);
+      const last = closes[closes.length - 1];
+      const yearAgo = closes[Math.max(0, closes.length - 252)];
+      const yoyPct = ((last - yearAgo) / yearAgo) * 100;
+      // 역사적 임계: 130% (1979), 90% (1973), 73% (영상 명시)
+      let rank: number;
+      let label: string;
+      if (yoyPct >= 73) { rank = 3; label = `🟢 금 연봉 ${yoyPct.toFixed(0)}% — video2 §"역대 3위 73%" 진입 또는 초과`; }
+      else if (yoyPct >= 50) { rank = 2; label = `🔵 금 연봉 ${yoyPct.toFixed(0)}% — 강한 상승`; }
+      else if (yoyPct >= 25) { rank = 1; label = `🟡 금 연봉 ${yoyPct.toFixed(0)}% — 양호`; }
+      else if (yoyPct >= 0) { rank = 0; label = `⚪ 금 연봉 ${yoyPct.toFixed(0)}%`; }
+      else { rank = -1; label = `🟠 금 연봉 ${yoyPct.toFixed(0)}% 약세`; }
+      d.GOLD_YEARLY_RETURN_HISTORICAL_RANK = {
+        name: 'gold_yearly_return_historical_rank',
+        value: rank,
+        date: today(),
+        formula: `금 1년 ${yoyPct.toFixed(2)}%. ${label}. video2 §16:54 "1979 130%/1973 90%/2024 73%".`,
+      };
+    }
+  } catch { void 0; }
+
+  // === Phase 2#9: NASDAQ_LONGTERM_CHANNEL_RETURN ===
+  // video3 §11:03 "2020-2021 153% 상승이 역사상 최대, 현재 150% 초과".
+  try {
+    const nHist = await fetchYahooHistory('^IXIC', 1260);
+    if (nHist.length >= 800) {
+      const closes = nHist.map((h) => h.close);
+      const last = closes[closes.length - 1];
+      // 5년 전 저점 대비 현재
+      const fiveYearLow = Math.min(...closes);
+      const cumulativeFromLow = ((last - fiveYearLow) / fiveYearLow) * 100;
+      let level: number;
+      let label: string;
+      if (cumulativeFromLow >= 200) { level = 3; label = `🔴 5년 저점 대비 +${cumulativeFromLow.toFixed(0)}% — 역사상 최대 초과 위험`; }
+      else if (cumulativeFromLow >= 150) { level = 2; label = `🟠 5년 저점 대비 +${cumulativeFromLow.toFixed(0)}% — video3 §"153% 역사상 최대" 임박`; }
+      else if (cumulativeFromLow >= 100) { level = 1; label = `🟡 5년 저점 대비 +${cumulativeFromLow.toFixed(0)}% — 강세 진행`; }
+      else { level = 0; label = `⚪ 5년 저점 대비 +${cumulativeFromLow.toFixed(0)}%`; }
+      d.NASDAQ_LONGTERM_CHANNEL_RETURN = {
+        name: 'nasdaq_longterm_channel_return',
+        value: parseFloat(cumulativeFromLow.toFixed(1)),
+        date: today(),
+        formula: `5년 저점 ${fiveYearLow.toFixed(0)} → 현재 ${last.toFixed(0)} = ${cumulativeFromLow.toFixed(1)}%. ${label}. video3 §11:03.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === Phase 2#14: OPERATOR_PROMISED_CONTENT_QUEUE_DAYS ===
+  // 노션 §"앞으로 풀어드릴 예정". 운영자 발신 빈도 추적 — kr-news (한경 GLOBAL) 마지막 글 vs 오늘.
+  try {
+    const krFresh = d.KR_NEWS_FRESHNESS_MINUTES?.value ?? null;
+    if (krFresh !== null) {
+      const daysSinceFresh = krFresh / (60 * 24);
+      let level: number;
+      let label: string;
+      if (daysSinceFresh <= 1) { level = 2; label = '🟢 운영자 발신 활발 (1일 이내)'; }
+      else if (daysSinceFresh <= 3) { level = 1; label = '🟡 운영자 발신 일상'; }
+      else if (daysSinceFresh <= 7) { level = 0; label = '⚪ 운영자 발신 1주 내'; }
+      else { level = -1; label = '🟠 운영자 발신 1주+ 공백'; }
+      d.OPERATOR_PROMISED_CONTENT_QUEUE = {
+        name: 'operator_promised_content_queue',
+        value: level,
+        date: today(),
+        formula: `KR 매크로 뉴스 마지막 ${daysSinceFresh.toFixed(1)}일 전 (proxy). ${label}. 노션 §"앞으로 풀어드릴 예정" 발신 추적.`,
       };
     }
   } catch { void 0; }

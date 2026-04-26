@@ -40,6 +40,18 @@ export interface InvestmentPlan {
   };
   // 21차 Phase 1#8: 자본 규모 / 투자 연차 / 계좌 종류
   totalCapitalKRW?: number;
+  // 26차 P1#4: USD 자본 분리 추적 + 자산별 USD 보유 (권고 vs 실제 USD 갭 측정)
+  totalCapitalUSD?: number;
+  currentHoldingsUSD?: {
+    cash?: number;
+    nasdaq?: number;
+    leverage?: number;
+    gold?: number;
+    silver?: number;
+    copper?: number;
+    korea?: number;
+    emerging?: number;
+  };
   investmentExperienceYears?: number;
   accountType?: 'general' | 'isa' | 'pension' | 'foreign';
   notes?: string;

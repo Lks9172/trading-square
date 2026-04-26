@@ -330,6 +330,52 @@ export function interpretDerived(
     if (value >= 7) return '🟡 네이버 투자정보 7일+ 공백';
     return null;
   }
+  // 26차 신규
+  if (key === 'GOLD_SILVER_RATIO_HISTORICAL_BAND') {
+    if (value === 2) return '🔴 GSR 100+ 극단 — video2 §"코로나 130→은 150%" 사례 구간';
+    if (value === 1) return '🟡 GSR 80-100 — 금 우세';
+    if (value === -1) return '🟢 GSR <60 — 은 강세 (역사 평균 하단)';
+    return null;
+  }
+  if (key === 'GOLD_COPPER_RATIO') {
+    if (value >= 200) return '🔴 GOLD/COPPER 200+ — 경기 둔화 / 위험 회피 우세';
+    return null;
+  }
+  if (key === 'USER_USD_CAPITAL_TOTAL') {
+    return null;
+  }
+  if (key === 'US_DEBT_GDP_2031_PROJECTION') {
+    if (value === 2) return '🔴 IMF 2031 부채 140% 임박';
+    if (value === 1) return '🟠 trajectory 진행 중';
+    return null;
+  }
+  if (key === 'TRUMP_TAX_CUT_DEFICIT_PROJECTION') {
+    if (value === 2) return '🔴 적자 8%+ 위험 — 감세 누적 가속';
+    if (value === 1) return '🟠 적자 6-8% trajectory 경계';
+    return null;
+  }
+  if (key === 'SEMI_EXPORT_PROXY_LEVEL') {
+    if (value === 2) return '🟢 반도체 모멘텀 강 (수출 호조 proxy)';
+    if (value === -1) return '🟠 반도체 약세';
+    return null;
+  }
+  if (key === 'GOLD_YEARLY_RETURN_HISTORICAL_RANK') {
+    if (value === 3) return '🟢 금 연봉 73%+ — video2 §"역대 3위"';
+    if (value === 2) return '🔵 금 연봉 50%+ 강한 상승';
+    if (value === -1) return '🟠 금 연봉 약세';
+    return null;
+  }
+  if (key === 'NASDAQ_LONGTERM_CHANNEL_RETURN') {
+    if (value >= 200) return '🔴 5년 저점 +200%+ 역사상 최대 초과';
+    if (value >= 150) return '🟠 video3 §"153% 역사상 최대" 임박';
+    return null;
+  }
+  if (key === 'OPERATOR_PROMISED_CONTENT_QUEUE') {
+    if (value === 2) return '🟢 운영자 발신 활발';
+    if (value === -1) return '🟠 운영자 발신 1주+ 공백';
+    return null;
+  }
+
   // 25차 신규
   if (key === 'META_MISSING_DERIVED_COUNT') {
     if (value >= 5) return '🔴 핵심 derived 5종+ 결측 — 데이터 파이프라인 점검 필요';

@@ -111,6 +111,10 @@ export interface PlanDiscipline {
   reviewDepthAvgChars: number;        // 7일 observation 평균 글자수
   reviewStreakDays: number;           // 연속 복기 일수 (현재까지)
   reviewMaxStreakDays: number;        // 30일 내 최장 streak
+  // 26차 Phase 2#10-13: 정성 정량화 4종
+  recoveryResponseLatencyDays: number; // signal_change 후 user_action 첫 기록까지 (-1=대응 없음)
+  // CONFIDENCE_GATE_BLOCKED_DAYS / LEADER_ROTATION_FREQUENCY / TIMING_QUALITY_SCORE 는
+  // history-store 누적 후 재산출 정확도 향상 — 현재 stub.
 }
 
 export async function computePlanDiscipline(): Promise<PlanDiscipline> {
@@ -170,6 +174,25 @@ export async function computePlanDiscipline(): Promise<PlanDiscipline> {
   }).length;
   const waitDiscipline30d = Math.max(0, Math.min(100, 100 - userActions30d * 10));
 
+  // 26차 Phase 2#10: CONFIDENCE_GATE_BLOCKED_DAYS — CONVICTION<3 누적 일수 (snapshot history 부재 시 단순 대용)
+  // 단순화: 현재 시점 conviction 만 사용해 0/1/X 표기 (정확한 누적은 history-store 누적 후 재계산)
+  // 26차 Phase 2#11: RECOVERY_RESPONSE_LATENCY_DAYS — signal_change 후 user_action 첫 기록까지
+  const cutoff60d = Date.now() - 60 * 86400000;
+  const recent60d = log.filter((e) => Number.isFinite(new Date(e.ts).getTime()) && new Date(e.ts).getTime() >= cutoff60d);
+  // signal_change 마지막 시점
+  const lastSignalChange = recent60d.find((e) => e.kind === 'signal_change');
+  let recoveryResponseLatencyDays = -1;
+  if (lastSignalChange) {
+    const firstActionAfter = recent60d
+      .filter((e) => e.kind === 'user_action' && new Date(e.ts).getTime() > new Date(lastSignalChange.ts).getTime())
+      .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())[0];
+    if (firstActionAfter) {
+      recoveryResponseLatencyDays = Math.floor(
+        (new Date(firstActionAfter.ts).getTime() - new Date(lastSignalChange.ts).getTime()) / 86400000,
+      );
+    }
+  }
+
   // 24차 Phase 2#20: REVIEW_DEPTH 평균 글자수 + STREAK
   const reviews7dList = reviews7d.filter((e) => e.kind === 'observation');
   const reviewDepthAvgChars = reviews7dList.length > 0
@@ -223,6 +246,7 @@ export async function computePlanDiscipline(): Promise<PlanDiscipline> {
     reviewDepthAvgChars,
     reviewStreakDays,
     reviewMaxStreakDays,
+    recoveryResponseLatencyDays,
   };
 }
 
