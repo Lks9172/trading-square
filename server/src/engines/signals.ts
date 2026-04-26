@@ -332,6 +332,16 @@ function nasdaqSignal(
   if (mtfMonthPos !== null && mtfMonthPos >= 95) { unmetReasons.push(`⚠️ 월봉 위치 ${mtfMonthPos.toFixed(0)}% → 12개월 고점 근처, 추격매수 주의 (보조조건)`); }
   else if (mtfMonthPos !== null && mtfMonthPos <= 15) { reasons.push(`월봉 위치 ${mtfMonthPos.toFixed(0)}% → 저점권, 분할매수 구간 (보조조건)`); }
 
+  // ★ === 29차 P1-B #4: RECOVERY_TRIPLE_SIGNAL — 3축 회복 가산 ===
+  // video2 §13:42-13:49 "ISM 반등 + 금구리비 하락 전환 + ICSA 감소" 동시 충족 시 +1.
+  const recoveryLvl = dv(derived, 'RECOVERY_TRIPLE_SIGNAL');
+  if (recoveryLvl !== null && recoveryLvl >= 2) {
+    reasons.push('✓ 회복 3축 충족 (video2 §13:42)');
+    met += 1;
+  } else if (recoveryLvl !== null && recoveryLvl >= 1) {
+    reasons.push('✓ 회복 2축 (video2 §13:42 보조)');
+  }
+
   if (icsa !== null && icsa >= 300000 && above200 === 0) {
     return withSignalExplanation({
       asset: 'NASDAQ',
@@ -650,6 +660,16 @@ function goldSignal(
 
   const pct = (score / maxScore) * 100;
 
+  // ★ === 29차 P1-B #6: GOLD_AXIS_GATE_FLAG — HEADWIND 시 지정학 단독 매수 차단 ===
+  // video2 §10:48 "1·2순위 (실질금리·DXY) NG 시 추격 금지".
+  // gateFlag = -1 (HEADWIND) AND 지정학(rank4) 단독 우호 시 reason 가산 (실제 강등은 baseSignal 결정 후 override 단계에서).
+  const goldGateFlag = dv(derived, 'GOLD_AXIS_GATE_FLAG');
+  if (goldGateFlag === -1) {
+    unmetReasons.push('⚠️ GOLD_AXIS_GATE_FLAG=HEADWIND (실질금리↑+DXY↑ 1·2순위 NG) — video2 §10:48 추격 금지');
+  } else if (goldGateFlag === 1) {
+    reasons.push('✓ GOLD_AXIS_GATE_FLAG=STRONG_TAILWIND (1·2순위 OK, video2 §09:50)');
+  }
+
   if (realYield !== null && realYield > 2.0 && dxy !== null && dxy > 106) {
     return withSignalExplanation({
       asset: 'GOLD',
@@ -671,6 +691,21 @@ function goldSignal(
   else signal = 'REDUCE';
   const baseSignal = signal;
   const overrides: string[] = [];
+
+  // ★ === 29차 P1-B #6: HEADWIND + 지정학 단독 매수 차단 override ===
+  // video2 §10:48 "1·2순위 NG 시 지정학 단독 추격 금지"
+  // 조건: HEADWIND (gateFlag=-1) AND 지정학/CB 만 우호 (rank3+rank4>0) AND 실질금리/DXY 약함.
+  if (goldGateFlag === -1 && signal === 'STRONG_BUY') {
+    const ryNg = ryTrend !== null && ryTrend > 0;
+    const dxyNg = dxyTrend !== null && dxyTrend > 0;
+    const geoOk = profile.manualInputs.geoRisk >= 3 || dv(derived, 'HORMUZ_CHAIN_SCORE') !== null;
+    if (ryNg && dxyNg && geoOk) {
+      signal = 'HOLD';
+      const overrideReason = `⚠️ HEADWIND 추격 금지 (video2 §10:48 1·2순위 NG) — 지정학 단독 매수 차단 (STRONG_BUY → HOLD)`;
+      overrides.push(overrideReason);
+      reasons.push(overrideReason);
+    }
+  }
 
   const goldFibZone = dv(derived, 'GOLD_FIB_ZONE');
   if (signal === 'REDUCE' && goldFibZone !== null && goldFibZone >= 2) {
@@ -846,6 +881,14 @@ function copperSignal(
   if (xli !== null && xli > 0) { reasons.push(`XLI 산업재 +${xli.toFixed(1)}% → 경기민감섹터 강세 (보조조건)`); }
   else if (xli !== null && xli < 0) { unmetReasons.push(`XLI 산업재 ${xli.toFixed(1)}% → 경기회복 신뢰 약화 (보조조건)`); }
   if (xle !== null && xle > 5) { unmetReasons.push(`XLE 에너지 +${xle.toFixed(1)}% → 유가/전쟁 주도 가능성 (보조조건)`); }
+
+  // ★ === 29차 P1-B #4: RECOVERY_TRIPLE_SIGNAL — copperSignal 가산 ===
+  // video2 §13:42 "회복 3가지" 정합 — 구리는 회복 트리거의 핵심 수혜자.
+  const recoveryLvlCu = dv(derived, 'RECOVERY_TRIPLE_SIGNAL');
+  if (recoveryLvlCu !== null && recoveryLvlCu >= 2) {
+    reasons.push('✓ 회복 3축 충족 (video2 §13:42)');
+    met += 1;
+  }
 
   if (reasons.length === 0) reasons.push('조건 미충족, 대기');
 
@@ -1200,17 +1243,36 @@ function kospiSignal(
     (fxLevel !== null && fxLevel >= 1) ? 1 : 0,
   ].reduce((a, b) => a + b, 0);
 
+  // ★ === 29차 P1-B #5: KOSPI_RECOVERY_3AXIS_LEVEL gate 강화 ===
+  // stt_kospi §05:35 "3축 동시 + 연속일수 = 진짜 추세 전환".
+  // 단발 trendConfirmCount 평가를 level≥1 (연속 3일+) 게이트로 승격. level=2 시 STRONG_BUY 우호.
+  const kRecLevel = dv(derived, 'KOSPI_RECOVERY_3AXIS_LEVEL');
+  const kRecDays = dv(derived, 'KOSPI_RECOVERY_TRIO_DAYS');
+  if (kRecLevel !== null && kRecLevel >= 1) {
+    reasons.push(`✓ KOSPI 회복 3축 ${kRecDays ?? 0}일 연속 (level=${kRecLevel}, stt_kospi §05:35)`);
+    met += 1;
+  }
+
   if (trendConfirmCount < 2 && (signal === 'STRONG_BUY')) {
-    signal = 'BUY';
-    const overrideReason = `추세전환 3조건 ${trendConfirmCount}/3 미충족 → BUY 상한 (보조조건)`;
-    overrides.push(overrideReason);
-    reasons.push(overrideReason);
+    // 29차 P1-B #5: kRecLevel=2 (5일+) 시 STRONG_BUY 보호 — 단발 trendConfirmCount 미충족 무시.
+    if (kRecLevel === 2) {
+      reasons.push('✓ KOSPI_RECOVERY_3AXIS_LEVEL=2 (5일+ 연속) → STRONG_BUY 보호 (stt_kospi §05:35)');
+    } else {
+      signal = 'BUY';
+      const overrideReason = `추세전환 3조건 ${trendConfirmCount}/3 미충족 → BUY 상한 (보조조건)`;
+      overrides.push(overrideReason);
+      reasons.push(overrideReason);
+    }
   }
   if (trendConfirmCount === 0 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
-    signal = 'HOLD';
-    const overrideReason = '추세전환 3조건 전부 미충족 → HOLD 상한 (보조조건)';
-    overrides.push(overrideReason);
-    reasons.push(overrideReason);
+    if (kRecLevel === 2) {
+      reasons.push('✓ KOSPI_RECOVERY_3AXIS_LEVEL=2 → HOLD 강등 면제');
+    } else {
+      signal = 'HOLD';
+      const overrideReason = '추세전환 3조건 전부 미충족 → HOLD 상한 (보조조건)';
+      overrides.push(overrideReason);
+      reasons.push(overrideReason);
+    }
   }
 
   // 15차 Phase 1+2: KOSPI RSI + DRAWDOWN_ATH

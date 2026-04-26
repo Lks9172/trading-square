@@ -5959,6 +5959,148 @@ export async function computeDerived(
     };
   } catch { void 0; }
 
+  // ★ === 29차 P1-B #4: RECOVERY_TRIPLE_SIGNAL ===
+  //   video2 §13:42-13:49 "경기 회복 3가지 동시 — ISM 바닥 반등 + 금구리비 하락 전환 + 실업수당 감소"
+  //   axis 1 (ISM 반등): ISM ≥ 50 AND 5D 평균 > 20D 평균 → 1
+  //   axis 2 (금구리비 하락 전환 = COPPER_GOLD_RATIO_TREND > 0.005, 즉 CGR 상승): 사용 (gold/copper 하락 ≡ copper/gold 상승)
+  //   axis 3 (ICSA 4주 평균 < 직전 4주 평균): readHistory('fred','ICSA') 8주 분량
+  try {
+    let axis1 = 0; let label1 = 'ISM 결측';
+    let axis2 = 0; let label2 = 'CGR 추세 결측';
+    let axis3 = 0; let label3 = 'ICSA 결측';
+    // axis 1: ISM history
+    const ismLatest = d.ISM_PROXY?.value ?? (typeof manualInputs?.ismPmi === 'number' ? manualInputs.ismPmi : null) ?? val(raw, 'ISM_MANUFACTURING');
+    if (ismLatest !== null && ismLatest >= 50) {
+      const indproHist = await readHistory('fred', 'INDPRO').catch(() => [] as Array<{date:string; value:number}>);
+      if (indproHist.length >= 25) {
+        const recent5 = indproHist.slice(-5).map((p) => p.value);
+        const prev20 = indproHist.slice(-25, -5).map((p) => p.value);
+        const r5avg = recent5.reduce((a, b) => a + b, 0) / recent5.length;
+        const p20avg = prev20.reduce((a, b) => a + b, 0) / prev20.length;
+        if (r5avg > p20avg) {
+          axis1 = 1; label1 = `ISM ${ismLatest.toFixed(1)}≥50 + INDPRO 5D ${r5avg.toFixed(2)} > 20D ${p20avg.toFixed(2)} → +1`;
+        } else {
+          label1 = `ISM ${ismLatest.toFixed(1)}≥50 BUT INDPRO 5D≤20D`;
+        }
+      } else {
+        // history 없으면 ISM ≥50 단독 평가
+        if (ismLatest >= 50) { axis1 = 1; label1 = `ISM ${ismLatest.toFixed(1)}≥50 (history 부족, 단독 평가) → +1`; }
+      }
+    } else if (ismLatest !== null) {
+      label1 = `ISM ${ismLatest.toFixed(1)}<50`;
+    }
+    // axis 2: COPPER_GOLD_RATIO_TREND (양수=구리 상승=금구리비 하락 전환).
+    //   spec 의 GOLD_COPPER_RATIO_TREND < -0.5 ≡ COPPER_GOLD_RATIO_TREND > 0.005 (단위 다름 — CGR trend 는 비율 변화율, 0.005=+0.5%).
+    const cgrTrend = d.COPPER_GOLD_RATIO_TREND?.value ?? null;
+    if (cgrTrend !== null) {
+      if (cgrTrend > 0.005) { axis2 = 1; label2 = `CGR_TREND ${(cgrTrend*100).toFixed(2)}%>+0.5% (금구리비 하락 전환) → +1`; }
+      else { label2 = `CGR_TREND ${(cgrTrend*100).toFixed(2)}%≤+0.5%`; }
+    }
+    // axis 3: ICSA 4주 평균 < 직전 4주 평균
+    const icsaHistB = await readHistory('fred', 'ICSA').catch(() => [] as Array<{date:string; value:number}>);
+    if (icsaHistB.length >= 8) {
+      const recent4 = icsaHistB.slice(-4).map((p) => p.value);
+      const prev4 = icsaHistB.slice(-8, -4).map((p) => p.value);
+      const r4avg = recent4.reduce((a, b) => a + b, 0) / recent4.length;
+      const p4avg = prev4.reduce((a, b) => a + b, 0) / prev4.length;
+      if (r4avg < p4avg) {
+        axis3 = 1; label3 = `ICSA 4W ${Math.round(r4avg/1000)}K < 직전 4W ${Math.round(p4avg/1000)}K → +1`;
+      } else {
+        label3 = `ICSA 4W ${Math.round(r4avg/1000)}K ≥ 직전 4W ${Math.round(p4avg/1000)}K`;
+      }
+    }
+    const met = axis1 + axis2 + axis3;
+    let level: number;
+    let label: string;
+    if (met >= 3) { level = 2; label = '🟢 회복 3축 충족 (video2 §13:42)'; }
+    else if (met >= 2) { level = 1; label = '🔵 회복 2축'; }
+    else { level = 0; label = '⚪ 회복 단발'; }
+    d.RECOVERY_TRIPLE_SIGNAL = {
+      name: 'recovery_triple_signal',
+      value: level,
+      date: today(),
+      formula: `${label1} / ${label2} / ${label3} → met ${met}/3. ${label}. video2 §13:42-13:49 "경기 회복 3가지 동시".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P1-B #5: KOSPI_RECOVERY_3AXIS_LEVEL + KOSPI_RECOVERY_TRIO_DAYS ===
+  //   stt_kospi §05:35 "추세선 회복 + 거래량 확인 + 환율 1480 이하 = 진짜 추세 전환"
+  //   3축 동시 충족일 → 연속일수 history 추적 (history-store('derived','KOSPI_RECOVERY_TRIO_DAY_COUNT'))
+  try {
+    const trendRec = d.KOSPI_TREND_RECOVERY?.value ?? 0;
+    const volConf = d.KOSPI_VOLUME_CONFIRM?.value ?? 0;
+    const usdkrwToday = val(raw, 'USDKRW');
+    const fxOk = usdkrwToday !== null && usdkrwToday <= 1480 ? 1 : 0;
+    const allMet = (trendRec === 1 && volConf === 1 && fxOk === 1) ? 1 : 0;
+    // 누적 일수: 어제 카운트 + (오늘 충족이면 +1, 미충족이면 0 reset)
+    const trioHist = await readHistory('derived', 'KOSPI_RECOVERY_TRIO_DAY_COUNT').catch(() => [] as Array<{date:string; value:number}>);
+    const yesterdayCount = trioHist.length > 0 ? trioHist[trioHist.length - 1].value : 0;
+    const newCount = allMet === 1 ? Math.max(0, yesterdayCount) + 1 : 0;
+    const todayKey = today();
+    await writeHistoryPoint('derived', 'KOSPI_RECOVERY_TRIO_DAY_COUNT', newCount, todayKey);
+    d.KOSPI_RECOVERY_TRIO_DAYS = {
+      name: 'kospi_recovery_trio_days',
+      value: newCount,
+      date: todayKey,
+      formula: `trend=${trendRec}, vol=${volConf}, fx≤1480=${fxOk} (USDKRW=${usdkrwToday?.toFixed(1) ?? '?'}). 3축 동시 충족 연속일수 ${newCount}일. stt_kospi §05:35.`,
+    };
+    let level: number;
+    let label: string;
+    if (newCount >= 5) { level = 2; label = '🟢 진짜 추세 전환 (3축 5일+)'; }
+    else if (newCount >= 3) { level = 1; label = '🔵 3축 연속 3일+'; }
+    else { level = 0; label = `⚪ ${newCount}일 (3일 미만)`; }
+    d.KOSPI_RECOVERY_3AXIS_LEVEL = {
+      name: 'kospi_recovery_3axis_level',
+      value: level,
+      date: todayKey,
+      formula: `KOSPI_RECOVERY_TRIO_DAYS=${newCount}. ${label}. stt_kospi §05:35 "환율 1480↓ + 추세 + 거래량 = 진짜 전환".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P1-B #6: GOLD_AXIS_CONFLICT_RESOLVER + GOLD_AXIS_GATE_FLAG ===
+  //   video2 §09:50-10:48 "금 1순위 실질금리 → 2순위 DXY → 3순위 CB → 4순위 지정학"
+  //   rank1+rank2 OK → 'STRONG_TAILWIND' (1.0 multiplier 신호)
+  //   rank1+rank2 NG → 'HEADWIND' (지정학 단독 매수 차단)
+  //   mixed → 'NEUTRAL'
+  try {
+    const ryTrend = d.REAL_YIELD_TREND?.value ?? null;
+    const dxyTrend = d.DXY_TREND?.value ?? null;
+    const cbDemand = d.CB_GOLD_STRUCTURAL_DEMAND?.value ?? null;
+    const hormuz = d.HORMUZ_CHAIN_SCORE?.value ?? null;
+    const geoRiskManual = manualInputs?.geoRisk ?? null;
+    // rank1 (실질금리): 추세 < 0 → +1, > 0 → -1
+    let rank1 = 0; let r1lab = 'real_yield_trend 결측';
+    if (ryTrend !== null) { rank1 = ryTrend < -0.05 ? 1 : (ryTrend > 0.05 ? -1 : 0); r1lab = `RY_TREND ${ryTrend.toFixed(3)}→${rank1>0?'+':''}${rank1}`; }
+    // rank2 (DXY): 추세 < -0.5 → +1, > +0.5 → -1
+    let rank2 = 0; let r2lab = 'dxy_trend 결측';
+    if (dxyTrend !== null) { rank2 = dxyTrend < -0.5 ? 1 : (dxyTrend > 0.5 ? -1 : 0); r2lab = `DXY_TREND ${dxyTrend.toFixed(2)}→${rank2>0?'+':''}${rank2}`; }
+    // rank3 (CB 매수)
+    let rank3 = 0; let r3lab = 'cb 결측';
+    if (cbDemand !== null) { rank3 = cbDemand >= 1 ? 1 : (cbDemand <= -1 ? -1 : 0); r3lab = `CB ${cbDemand}→${rank3>0?'+':''}${rank3}`; }
+    // rank4 (지정학)
+    let rank4 = 0; let r4lab = '지정학 결측';
+    if (hormuz !== null) { rank4 = hormuz >= 2 ? 1 : (hormuz <= -1 ? -1 : 0); r4lab = `HORMUZ ${hormuz}→${rank4>0?'+':''}${rank4}`; }
+    else if (geoRiskManual !== null) { rank4 = geoRiskManual >= 3 ? 1 : 0; r4lab = `geoRisk(manual) ${geoRiskManual}→${rank4}`; }
+    // gate flag
+    let gateFlag: number; // -1=HEADWIND, 0=NEUTRAL, 1=STRONG_TAILWIND
+    let gateLabel: string;
+    if (rank1 > 0 && rank2 > 0) { gateFlag = 1; gateLabel = '🟢 STRONG_TAILWIND (실질금리↓+DXY↓ 1·2순위 OK)'; }
+    else if (rank1 < 0 && rank2 < 0) { gateFlag = -1; gateLabel = '🔴 HEADWIND (실질금리↑+DXY↑ 1·2순위 NG, 지정학 단독 매수 차단)'; }
+    else { gateFlag = 0; gateLabel = '🟡 NEUTRAL'; }
+    d.GOLD_AXIS_CONFLICT_RESOLVER = {
+      name: 'gold_axis_conflict_resolver',
+      value: rank1 + rank2 + rank3 + rank4,
+      date: today(),
+      formula: `rank1(${r1lab}) + rank2(${r2lab}) + rank3(${r3lab}) + rank4(${r4lab}) = ${rank1+rank2+rank3+rank4}. video2 §09:50-10:48 "1순위 실질금리".`,
+    };
+    d.GOLD_AXIS_GATE_FLAG = {
+      name: 'gold_axis_gate_flag',
+      value: gateFlag,
+      date: today(),
+      formula: `${gateLabel}. video2 §10:48 "1·2순위 NG 시 추격 금지".`,
+    };
+  } catch { void 0; }
+
   return d;
 }
 
