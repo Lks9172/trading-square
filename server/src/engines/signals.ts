@@ -1037,6 +1037,10 @@ function goldSignal(
     }
   }
 
+  // 29차 fix-B: GOLD weightedScore cap — score/maxScore 동시 증가 패턴이지만
+  // 향후 신규 가산 도입 시 over-cap 방지 위해 명시 cap 일관 적용.
+  if (score > maxScore) score = maxScore;
+
   return withSignalExplanation({
     asset: 'GOLD',
     signal,
@@ -1157,6 +1161,9 @@ function silverSignal(
     unmetReasons.push(overrideReason);
   }
 
+  // 29차 fix-B: SILVER weightedScore cap — V2 등 신규 가산으로 met>total 가능 (over-cap 방지).
+  if (met > total) met = total;
+
   return withSignalExplanation({
     asset: 'SILVER',
     signal,
@@ -1241,6 +1248,10 @@ function copperSignal(
     reasons.push('✓ CGR 상승 전환 (영상2 "금구리비 하락 전환 = 경기회복 전조") — 타이밍 확정 +1');
     met += 1;
   }
+
+  // 29차 fix-B: COPPER weightedScore cap — 28차/29차 신규 가산
+  // (RECOVERY_TRIPLE / COPPER_TIMEFRAME / CGR_UPTURN) 으로 met>total 발생 (133% over-cap).
+  if (met > total) met = total;
 
   // Fix #6(2차 감사): REDUCE 분기 복구 — 기존 `met≥3 STRONG_BUY / met===2 BUY / else HOLD` 는
   //   met=0(3조건 모두 미충족) 에서도 HOLD 로 약세 강등이 없었다. signalFromScore 로 통일:
@@ -1412,6 +1423,9 @@ function leverageCheck(
     clearLeverageEntry();
     decisionReasons.push(`신호 종료 → 진입일 기록 삭제 (다음 진입 시 재기록)`);
   }
+
+  // 29차 fix-B: LEVERAGE weightedScore cap (일관 패턴 적용).
+  if (met > total) met = total;
 
   return withSignalExplanation({
     asset: 'LEVERAGE',
@@ -1976,6 +1990,9 @@ function emergingSignal(
     overrides.push(overrideReason);
     unmetReasons.push(overrideReason);
   }
+
+  // 29차 fix-B: EMERGING weightedScore cap (일관 패턴 적용).
+  if (met > total) met = total;
 
   return withSignalExplanation({
     asset: 'EMERGING',
