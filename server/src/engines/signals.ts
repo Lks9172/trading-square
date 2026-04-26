@@ -301,6 +301,17 @@ function nasdaqSignal(
     unmetReasons.push(`⚠️ RSI<30 ${rsiDuration}일 연속 — 추세 약함, 분할매수 정지 (video6 §10:22)`);
   }
 
+  // ★ === 29차 P2-E #35: INSIDER_CLUSTER_PURCHASES_COUNT_50K (OpenInsider) ===
+  // 노션 §OpenInsider — cluster 종목 수 ≥ 5 → +1 (역발상 buy 환경).
+  const oiCluster = dv(derived, 'INSIDER_CLUSTER_PURCHASES_COUNT_50K');
+  if (oiCluster === 2) {
+    met += 2;
+    reasons.push('✓ OpenInsider $50K↑ cluster ≥10 종목 — 역발상 buy 환경 강 (노션 §OpenInsider)');
+  } else if (oiCluster === 1) {
+    met += 1;
+    reasons.push('✓ OpenInsider $50K↑ cluster ≥5 종목 — 역발상 buy 환경 (노션 §OpenInsider)');
+  }
+
   const xlk = dv(derived, 'SECTOR_XLK');
   if (xlk !== null && xlk > 0) { reasons.push(`XLK 기술섹터 +${xlk.toFixed(1)}% → 성장주 랠리 질 양호 (보조조건)`); }
   else if (xlk !== null && xlk < 0) { unmetReasons.push(`XLK 기술섹터 ${xlk.toFixed(1)}% → 성장주 주도력 약함 (보조조건)`); }
@@ -1595,6 +1606,30 @@ function kospiSignal(
   const fxForeignGap = dv(derived, 'FX_FOREIGN_BASELINE_GAP_TRILLION');
   if (fxForeignGap === 1) {
     unmetReasons.push('⚠️ FX-외인 baseline 갭 ≥30조 — ATM 화 강 경고 (stt_kospi §08:21)');
+  }
+
+  // ★ === 29차 P2-E #31: KOSPI_HALFYEAR_UPPER_WICK_THRESHOLD ===
+  // stt_kospi §03:18 — -1 (≥30%) 시 STRONG_BUY → BUY 강등.
+  const kospiWickThr = dv(derived, 'KOSPI_HALFYEAR_UPPER_WICK_THRESHOLD');
+  if (kospiWickThr === -1 && signal === 'STRONG_BUY') {
+    const previous = signal;
+    signal = 'BUY';
+    const overrideReason = `⚠️ 반기봉 윗꼬리 ≥30% (매도압력 강) → ${previous} → BUY (stt_kospi §03:18)`;
+    overrides.push(overrideReason);
+    unmetReasons.push(overrideReason);
+  } else if (kospiWickThr === 1) {
+    reasons.push('✓ 반기봉 윗꼬리 < 15% (stt_kospi §03:18)');
+    met += 1;
+  }
+
+  // ★ === 29차 P2-E #36: KOSPI_VOLUME_TIER ===
+  // stt_kospi §"주간 평균 20조" — tier +1/0/-1.
+  const volTier = dv(derived, 'KOSPI_VOLUME_TIER');
+  if (volTier === 1) {
+    reasons.push('✓ KOSPI 거래량 tier+1 (≥20조 지속성 강, stt_kospi)');
+    met += 1;
+  } else if (volTier === -1) {
+    unmetReasons.push('⚠️ KOSPI 거래량 tier-1 (<15조 관심 약화, stt_kospi)');
   }
 
   // 코스피 완화 규칙:

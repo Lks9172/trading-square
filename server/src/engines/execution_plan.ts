@@ -325,6 +325,17 @@ function kospiPlan(
     reason = '외국인 5일 연속 순매도 — 구조적 이탈 확인 후 재검토';
   }
 
+  // ★ === 29차 P2-E #33: KOSPI 분할 환전 액션 ===
+  // stt_kospi §09:36 "장기 채널 활용 — 하단/상단 부근 환전".
+  const krwChannelPos = vDer(derived, 'USDKRW_WEEKLY_CHANNEL_POSITION');
+  if (krwChannelPos !== null) {
+    if (krwChannelPos >= 0.9) {
+      stages.push({ stage: 3, weightPct: 30, triggerCondition: `USDKRW 주봉채널 ${krwChannelPos.toFixed(2)} ≥ 0.9 → KRW→USD 분할 환전 30% 권고 (stt_kospi §09:36)`, status: 'ready' });
+    } else if (krwChannelPos <= 0.1) {
+      stages.push({ stage: 3, weightPct: 30, triggerCondition: `USDKRW 주봉채널 ${krwChannelPos.toFixed(2)} ≤ 0.1 → USD→KRW 분할 환전 30% 권고 (stt_kospi §09:36)`, status: 'ready' });
+    }
+  }
+
   return {
     asset: 'KOSPI',
     action,

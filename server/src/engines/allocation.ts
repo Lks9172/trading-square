@@ -458,6 +458,59 @@ export function computeAllocation(
     }
   }
 
+  // ★ === 29차 P2-E #34: INTERMEDIATE_ASSET_REGIME — silver/copper post-multiplier ===
+  // video2 §03:35 "은/구리 = 중간 자산". GROWTH+RISK 합으로 silver +30%/-30%, copper (GROWTH 단일) +20%/-20%.
+  const intermediate = derived.INTERMEDIATE_ASSET_REGIME?.value ?? null;
+  const ismValForCopper = derived.ISM_PROXY?.value ?? null;
+  if (intermediate !== null) {
+    if (intermediate >= 1) {
+      const beforeS = base.silver || 0;
+      const newS = Math.round(beforeS * 1.3);
+      const beforeC = base.copper || 0;
+      // copper: GROWTH 단일 (>=1) 시 +20%
+      const growthAxis = ismValForCopper !== null && ismValForCopper >= 52 ? 1 : ismValForCopper !== null && ismValForCopper < 48 ? -1 : 0;
+      const newC = growthAxis >= 1 ? Math.round(beforeC * 1.2) : beforeC;
+      const ds = newS - beforeS;
+      const dc = newC - beforeC;
+      const totalDelta = ds + dc;
+      if (totalDelta !== 0 && (base.cash ?? 0) >= totalDelta) {
+        base.silver = newS;
+        base.copper = newC;
+        base.cash = (base.cash ?? 0) - totalDelta;
+        explanation?.adjustments.push({
+          step: 'intermediate-asset-regime',
+          detail: `INTERMEDIATE_ASSET_REGIME=${intermediate} -> silver ${ds >= 0 ? '+' : ''}${ds}%, copper ${dc >= 0 ? '+' : ''}${dc}% (video2 §03:35)`,
+          allocKey: 'silver',
+          amount: totalDelta,
+          before: beforeS,
+          after: base.silver,
+        });
+      }
+    } else if (intermediate <= -1) {
+      const beforeS = base.silver || 0;
+      const newS = Math.round(beforeS * 0.7);
+      const beforeC = base.copper || 0;
+      const growthAxis = ismValForCopper !== null && ismValForCopper >= 52 ? 1 : ismValForCopper !== null && ismValForCopper < 48 ? -1 : 0;
+      const newC = growthAxis <= -1 ? Math.round(beforeC * 0.8) : beforeC;
+      const ds = newS - beforeS;  // negative
+      const dc = newC - beforeC;  // negative
+      const totalDelta = ds + dc;
+      if (totalDelta !== 0) {
+        base.silver = newS;
+        base.copper = newC;
+        base.cash = (base.cash ?? 0) - totalDelta;  // totalDelta 가 음수이므로 cash 증가
+        explanation?.adjustments.push({
+          step: 'intermediate-asset-regime',
+          detail: `INTERMEDIATE_ASSET_REGIME=${intermediate} -> silver ${ds}%, copper ${dc}% (video2 §03:35)`,
+          allocKey: 'silver',
+          amount: totalDelta,
+          before: beforeS,
+          after: base.silver,
+        });
+      }
+    }
+  }
+
   const leverageSignal = signals.find((s) => s.asset === 'LEVERAGE');
   // Fix #3: STRONG_BUY 도 허용. 기존엔 === 'BUY' 만 통과시켜 STRONG_BUY 시 레버리지 0%
   // 처리되는 비대칭이 있었다(3/3 조건 충족 후 승격되면 오히려 차단되는 모순).

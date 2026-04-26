@@ -7547,6 +7547,154 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
+  // ★ === 29차 P2-E #30: GEOPOLITICAL_UNWIND_EVENT_5AX 확장 ===
+  // stt_kospi §04:58 — 기존 3축 (KOSPI/FX/WTI) + 외인 1D ≥+1조 + KOSPI 일봉 +6%.
+  // 5축 hit → level=2 / 4축 → 1 / 3축 → 0 (기존).
+  try {
+    const baseLevel = d.GEOPOLITICAL_UNWIND_EVENT?.value ?? null;
+    const foreignNet1D = d.KOSPI_FOREIGN_NET_1D?.value ?? null;
+    // KOSPI 일봉 % — kospi 1D 변화율
+    let kospi1DPct: number | null = null;
+    try {
+      const kHist = await readHistory('yahoo', 'KOSPI');
+      if (kHist.length >= 2) {
+        const cur = kHist[kHist.length - 1].value;
+        const prev = kHist[kHist.length - 2].value;
+        if (prev > 0) kospi1DPct = ((cur - prev) / prev) * 100;
+      }
+    } catch { void 0; }
+    if (baseLevel !== null) {
+      const ax4 = foreignNet1D !== null && foreignNet1D >= 10000;  // 1조 = 10000억
+      const ax5 = kospi1DPct !== null && kospi1DPct >= 6;
+      // baseLevel 2 = 3축 모두, 1 = 2축. 5축 모두 충족 시 level=2 정의.
+      let level = 0;
+      if (baseLevel === 2 && ax4 && ax5) level = 2;       // 5축 모두
+      else if (baseLevel === 2 && (ax4 || ax5)) level = 1; // 4축
+      else level = 0;                                     // 3축 이하
+      d.GEOPOLITICAL_UNWIND_EVENT_5AX = {
+        name: 'geopolitical_unwind_event_5ax',
+        value: level,
+        date: today(),
+        formula: `base 3축=${baseLevel} + 외인 1D ${foreignNet1D ?? '?'}억 ≥1조=${ax4} + KOSPI 1D ${kospi1DPct?.toFixed(2) ?? '?'}% ≥6%=${ax5} → level=${level}. stt_kospi §04:58 "5축 동시 발화".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P2-E #31: KOSPI_HALFYEAR_UPPER_WICK_THRESHOLD ===
+  // stt_kospi §03:18 "반기봉 윗꼬리 길어진다" — 임계 분류:
+  //   ≥ 30% → -1 (매도압력 강) / ≥ 15% → 0 / < 15% → +1.
+  try {
+    const wickPct = d.KOSPI_HALFYEAR_UPPER_WICK_PCT?.value ?? null;
+    if (wickPct !== null) {
+      let level: number;
+      let label: string;
+      if (wickPct >= 30) { level = -1; label = `🔴 ${wickPct.toFixed(1)}% ≥ 30 (매도압력 강)`; }
+      else if (wickPct >= 15) { level = 0; label = `🟡 ${wickPct.toFixed(1)}% (15~30)`; }
+      else { level = 1; label = `🟢 ${wickPct.toFixed(1)}% < 15`; }
+      d.KOSPI_HALFYEAR_UPPER_WICK_THRESHOLD = {
+        name: 'kospi_halfyear_upper_wick_threshold',
+        value: level,
+        date: today(),
+        formula: `${label}. stt_kospi §03:18 "반기봉 윗꼬리".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P2-E #32: KOSPI_PARTIAL_PROFIT_SCENARIO_A ===
+  // stt_kospi §11:45 — SCENARIO_GATE_A_B=1 진행 중 user.currentHoldings.kospi 따른 권고:
+  //   보유 > 0 → "30% 익절" / 보유 == 0 → "신규 매수 보류".
+  try {
+    const sgab = d.SCENARIO_GATE_A_B?.value ?? null;
+    let level = 0;
+    let label = '⚪ SCENARIO_GATE_A_B 미발동';
+    if (sgab === 1) {
+      const { readInvestmentPlan } = await import('../services/investment-plan');
+      const plan = await readInvestmentPlan();
+      const kospiHold = plan.currentHoldings?.korea ?? 0;
+      if (kospiHold > 0) {
+        level = 1;
+        label = `🟡 시나리오 A 진행 + KOSPI 보유 ${kospiHold.toFixed(1)}% — 일부 익절 30% 권고 (stt_kospi §11:45)`;
+      } else {
+        level = -1;
+        label = `🟠 시나리오 A 진행 + KOSPI 보유 0% — 신규 매수 보류 (리스크 높음, stt_kospi §11:45)`;
+      }
+    }
+    d.KOSPI_PARTIAL_PROFIT_SCENARIO_A = {
+      name: 'kospi_partial_profit_scenario_a',
+      value: level,
+      date: today(),
+      formula: `${label}. stt_kospi §11:45.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-E #34: INTERMEDIATE_ASSET_REGIME (silver/copper 비중 결정 보조) ===
+  // video2 §03:35 "은/구리 = 중간 자산".
+  // GROWTH_AXIS = ISM_PROXY 추세 (+1/0/-1)
+  // RISK_AXIS = VIX_TIER (+1=낮음 (<20)/0/-1=높음 (≥30))
+  try {
+    const ismVal = d.ISM_PROXY?.value ?? null;
+    let growthAxis = 0;
+    if (ismVal !== null) {
+      if (ismVal >= 52) growthAxis = 1;
+      else if (ismVal < 48) growthAxis = -1;
+    }
+    const vixCur = val(raw, 'VIXCLS');
+    let riskAxis = 0;
+    if (vixCur !== null) {
+      if (vixCur < 20) riskAxis = 1;
+      else if (vixCur >= 30) riskAxis = -1;
+    }
+    d.INTERMEDIATE_ASSET_REGIME = {
+      name: 'intermediate_asset_regime',
+      value: growthAxis + riskAxis,
+      date: today(),
+      formula: `GROWTH=${growthAxis} (ISM ${ismVal?.toFixed(1) ?? '?'}) + RISK=${riskAxis} (VIX ${vixCur?.toFixed(1) ?? '?'}) → ${growthAxis + riskAxis}. video2 §03:35 "은/구리 = 중간 자산".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P2-E #35: INSIDER_CLUSTER_PURCHASES_COUNT_50K (OpenInsider) ===
+  // 노션 §OpenInsider — http://openinsider.com/insider-cluster-purchases.
+  // $50K 컷오프 + 30일 윈도우. cluster (2+ insiders) 종목 수 ≥ 5 → +1.
+  try {
+    const { fetchOpenInsiderClusterPurchases } = await import('../collectors/openinsider');
+    const oi = await fetchOpenInsiderClusterPurchases();
+    if (oi !== null) {
+      const count = oi.totalTickers;
+      let level: number;
+      let label: string;
+      if (count >= 10) { level = 2; label = `🟢🟢 ${count} 종목 cluster ≥ 10 (역발상 buy 환경 강)`; }
+      else if (count >= 5) { level = 1; label = `🟢 ${count} 종목 cluster ≥ 5`; }
+      else { level = 0; label = `⚪ ${count} 종목`; }
+      d.INSIDER_CLUSTER_PURCHASES_COUNT_50K = {
+        name: 'insider_cluster_purchases_count_50k',
+        value: level,
+        date: today(),
+        formula: `OpenInsider $50K↑ cluster ${count} 종목 / 총 매수 $${(oi.totalUsd / 1e6).toFixed(1)}M. ${label}. 노션 §OpenInsider.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P2-E #36: KOSPI_VOLUME_TIER (3단) ===
+  // stt_kospi §노션 "주간 평균 20조 이상 = 강 / 15조 이하 = 약".
+  // 기존 KOSPI_VOLUME_20T_FLAG 확장.
+  try {
+    const recentVol = d.KOSPI_VOLUME_5D_AVG_KRW?.value ?? null;
+    if (recentVol !== null) {
+      const trillion = recentVol / 10000; // 억원 → 조원
+      let tier: number;
+      let label: string;
+      if (trillion >= 20) { tier = 1; label = `🟢 ${trillion.toFixed(1)}조 ≥ 20 (지속성 강)`; }
+      else if (trillion >= 15) { tier = 0; label = `🟡 ${trillion.toFixed(1)}조 (15-20 보통)`; }
+      else { tier = -1; label = `🔴 ${trillion.toFixed(1)}조 < 15 (관심 약화)`; }
+      d.KOSPI_VOLUME_TIER = {
+        name: 'kospi_volume_tier',
+        value: tier,
+        date: today(),
+        formula: `KOSPI 5일 평균 거래대금 ${trillion.toFixed(1)}조 → tier=${tier}. ${label}. stt_kospi §"주간 평균 20조".`,
+      };
+    }
+  } catch { void 0; }
+
   return d;
 }
 
