@@ -668,6 +668,26 @@ function nasdaqSignal(
     reasons.push(`✓ yearly pin bar 다음 해 양봉 ${(pinRate * 100).toFixed(0)}% (참조 통계, video3 §09:09 "100%")`);
   }
 
+  // ★ === 29차 P3-D #22: EVENT_DAY_VOLATILITY_GUARD — 신규 매수 보류 ===
+  const eventGuard = dv(derived, 'EVENT_DAY_VOLATILITY_GUARD');
+  if (eventGuard === 1) {
+    unmetReasons.push('🛑 EVENT_DAY_VOLATILITY_GUARD=1 — CPI/FOMC 발표일 (video6 §08:18, 신규 매수 보류)');
+  }
+
+  // ★ === 29차 P3-D #23: ALGO_VOLATILITY_AMPLIFY_FLAG — 신규 매수 보류 ===
+  const algoVol = dv(derived, 'ALGO_VOLATILITY_AMPLIFY_FLAG');
+  if (algoVol === 1) {
+    unmetReasons.push('🛑 ALGO_VOLATILITY_AMPLIFY_FLAG=1 — 알고 변동성 증폭 (일중 ≥3% + 거래량 1.5x, video6 "알고리즘·퀀트")');
+  }
+
+  // ★ === 29차 P3-D #25: POLICY_SECTOR_LIFT_PCT — 정책 효과 확인 ===
+  const policyLift = dv(derived, 'POLICY_SECTOR_LIFT_PCT');
+  if (policyLift === 2) {
+    reasons.push('✓ POLICY_SECTOR_LIFT ≥+10% — 정책 효과 강 (video6 §"정책 = 보이는 손")');
+  } else if (policyLift === -1) {
+    unmetReasons.push('⚠️ POLICY_SECTOR_LIFT < 0% — 정책 무력 경고 (video6)');
+  }
+
   // ★ === 29차 P3-A #5: JGB_10Y_LEVEL — 캐리 트레이드 unwind 위험 ===
   // video6 §04:28 "일본 금리 체크" — JGB ↑ 시 NASDAQ 보조 -0.5.
   const jgbLvl = dv(derived, 'JGB_10Y_LEVEL');

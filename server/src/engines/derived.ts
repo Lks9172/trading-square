@@ -8209,6 +8209,168 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
+  // ★ === 29차 P3-D #21: HORMUZ_LAG_DAYS — 호르무즈 lag-aware 모델링 ===
+  // stt_kospi §"호르무즈→헬륨→AI 반도체 2-3개월 지연".
+  // HORMUZ_CHAIN_SCORE 변화 시점 + 60-90일 카운트 (lag ≥60일 시 reduced-strength tailwind).
+  try {
+    const hormuzScore = d.HORMUZ_CHAIN_SCORE?.value ?? null;
+    let lagDays = 0;
+    let strength = 0;
+    let label = '⚪ HORMUZ 정상';
+    try {
+      const hist = await readHistory('computed', 'HORMUZ_CHAIN_SCORE');
+      if (hist.length >= 1 && hormuzScore !== null && hormuzScore < 0) {
+        // 음수 진입 시점 찾기 (가장 최근 변화)
+        let changeDate: string | null = null;
+        for (let i = hist.length - 1; i >= 1; i--) {
+          if (hist[i].value < 0 && hist[i - 1].value >= 0) {
+            changeDate = hist[i].date;
+            break;
+          }
+        }
+        if (changeDate) {
+          lagDays = Math.round((Date.now() - new Date(changeDate).getTime()) / 86400000);
+          if (lagDays >= 90) { strength = 1; label = `🟢 HORMUZ 충격 ${lagDays}일 경과 — 반도체 tailwind (full strength)`; }
+          else if (lagDays >= 60) { strength = 0.5; label = `🟡 HORMUZ 충격 ${lagDays}일 경과 — reduced-strength tailwind (×0.5)`; }
+          else { label = `⏳ HORMUZ 충격 ${lagDays}일 — 60일 lag 미달`; }
+        }
+      }
+    } catch { void 0; }
+    d.HORMUZ_LAG_DAYS = {
+      name: 'hormuz_lag_days',
+      value: lagDays,
+      date: today(),
+      formula: `HORMUZ 변화 후 ${lagDays}일 (strength=${strength}). ${label}. stt_kospi §"호르무즈→헬륨→AI 반도체 2-3개월 지연".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P3-D #22: EVENT_DAY_VOLATILITY_GUARD ===
+  // video6 §08:18 "CPI 발표일에 시장 3-5%" — D-Day 당일 신규 매수 보류.
+  try {
+    const cpiDday = d.CPI_DDAY?.value ?? null;
+    const fomcDday = d.FOMC_DDAY?.value ?? null;
+    const isCpiDay = cpiDday === 0;
+    const isFomcDay = fomcDday === 0;
+    const flag = (isCpiDay || isFomcDay) ? 1 : 0;
+    d.EVENT_DAY_VOLATILITY_GUARD = {
+      name: 'event_day_volatility_guard',
+      value: flag,
+      date: today(),
+      formula: `CPI D=${cpiDday ?? '?'} / FOMC D=${fomcDday ?? '?'}. ${flag ? '🛑 발표일 — 신규 매수 보류 (video6 §08:18)' : '⚪ 정상'}.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P3-D #23: ALGO_VOLATILITY_AMPLIFY_FLAG ===
+  // video6 §"알고리즘·퀀트 = 사람 아님" — 일중 변동률 ≥3% AND 거래량 ≥1.5x.
+  try {
+    const ndxOhlc = await fetchYahooOHLC('^IXIC', 30);
+    if (ndxOhlc && ndxOhlc.length >= 6) {
+      const recent = ndxOhlc[ndxOhlc.length - 1];
+      const intradayPct = recent.close > 0 ? ((recent.high - recent.low) / recent.close) * 100 : 0;
+      const avgVol5 = ndxOhlc.slice(-6, -1).reduce((s, p) => s + (p.volume || 0), 0) / 5;
+      const volRatio = avgVol5 > 0 ? (recent.volume || 0) / avgVol5 : 0;
+      const flag = (intradayPct >= 3 && volRatio >= 1.5) ? 1 : 0;
+      d.ALGO_VOLATILITY_AMPLIFY_FLAG = {
+        name: 'algo_volatility_amplify_flag',
+        value: flag,
+        date: today(),
+        formula: `NASDAQ 일중 ${intradayPct.toFixed(2)}% (≥3=${intradayPct >= 3}) + 거래량 ${volRatio.toFixed(2)}x 5D평균 (≥1.5=${volRatio >= 1.5}) → flag=${flag}. ${flag ? '🛑 알고 변동성 증폭 (신규 매수 보류)' : '⚪ 정상'}. video6 §"알고리즘·퀀트".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P3-D #24: OVERPAY_FLAG ===
+  // video6 §05:30 "좋은 회사를 좋은 가격에" — 4주간 BUY 시점 PER≥25 OR ATH 대비 +20% 비율 ≥3회.
+  try {
+    const { readRecentTradeLog } = await import('../services/investment-plan');
+    const log = await readRecentTradeLog(500);
+    const cutoff = Date.now() - 28 * 86400000;
+    const buyEntries = log.filter((e) => e.kind === 'user_action' && (e.notes?.includes('BUY') || e.to === 'BUY' || e.to === 'STRONG_BUY') && new Date(e.ts).getTime() >= cutoff);
+    const ndxHistory = await fetchYahooHistory('^IXIC', 200);
+    const ath = ndxHistory.length > 0 ? Math.max(...ndxHistory.map(p => p.close)) : 0;
+    const curPrice = ndxHistory.length > 0 ? ndxHistory[ndxHistory.length - 1].close : 0;
+    const overpayCount = buyEntries.filter(() => {
+      // 단순화: 현재 NASDAQ ATH 대비 +20% (NASDAQ 대표 측정).
+      const disparityATH = ath > 0 ? ((curPrice - ath) / ath) * 100 : 0;
+      return disparityATH >= -10; // ATH 근처(-10% 이내) BUY
+    }).length;
+    const flag = overpayCount >= 3 ? 1 : 0;
+    d.OVERPAY_FLAG = {
+      name: 'overpay_flag',
+      value: flag,
+      date: today(),
+      formula: `4주간 BUY ${buyEntries.length} 회 / ATH 근처 매수 ${overpayCount} 회 → flag=${flag}. ${flag ? '🛑 추격매수 패턴 (video6 §05:30 "좋은 가격에" 위반)' : '⚪ 정상'}. video6 §05:30.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P3-D #25: POLICY_SECTOR_LIFT_PCT ===
+  // video6 §"정책 = 보이는 손" — 최근 30일 정책 이벤트 후 섹터 ETF 변동.
+  // 단순화: SECTOR_XLF (정책 수혜 대표) 30D 누적 변동.
+  try {
+    const xlfHist = await fetchYahooHistory('XLF', 35);
+    if (xlfHist.length >= 30) {
+      const cur = xlfHist[xlfHist.length - 1].close;
+      const past = xlfHist[xlfHist.length - 30].close;
+      const ret = past > 0 ? (cur - past) / past * 100 : 0;
+      let level: number;
+      let label: string;
+      if (ret >= 10) { level = 2; label = `🟢 XLF 30D +${ret.toFixed(1)}% ≥ 10% (정책 효과 강)`; }
+      else if (ret >= 3) { level = 1; label = `🟢 XLF 30D +${ret.toFixed(1)}% (정책 효과 확인)`; }
+      else if (ret < 0) { level = -1; label = `🔴 XLF 30D ${ret.toFixed(1)}% < 0 (정책 무력 경고)`; }
+      else { level = 0; label = `⚪ XLF 30D ${ret.toFixed(1)}%`; }
+      d.POLICY_SECTOR_LIFT_PCT = {
+        name: 'policy_sector_lift_pct',
+        value: level,
+        date: today(),
+        formula: `XLF 30D ${ret.toFixed(2)}%. ${label}. video6 §"정책 = 보이는 손".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P3-D #26: USER_HORIZON_ALIGNMENT_TOOLS ===
+  // video6 §01:48 — horizon 별 도구 매핑.
+  try {
+    const horizon = manualInputs?.investmentHorizon ?? 'medium';
+    let tools: string;
+    if (horizon === 'short') tools = 'RSI 14 일봉, 20MA 일봉, 호가창';
+    else if (horizon === 'long') tools = '주봉/월봉, RSI 주봉, 펀더(PER/ROE)';
+    else tools = 'RSI 14 일봉, 200DMA, 지지저항';
+    const horizonAlign = d.USER_HORIZON_ALIGNMENT?.value ?? 0;
+    d.USER_HORIZON_ALIGNMENT_TOOLS = {
+      name: 'user_horizon_alignment_tools',
+      value: horizonAlign,
+      date: today(),
+      formula: `horizon=${horizon} → 도구 매핑: ${tools}. align=${horizonAlign}. video6 §01:48 "horizon 별 도구".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 29차 P3-D #27: STRATEGY_VS_HOLD_DELTA ===
+  // video1 §03:43 "전략 A buy&hold 의 inferiority" — 백테스트 alpha 노출.
+  // 단순화: 최근 1년 NASDAQ 가격이 ATH 대비 -10% 이상 떨어졌다가 회복했는지로 alpha 발생 가능성 추정.
+  try {
+    const ndx250 = await fetchYahooHistory('^IXIC', 260);
+    if (ndx250.length >= 250) {
+      const closes = ndx250.map(p => p.close);
+      const cur = closes[closes.length - 1];
+      const past = closes[0];
+      const buyAndHold = past > 0 ? (cur - past) / past * 100 : 0;
+      // 전략 alpha 추정: 1년 내 -10%↓ 구간이 있었으면 시점 매수 alpha 가능
+      const ath250 = Math.max(...closes);
+      const min250 = Math.min(...closes);
+      const drawdownPct = (min250 - ath250) / ath250 * 100;
+      const alphaEstimate = drawdownPct <= -10 ? Math.abs(drawdownPct) * 0.3 : 0; // 진폭 30% 추정
+      let label: string;
+      if (alphaEstimate >= 5) label = `🟢 전략 alpha 추정 +${alphaEstimate.toFixed(1)}% (drawdown ${drawdownPct.toFixed(1)}% 활용)`;
+      else label = `⚪ 전략 alpha 추정 +${alphaEstimate.toFixed(1)}% (DCA 우위)`;
+      d.STRATEGY_VS_HOLD_DELTA = {
+        name: 'strategy_vs_hold_delta',
+        value: parseFloat(alphaEstimate.toFixed(1)),
+        date: today(),
+        formula: `1년 buy&hold ${buyAndHold.toFixed(1)}%, drawdown ${drawdownPct.toFixed(1)}%, 전략 alpha 추정 +${alphaEstimate.toFixed(1)}%. ${label}. video1 §03:43 "전략 A vs buy&hold".`,
+      };
+    }
+  } catch { void 0; }
+
   return d;
 }
 

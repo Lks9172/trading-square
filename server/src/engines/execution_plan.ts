@@ -536,6 +536,19 @@ export async function computeExecutionPlans(
     // CASH 는 플레이북 없음 (보조 자산)
   }
 
+  // ★ === 29차 P3-D #22+#23: EVENT_DAY/ALGO 가드 — 신규 매수 액션 보류 ===
+  // video6 §08:18 "CPI 발표일 3-5%" + §"알고리즘 변동성".
+  const eventGuard = derived.EVENT_DAY_VOLATILITY_GUARD?.value ?? 0;
+  const algoGuard = derived.ALGO_VOLATILITY_AMPLIFY_FLAG?.value ?? 0;
+  if (eventGuard === 1 || algoGuard === 1) {
+    const tags = [eventGuard === 1 ? 'EVENT_DAY' : null, algoGuard === 1 ? 'ALGO_VOL' : null].filter(Boolean).join(' + ');
+    for (const p of plans) {
+      if (p.action === 'BUY_NOW' || p.action === 'SCALE_IN') {
+        p.primaryReason = `🛑 ${tags} 가드 활성 — ${p.primaryReason} (신규 매수 보류, video6 §08:18)`;
+      }
+    }
+  }
+
   // 21차 P1#1+P1#4: trancheStore entries 기반 stage status 동기화 + avgEntry 절대 stop/take.
   try {
     const { listTranches } = await import('../services/trancheStore');
