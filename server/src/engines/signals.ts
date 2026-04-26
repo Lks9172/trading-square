@@ -117,6 +117,65 @@ function signalFromScore(met: number, total: number, thresholds: SignalThreshold
   return 'SELL';
 }
 
+/**
+ * 29차 fix-A: 가중치 차등화 헬퍼 — addCondition 패턴.
+ *
+ * NASDAQ/KOSPI signal 의 모든 reason 가중치 1.0 동일 결함 발견. 영상 강조도 차이 미반영.
+ * 본 헬퍼는 met (정수 카운트), total (정수 max), weighted (가중 합), weightedMax (가중 max),
+ * reasons / unmetReasons 를 동기화 갱신한다. weight 인자로 영상 강조도 반영.
+ *
+ * 사용:
+ *   addCondition(state, condition_met_bool, weight, reason_label_when_met, reason_label_when_unmet?)
+ *
+ * 영상 강조도 매트릭스:
+ *   2.0 = 역사적 기회 / 3축 정합 (예: VIX_HISTORIC_BUY, RECOVERY_3축, KOSPI_RECOVERY_LEVEL=2)
+ *   1.5 = 영상 핵심 분기 (예: 실업수당, VIX, 정책, DRAWDOWN_LEVEL, 외인 streak, USDKRW)
+ *   1.0 = 영상 표준 조건 (예: 200DMA, 이격도 -10%, F&G, M2, RSI<30)
+ *   0.7 = 영상 보조 (예: F&G, EARNINGS_BEAT, TIMEFRAME, ENTRY_QUINTILE, ROE)
+ *   0.5 = 그 외 보조 / 참조 통계
+ */
+interface ConditionState {
+  met: number;
+  total: number;
+  weighted: number;
+  weightedMax: number;
+  reasons: string[];
+  unmetReasons: string[];
+}
+
+function addCondition(
+  state: ConditionState,
+  isMet: boolean,
+  weight: number,
+  metReason: string,
+  unmetReason?: string,
+): void {
+  state.total += 1;
+  state.weightedMax += weight;
+  if (isMet) {
+    state.met += 1;
+    state.weighted += weight;
+    state.reasons.push(`${metReason} (가중치 ${weight.toFixed(1)})`);
+  } else if (unmetReason !== undefined) {
+    state.unmetReasons.push(`${unmetReason} (가중치 ${weight.toFixed(1)} 미충족)`);
+  }
+}
+
+/**
+ * 가산 전용 (already-counted-in-total bonus) — addCondition 과 달리 total 은 증가시키지 않고
+ * met/weighted 만 증가. 기존 met += 1 + reason.push 를 가중치 표기와 함께 일관화.
+ */
+function addBonus(
+  state: ConditionState,
+  weight: number,
+  reason: string,
+  metPoints: number = 1,
+): void {
+  state.met += metPoints;
+  state.weighted += weight * metPoints;
+  state.reasons.push(`${reason} (가중치 ${weight.toFixed(1)} 가산${metPoints !== 1 ? ` ×${metPoints}` : ''})`);
+}
+
 function softenRiskSignal(signal: Signal): Signal {
   if (signal === 'STRONG_BUY') return 'BUY';
   if (signal === 'BUY') return 'HOLD';
