@@ -399,6 +399,44 @@ export function computeAllocation(
 
   // Fix #4(2차 감사): M2 쿠션 블록은 승수 루프 이전으로 이동됨. 여기서 중복 적용 금지.
 
+  // ★ === 29차 P1-A #1: LEVERAGE_EXIT_AT_TARGET force-override ===
+  // video1 §10:42-10:54 "착한 레버리지 +20~30% 익절" 정합.
+  // level≥1 (cumReturnPct ≥ 20) 시 base.leverage 강제 0 + nasdaq 으로 흡수 (다음 사이클 평가용).
+  const leverageExitFlag = derived.LEVERAGE_EXIT_AT_TARGET?.value ?? null;
+  if (leverageExitFlag !== null && leverageExitFlag >= 20 && (base.leverage || 0) > 0) {
+    const before = base.leverage || 0;
+    base.nasdaq = (base.nasdaq || 0) + before;
+    base.leverage = 0;
+    explanation?.adjustments.push({
+      step: 'leverage-exit-target',
+      detail: `LEVERAGE EXIT @ +${leverageExitFlag.toFixed(1)}% (video1 §전략C "+20~30% 익절") -> 0% 강제 + nasdaq 흡수`,
+      allocKey: 'leverage',
+      amount: before,
+      before,
+      after: 0,
+    });
+  }
+
+  // ★ === 29차 P1-A #2: DRAWDOWN_TYPE_CLASSIFIER SYSTEMIC_RISK 추가 방어 ===
+  // video1 §08:38 + video3 §17:50 — SYSTEMIC_RISK (level=-2) 시 nasdaq -10, cash +10.
+  const ddType = derived.DRAWDOWN_TYPE_CLASSIFIER?.value ?? null;
+  if (ddType !== null && ddType <= -2) {
+    const cut = Math.min(10, base.nasdaq || 0);
+    if (cut > 0) {
+      const before = base.nasdaq || 0;
+      base.nasdaq = before - cut;
+      base.cash = (base.cash || 0) + cut;
+      explanation?.adjustments.push({
+        step: 'drawdown-systemic-risk',
+        detail: `DRAWDOWN_TYPE_CLASSIFIER=SYSTEMIC_RISK (level=${ddType}) -> nasdaq ${cut}% → cash (video3 §18:31 "회복 수년")`,
+        allocKey: 'nasdaq',
+        amount: cut,
+        before,
+        after: base.nasdaq,
+      });
+    }
+  }
+
   const leverageSignal = signals.find((s) => s.asset === 'LEVERAGE');
   // Fix #3: STRONG_BUY 도 허용. 기존엔 === 'BUY' 만 통과시켜 STRONG_BUY 시 레버리지 0%
   // 처리되는 비대칭이 있었다(3/3 조건 충족 후 승격되면 오히려 차단되는 모순).

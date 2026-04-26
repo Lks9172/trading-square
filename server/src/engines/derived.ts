@@ -1,7 +1,7 @@
 import { MarketDataPoint, DerivedIndicator } from '../types/indicators';
 import { fetchYahooHistory, fetchYahooOHLC } from '../collectors/yahoo';
 import { fetchFredHistory } from '../collectors/fred';
-import { readHistory } from '../state/history-store';
+import { readHistory, writeHistoryPoint } from '../state/history-store';
 import { fetchKrxInvestorFlow, summarizeInvestorFlow } from '../collectors/krx-flow';
 import {
   fetchMultiTimeframe,
@@ -5800,6 +5800,162 @@ export async function computeDerived(
       value: missing.length,
       date: today(),
       formula: `핵심 derived ${criticalKeys.length}종 중 결측 ${missing.length}종${missing.length > 0 ? `: ${missing.slice(0, 5).join(', ')}` : ''}. catch silent skip 추적 (25차).`,
+    };
+  } catch { void 0; }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 29차 macrosquare audit Phase 1 — P1 17건 (5 atomic batch)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ★ === 29차 P1-A #1: LEVERAGE_EXIT_AT_TARGET ===
+  //   video1 §10:42-10:54 "착한 레버리지 진입 후 +20~30% 익절, 횡보 시 일반 ETF 복귀".
+  //   LEVERAGE_TRIGGER_3OF3=1 발효 시점의 NASDAQ close 를 history-store('derived','LEVERAGE_ENTRY_PRICE') 에 기록.
+  //   기록 후 매일 누적 수익률 산출하여 ≥30 강제 익절 / ≥20 익절 권고 / else 0.
+  try {
+    const lvgTrigger = d.LEVERAGE_TRIGGER_3OF3?.value ?? 0;
+    const nasdaqNow = val(raw, 'NASDAQ');
+    const todayKey = today();
+    if (lvgTrigger >= 1 && nasdaqNow !== null) {
+      // 진입가 history append (이미 동일 날짜 있으면 upsert).
+      const existing = await readHistory('derived', 'LEVERAGE_ENTRY_PRICE').catch(() => [] as Array<{date:string; value:number}>);
+      // 가장 최근 진입가 기록 — trigger 가 처음 켜진 날에만 기록 (이미 series 있으면 그 첫 진입가 사용).
+      let entryPrice: number | null = null;
+      let entryDate: string | null = null;
+      if (existing.length > 0) {
+        // trigger 끊김 후 재발효 케이스 대비: 최신 점만 채택.
+        entryPrice = existing[existing.length - 1].value;
+        entryDate = existing[existing.length - 1].date;
+      } else {
+        // 첫 발효 — 오늘 nasdaqClose 기록.
+        await writeHistoryPoint('derived', 'LEVERAGE_ENTRY_PRICE', nasdaqNow, todayKey);
+        entryPrice = nasdaqNow;
+        entryDate = todayKey;
+      }
+      if (entryPrice !== null && entryPrice > 0 && entryDate) {
+        const cumReturnPct = ((nasdaqNow - entryPrice) / entryPrice) * 100;
+        const elapsedDays = Math.max(0, Math.floor((Date.now() - new Date(entryDate).getTime()) / 86400000));
+        let level: number;
+        let label: string;
+        if (cumReturnPct >= 30) { level = 2; label = `🟢 강제 익절 (+${cumReturnPct.toFixed(1)}% ≥ 30%, video1 §10:54)`; }
+        else if (cumReturnPct >= 20) { level = 1; label = `🟡 익절 권고 (+${cumReturnPct.toFixed(1)}% ≥ 20%, video1 §10:42)`; }
+        else { level = 0; label = `⚪ 보유 진행 중 (${cumReturnPct >= 0 ? '+' : ''}${cumReturnPct.toFixed(1)}%, ${elapsedDays}일 경과)`; }
+        d.LEVERAGE_EXIT_AT_TARGET = {
+          name: 'leverage_exit_at_target',
+          value: parseFloat(cumReturnPct.toFixed(2)),
+          date: todayKey,
+          formula: `진입가 ${entryPrice.toFixed(0)} (${entryDate}) → 현재 ${nasdaqNow.toFixed(0)} = ${cumReturnPct >= 0 ? '+' : ''}${cumReturnPct.toFixed(2)}%, ${elapsedDays}일 경과. level=${level}. ${label}. video1 §전략C "착한 레버리지 +20~30% 익절".`,
+        };
+      }
+    } else if (lvgTrigger === 0) {
+      // trigger 꺼지면 다음 진입을 위해 history 정리는 하지 않음 (다음 발효 시 새 진입가 기록).
+      // 단순히 LEVERAGE_EXIT_AT_TARGET 미산출.
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P1-A #2: DRAWDOWN_TYPE_CLASSIFIER (= RECESSION_VS_CORRECTION_FLAG) ===
+  //   video1 §08:38-08:56 "기업 펀더 살아있는 -30% = 기회" + video3 §17:50-18:31 "회복 수년 vs 빠른 반등 분기점"
+  //   drawdown ≤ -30 ∧ ICSA <300K ∧ ISM ≥ 48 → 'OPPORTUNITY' (level=-1, 매수 우호)
+  //   drawdown ≤ -30 ∧ (ICSA ≥350K ∨ ISM <45) → 'SYSTEMIC_RISK' (level=-2)
+  //   drawdown ≤ -30 + 그 외 → 'AMBIGUOUS' (level=0)
+  //   drawdown > -30 → null (비활성)
+  try {
+    const dd = d.NASDAQ_DRAWDOWN_ATH?.value ?? null;
+    const icsa = val(raw, 'ICSA');
+    const ismLatest = d.ISM_PROXY?.value ?? (typeof manualInputs?.ismPmi === 'number' ? manualInputs.ismPmi : null) ?? val(raw, 'ISM_MANUFACTURING');
+    if (dd !== null && dd <= -30) {
+      let cls: 'OPPORTUNITY' | 'SYSTEMIC_RISK' | 'AMBIGUOUS';
+      let level: number;
+      let label: string;
+      const ismLow = ismLatest !== null && ismLatest < 45;
+      const ismOk = ismLatest !== null && ismLatest >= 48;
+      const icsaHigh = icsa !== null && icsa >= 350000;
+      const icsaLow = icsa !== null && icsa < 300000;
+      if (icsaLow && ismOk) {
+        cls = 'OPPORTUNITY'; level = -1;
+        label = `🟢 OPPORTUNITY (drawdown ${dd.toFixed(1)}%, ICSA ${Math.round(icsa!/1000)}K<300K, ISM ${ismLatest!.toFixed(1)}≥48 — video1 §08:38 "펀더 살아있는 기회")`;
+      } else if (icsaHigh || ismLow) {
+        cls = 'SYSTEMIC_RISK'; level = -2;
+        label = `🔴 SYSTEMIC_RISK (drawdown ${dd.toFixed(1)}%${icsaHigh ? `, ICSA ${Math.round(icsa!/1000)}K≥350K` : ''}${ismLow ? `, ISM ${ismLatest!.toFixed(1)}<45` : ''} — video3 §18:31 "회복 수년")`;
+      } else {
+        cls = 'AMBIGUOUS'; level = 0;
+        label = `🟡 AMBIGUOUS (drawdown ${dd.toFixed(1)}%, ICSA ${icsa !== null ? Math.round(icsa/1000)+'K' : 'n/a'}, ISM ${ismLatest?.toFixed(1) ?? 'n/a'} — 분기 미확정)`;
+      }
+      d.DRAWDOWN_TYPE_CLASSIFIER = {
+        name: 'drawdown_type_classifier',
+        value: level,
+        date: today(),
+        formula: `${cls}. ${label}. video1 §08:38 + video3 §17:50.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 29차 P1-A #3: INVESTMENT_TRIPLE_GATE_SCORE ===
+  //   video6 §04:48 "펀더(무엇) × 매크로(지금) × 차트(어느 가격) — 3축 일치"
+  //   펀더 axis: EARNINGS_SURPRISE_FLAG / ANALYST_CONSENSUS_NASDAQ_MEGACAP / fallback INSTITUTIONAL_NASDAQ_FLOW
+  //   매크로 axis: 현 regime 분류 — RISK_ON/NEUTRAL/PANIC_BUT_OK=+1, CAUTION=0, 그 외=-1
+  //   차트 axis: NASDAQ_DISPARITY ∈ [-10,+10]=+1, 그 외=0, ≤-15=-1
+  //   value: 합계 / 3 (-1 ~ 1 range). signals.ts NASDAQ STRONG_BUY 게이트 보강 입력.
+  try {
+    // (a) 펀더 축
+    let fundAxis: number = 0;
+    let fundLabel: string;
+    const earnSurprise = d.EARNINGS_SURPRISE_FLAG?.value ?? null;
+    const analyst = d.ANALYST_CONSENSUS_NASDAQ_MEGACAP?.value ?? null;
+    const inst = d.INSTITUTIONAL_NASDAQ_FLOW?.value ?? null;
+    if (earnSurprise !== null) {
+      fundAxis = earnSurprise > 0 ? 1 : earnSurprise < 0 ? -1 : 0;
+      fundLabel = `EARNINGS_SURPRISE_FLAG=${earnSurprise} → ${fundAxis}`;
+    } else if (analyst !== null) {
+      fundAxis = analyst > 0.5 ? 1 : analyst < -0.5 ? -1 : 0;
+      fundLabel = `ANALYST_CONSENSUS=${analyst.toFixed(2)} → ${fundAxis}`;
+    } else if (inst !== null) {
+      fundAxis = inst > 0 ? 1 : inst < 0 ? -1 : 0;
+      fundLabel = `INSTITUTIONAL_NASDAQ_FLOW=${inst} (fallback) → ${fundAxis}`;
+    } else {
+      fundLabel = '펀더 데이터 결측 → 0';
+    }
+    // (b) 매크로 축 — REGIME 은 derived 가 아닌 cache.ts 후 단계에서 계산되므로 raw history-store 에서 latest signal:REGIME 읽기.
+    let macroAxis: number = 0;
+    let macroLabel: string;
+    let regimeStr: string | null = null;
+    try {
+      const regimeHist = await readHistory('signal', 'REGIME').catch(() => [] as Array<{date:string; value:number; meta?:any}>);
+      if (regimeHist.length > 0) {
+        const last = regimeHist[regimeHist.length - 1] as any;
+        regimeStr = (last.meta?.regime ?? last.regime ?? null) as string | null;
+      }
+    } catch { void 0; }
+    if (regimeStr === 'RISK_ON' || regimeStr === 'NEUTRAL' || regimeStr === 'PANIC_BUT_OK') {
+      macroAxis = 1; macroLabel = `regime=${regimeStr} → +1`;
+    } else if (regimeStr === 'CAUTION') {
+      macroAxis = 0; macroLabel = `regime=${regimeStr} → 0`;
+    } else if (regimeStr === 'CORRECTION' || regimeStr === 'RECESSION_RISK' || regimeStr === 'BOND_VIGILANTE' || regimeStr === 'STAGFLATION' || regimeStr === 'STAGFLATION_BOND_VIGILANTE') {
+      macroAxis = -1; macroLabel = `regime=${regimeStr} → -1`;
+    } else {
+      macroLabel = `regime=null (history 미존재) → 0`;
+    }
+    // (c) 차트 축
+    let chartAxis: number = 0;
+    let chartLabel: string;
+    const disparity = d.NASDAQ_DISPARITY?.value ?? null;
+    if (disparity !== null) {
+      if (disparity >= -10 && disparity <= 10) { chartAxis = 1; chartLabel = `이격도 ${disparity.toFixed(1)}% ∈ [-10,+10] → +1`; }
+      else if (disparity <= -15) { chartAxis = -1; chartLabel = `이격도 ${disparity.toFixed(1)}% ≤ -15 → -1`; }
+      else { chartAxis = 0; chartLabel = `이격도 ${disparity.toFixed(1)}% (외 구간) → 0`; }
+    } else {
+      chartLabel = '이격도 결측 → 0';
+    }
+    const sumScore = (fundAxis + macroAxis + chartAxis) / 3;
+    let levelLabel: string;
+    if (sumScore >= 0.66) levelLabel = '🟢 3축 정합 — STRONG_BUY 우호';
+    else if (sumScore >= 0.0) levelLabel = '🔵 균형';
+    else if (sumScore <= -0.33) levelLabel = '🔴 3축 분기 — STRONG_BUY 차단';
+    else levelLabel = '🟡 약 분기';
+    d.INVESTMENT_TRIPLE_GATE_SCORE = {
+      name: 'investment_triple_gate_score',
+      value: parseFloat(sumScore.toFixed(3)),
+      date: today(),
+      formula: `펀더(${fundLabel}) + 매크로(${macroLabel}) + 차트(${chartLabel}) = ${(fundAxis+macroAxis+chartAxis)} / 3 = ${sumScore.toFixed(3)}. ${levelLabel}. video6 §04:48 "3축 일치".`,
     };
   } catch { void 0; }
 

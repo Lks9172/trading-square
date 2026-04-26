@@ -252,7 +252,13 @@ export function classifyRegime(
   }
 
   const normalized = ((weightedSum / totalWeight + 2) / 4) * 100;
-  const score = Math.round(clamp(normalized, 0, 100));
+  let score = Math.round(clamp(normalized, 0, 100));
+
+  // ★ 29차 P1-A #2: DRAWDOWN_TYPE_CLASSIFIER SYSTEMIC_RISK 시 score 5점 패널티 (video1 §08:38).
+  const ddTypeForScore = dv(derived, 'DRAWDOWN_TYPE_CLASSIFIER');
+  if (ddTypeForScore !== null && ddTypeForScore <= -2) {
+    score = Math.max(0, score - 5);
+  }
 
   const icsa = v(raw, 'ICSA');
   const overheated = dv(derived, 'OVERHEATED');
@@ -308,6 +314,16 @@ export function classifyRegime(
   if (goldilocks === -1 && (regime === 'RISK_ON' || regime === 'NEUTRAL')) {
     overrides.push('GOLDILOCKS_ZONE=-1 (recession 신호) -> 최소 CAUTION 강등');
     regime = 'CAUTION';
+  }
+
+  // ★ === 29차 P1-A #2: DRAWDOWN_TYPE_CLASSIFIER SYSTEMIC_RISK 강제 RECESSION_RISK ===
+  // video1 §08:38 + video3 §17:50-18:31 "회복 수년 vs 빠른 반등 분기점".
+  const ddType = dv(derived, 'DRAWDOWN_TYPE_CLASSIFIER');
+  if (ddType !== null && ddType <= -2) {
+    if (regime !== 'RECESSION_RISK' && regime !== 'STAGFLATION' && regime !== 'BOND_VIGILANTE' && regime !== 'STAGFLATION_BOND_VIGILANTE') {
+      overrides.push('DRAWDOWN_TYPE_CLASSIFIER=SYSTEMIC_RISK -> regime forced to RECESSION_RISK (video1 §08:38 + video3 §17:50)');
+      regime = 'RECESSION_RISK';
+    }
   }
 
   // Fix #4: CREDIT_STRESS_FLAG 소비.

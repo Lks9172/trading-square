@@ -1154,6 +1154,36 @@ export async function readHistory(source: string, key: string): Promise<HistoryP
   }
 }
 
+/**
+ * 29차 P1 헬퍼: derived 스냅샷 키별로 단일 (date, value) 포인트를 append.
+ *  - 같은 date 가 이미 있으면 값을 갱신 (in-place upsert)
+ *  - date 가 비어있으면 오늘 ISO 사용
+ *  - 실패는 silent (호출부 상위 try/catch 와 정합)
+ *
+ *  사용 예: writeHistoryPoint('derived', 'LEVERAGE_ENTRY_PRICE', nasdaqClose)
+ */
+export async function writeHistoryPoint(
+  source: string,
+  key: string,
+  value: number,
+  date?: string,
+): Promise<void> {
+  if (!Number.isFinite(value)) return;
+  try {
+    const dt = date ?? new Date().toISOString().split('T')[0];
+    const existing = await readHistory(source, key);
+    const idx = existing.findIndex((p) => p.date === dt);
+    if (idx >= 0) {
+      existing[idx] = { date: dt, value };
+    } else {
+      existing.push({ date: dt, value });
+    }
+    // 시계열 정렬 보장 (date 오름차순).
+    existing.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    await writeHistory(source, key, existing);
+  } catch { /* silent — 진단용 보조 series 라 실패해도 상위 derived 로직 차단 금지 */ }
+}
+
 export async function backfillFred(apiKey: string, onlyKeys?: string[]) {
   const start = yearsAgo(GUARANTEE.FRED_YEARS);
   const entries = Object.entries(FRED_SERIES).filter(

@@ -490,6 +490,31 @@ function nasdaqSignal(
     }
   }
 
+  // ★ === 29차 P1-A #3: INVESTMENT_TRIPLE_GATE_SCORE — STRONG_BUY 게이트 정합성 ===
+  // video6 §04:48 "펀더 × 매크로 × 차트 3축 일치" — 3축 스코어 ≥0.66 시 STRONG_BUY 통과,
+  // <0 시 STRONG_BUY → BUY 강등, ≤-0.33 시 STRONG_BUY 차단 + BUY → HOLD 강등.
+  const tripleGate = dv(derived, 'INVESTMENT_TRIPLE_GATE_SCORE');
+  if (tripleGate !== null) {
+    if (tripleGate <= -0.33) {
+      if (signal === 'STRONG_BUY' || signal === 'BUY') {
+        const previous = signal;
+        signal = 'HOLD';
+        const overrideReason = `TRIPLE_GATE ${tripleGate.toFixed(2)} ≤ -0.33 (3축 분기, video6 §04:48) → ${previous} → HOLD`;
+        overrides.push(overrideReason);
+        unmetReasons.push(overrideReason);
+      }
+    } else if (tripleGate < 0.0) {
+      if (signal === 'STRONG_BUY') {
+        signal = 'BUY';
+        const overrideReason = `TRIPLE_GATE ${tripleGate.toFixed(2)} < 0 (3축 약분기, video6 §04:48) → STRONG_BUY → BUY`;
+        overrides.push(overrideReason);
+        unmetReasons.push(overrideReason);
+      }
+    } else if (tripleGate >= 0.66) {
+      reasons.push(`✓ TRIPLE_GATE ${tripleGate.toFixed(2)} ≥ 0.66 (3축 정합, video6 §04:48 "펀더×매크로×차트")`);
+    }
+  }
+
   // 23차 Tier 1#3: NASDAQ signal met/total 정합 cap.
   //   기존 met++ 만 하는 가점들 (NASDAQ_DRAWDOWN, RSI<30, 이격도 -25%, W_BOTTOM, econDiv, wtiCuLag 등) 이
   //   total 동기화 안 돼 met/total > 100% 가능. PSYCH 외 가점은 "강도 가산"으로 보고 met cap = total.
