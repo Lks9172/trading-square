@@ -52,6 +52,10 @@ export interface InvestmentPlan {
     korea?: number;
     emerging?: number;
   };
+  // 28차 영상6: 시작 시점 + 시작 자본 (USD 기준 누적 수익률 산출)
+  accountStartDate?: string;       // ISO date
+  startingCapitalUSD?: number;     // 시작 자본 USD
+  startingCapitalKRW?: number;     // 시작 자본 KRW
   investmentExperienceYears?: number;
   accountType?: 'general' | 'isa' | 'pension' | 'foreign';
   notes?: string;

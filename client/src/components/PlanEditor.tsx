@@ -58,10 +58,14 @@ interface Props {
   weeklyReport: WeeklyReport | null;
   weeklyText: string;
   // 19차 신규
-  convictionScore?: number | null;          // CONVICTION_SCORE_7AXIS (-7~+7)
+  convictionScore?: number | null;          // CONVICTION_SCORE_7AXIS (-7~+9 — 28차 9축)
   trancheUsedPct?: number;
   // 22차 P1#4: 운영자 한마디 회전
   operatorQuote?: { short: string; full: string } | null;
+  // 28차 영상6: 4단 우선순위 진척도
+  priorityOrderScore?: number | null;       // INVESTOR_PRIORITY_ORDER_SCORE (0~4)
+  riskRewardRatio?: number | null;          // NASDAQ_RISK_REWARD_RATIO
+  misconceptionFlags?: number | null;       // INVESTOR_MISCONCEPTION_FLAGS
 }
 
 // 21차 Phase 1#7: 외부 링크 6대 카테고리로 재구조화 — 노션 카테고리 정합.
@@ -158,7 +162,7 @@ const LENSES = [
   { key: 'momentum', label: '⑦ 모멘텀 (MACD / 52W Hi / 멀티프레임)' },
 ];
 
-export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, convictionScore, trancheUsedPct, operatorQuote }: Props) {
+export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, convictionScore, trancheUsedPct, operatorQuote, priorityOrderScore, riskRewardRatio, misconceptionFlags }: Props) {
   const [plan, setPlan] = useState<InvestmentPlan | null>(initialPlan);
   const [log, setLog] = useState<TradeLogEntry[]>(initialLog);
   const [savingPlan, setSavingPlan] = useState(false);
@@ -227,6 +231,45 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
         <p className="text-[10px] text-slate-500 mt-1">
           본 페이지는 노션 §"자산제곱 실전 투자 템플릿"의 디지털 구현체입니다.
         </p>
+
+        {/* 28차 영상6: 4단 우선순위 진척도 (종목 < 타이밍 < 비중 < 심리) */}
+        {typeof priorityOrderScore === 'number' && (
+          <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/40 p-3">
+            <div className="text-xs font-semibold text-slate-200 mb-2">
+              🎯 4단 우선순위 진척도 ({priorityOrderScore}/4) — video6 "종목 &lt; 타이밍 &lt; 비중 &lt; 심리"
+            </div>
+            <div className="grid grid-cols-2 gap-1 text-[11px]">
+              <div className={priorityOrderScore >= 1 ? 'text-emerald-300' : 'text-slate-500'}>
+                {priorityOrderScore >= 1 ? '✅' : '⬜'} 1단계: 시간프레임 정의
+              </div>
+              <div className={priorityOrderScore >= 2 ? 'text-emerald-300' : 'text-slate-500'}>
+                {priorityOrderScore >= 2 ? '✅' : '⬜'} 2단계: 비중 입력
+              </div>
+              <div className={priorityOrderScore >= 3 ? 'text-emerald-300' : 'text-slate-500'}>
+                {priorityOrderScore >= 3 ? '✅' : '⬜'} 3단계: 시나리오/복기
+              </div>
+              <div className={priorityOrderScore >= 4 ? 'text-emerald-300' : 'text-slate-500'}>
+                {priorityOrderScore >= 4 ? '✅' : '⬜'} 4단계: 시스템 신호 정합
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 28차 영상6: 손익비 + 오해 패턴 alerts */}
+        {(typeof riskRewardRatio === 'number' || (typeof misconceptionFlags === 'number' && misconceptionFlags > 0)) && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {typeof riskRewardRatio === 'number' && (
+              <span className={`text-[11px] rounded px-2 py-1 border ${riskRewardRatio >= 3 ? 'border-emerald-700 bg-emerald-950/30 text-emerald-200' : riskRewardRatio <= 0.5 ? 'border-red-700 bg-red-950/40 text-red-200' : 'border-slate-700 text-slate-300'}`}>
+                ⚖️ 손익비 1:{riskRewardRatio.toFixed(1)} {riskRewardRatio >= 3 ? '본진' : riskRewardRatio <= 0.5 ? '추격위험' : ''}
+              </span>
+            )}
+            {typeof misconceptionFlags === 'number' && misconceptionFlags > 0 && (
+              <span className="text-[11px] rounded px-2 py-1 border border-orange-700 bg-orange-950/30 text-orange-200">
+                🟠 오해 패턴 {misconceptionFlags}종 감지 (video6 §오해 4종)
+              </span>
+            )}
+          </div>
+        )}
         {/* 19차 P2#12: 확신 점수 표시 + 미달 시 게이트 경고 */}
         {typeof convictionScore === 'number' && (
           <div className={`mt-3 rounded-lg p-3 text-sm ${lowConviction ? 'border border-amber-700 bg-amber-950/40 text-amber-200' : 'border border-emerald-800 bg-emerald-950/30 text-emerald-200'}`}>

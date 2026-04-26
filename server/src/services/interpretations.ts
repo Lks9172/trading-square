@@ -330,6 +330,28 @@ export function interpretDerived(
     if (value >= 7) return '🟡 네이버 투자정보 7일+ 공백';
     return null;
   }
+  // 28차 영상6 신규
+  if (key === 'NASDAQ_RISK_REWARD_RATIO') {
+    if (value >= 3) return '🟢 손익비 1:3+ 우호 — video6 §"본진 매수 구간"';
+    if (value <= 0.5) return '🔴 손익비 1:2+ 추격 위험 — video6 §"오를 폭 < 빠질 폭"';
+    return null;
+  }
+  if (key === 'USER_USD_RETURN_PCT') {
+    if (value >= 30) return '🟢 USD 기준 수익률 +30%+ — video6 §"진짜 자산은 달러로"';
+    if (value <= -20) return '🔴 USD 기준 -20%↓ — 환율 흡수 후 실질 손실';
+    return null;
+  }
+  if (key === 'INVESTOR_PRIORITY_ORDER_SCORE') {
+    if (value === 4) return '🟢 4단 우선순위 모두 정합 (video6 §"종목<타이밍<비중<심리")';
+    if (value <= 1) return '🟠 우선순위 1단 이하 — 시간프레임부터 정의 필요';
+    return null;
+  }
+  if (key === 'INVESTOR_MISCONCEPTION_FLAGS') {
+    if (value >= 2) return '🔴 오해 2종+ 감지 — video6 §오해 4종 점검';
+    if (value === 1) return '🟠 오해 1종 감지';
+    return null;
+  }
+
   // 27차 신규
   if (key === 'SMART_MONEY_4FACTOR_CONSENSUS') {
     if (value === 2) return '🟢 4팩터 (13F+Dataroma+TipRanks+Insider) 강 합의 매수';

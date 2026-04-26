@@ -391,6 +391,17 @@ function nasdaqSignal(
   if (longChannelRet !== null && longChannelRet >= 150) {
     overheatFlags.push(`5년 저점 +${longChannelRet.toFixed(0)}% ≥ 150% (video3 §"153% 역사상 최대" 임박)`);
   }
+  // 28차 영상6 #1: NASDAQ_RISK_REWARD_RATIO ≤ 0.5 (1:2+ 추격 위험) overheat 가산
+  // video6 §"오를 폭 < 빠질 폭"
+  const rrRatio = dv(derived, 'NASDAQ_RISK_REWARD_RATIO');
+  if (rrRatio !== null && rrRatio <= 0.5) {
+    overheatFlags.push(`손익비 1:${(1/rrRatio).toFixed(1)} 추격 위험 (video6 §"오를 폭 < 빠질 폭")`);
+  }
+  // RR ≥ 3 시 BUY 가산 (저점 기회)
+  if (rrRatio !== null && rrRatio >= 3 && disparity !== null && disparity < 0) {
+    met += 1; total += 1;
+    reasons.push(`✓ 손익비 1:${rrRatio.toFixed(1)} 우호 + 이격 음수 (video6 §"손익비 본진", +1)`);
+  }
   const chaseWarning = dv(derived, 'NASDAQ_CHASE_WARNING');
   if (chaseWarning === 1) overheatFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
 

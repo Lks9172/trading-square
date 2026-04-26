@@ -161,17 +161,29 @@ async function handleLog(asset: string, action: string, notes?: string): Promise
   const sysSell = sysSignal === 'SELL' || sysSignal === 'REDUCE';
   let against = false;
   if ((userSell && sysBuy) || (userBuy && sysSell)) against = true;
-  const { appendTradeLog } = await import('./investment-plan');
+  // 28차 영상6: horizon 정합 체크 — 사용자 horizon 과 신호 시간 프레임 일치도
+  // 단기/스윙 신호 (NASDAQ_CROSS, RSI 등) vs long horizon 사용자 → 경고
+  const { appendTradeLog, readInvestmentPlan } = await import('./investment-plan');
+  const plan = await readInvestmentPlan();
+  const horizon = plan.horizon ?? 'medium';
+  let horizonWarning = '';
+  // 단순 휴리스틱: short horizon 사용자가 매크로/장기 신호 (regime 기반) 결정에 따라 trade — OK
+  // long horizon 사용자가 단기 변동에 자주 trade — 경고
+  if (horizon === 'long' && userSell && sysSignal === 'BUY') {
+    horizonWarning = '\n⚠️ video6 §"시간프레임이 정해지지 않으면 전략이 없다" — long horizon 인데 단기 매도 검토';
+  } else if (horizon === 'short' && (sysSignal === 'STRONG_BUY' || sysSignal === 'BUY')) {
+    horizonWarning = '\n💡 long signal 인데 short horizon — 단기 익절 후 재진입 시 손익비 1:3 점검 권장 (video6)';
+  }
   await appendTradeLog({
     kind: 'user_action',
     asset: asset.toUpperCase(),
     to: upperAction,
     notes: notes || `telegram /log`,
     againstSystemRecommendation: against,
-    context: { regimeAtAction: snap.regime?.regime, signalAtAction: sysSignal },
+    context: { regimeAtAction: snap.regime?.regime, signalAtAction: sysSignal, userHorizon: horizon },
   });
   const flag = against ? '🔴 시스템 권고와 반대' : '🟢 시스템 권고 정합';
-  return `✅ Trade Log 기록 완료\n${asset.toUpperCase()} ${upperAction}\n시스템: ${sysSignal || '-'} (${snap.regime?.regime})\n${flag}`;
+  return `✅ Trade Log 기록\n${asset.toUpperCase()} ${upperAction}\n시스템: ${sysSignal || '-'} (${snap.regime?.regime}) / horizon: ${horizon}\n${flag}${horizonWarning}`;
 }
 
 async function pollOnce(): Promise<void> {

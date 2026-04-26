@@ -7,26 +7,27 @@
 
 import { useEffect, useState } from 'react';
 
+// 28차 영상6 §"종목 < 타이밍 < 비중 < 심리" 순서로 재정렬
 const STEPS = [
   {
-    title: '🎯 레짐 신호등',
-    body: '상단의 RegimeHeader 가 현재 시장 국면을 6색 신호등으로 보여줍니다 (RISK_ON 🟢 / NEUTRAL 🔵 / CAUTION 🟡 / CORRECTION 🟠 / PANIC 🔴 / RECESSION ⚫). 점수 0-100 + 핵심 컴포넌트 변화도 함께.',
-    cite: 'video1 §1부 "투자에서 가장 큰 적은 나 자신"',
+    title: '⏱️ 1단계 — 시간 프레임 정의',
+    body: '/plan 페이지에서 horizon 을 선택하세요. 단기 (며칠) / 스윙 (며칠~몇주) / 장기 (수개월~수년). video6 핵심: "시간 프레임이 정해지지 않으면 전략이 없는 겁니다." 같은 하락도 시간 프레임에 따라 의미가 다릅니다.',
+    cite: 'video6 §"가장 먼저 해야 하는 게 얼마나 오래 들고 있을까"',
   },
   {
-    title: '🧭 7축 확신 게이지',
-    body: 'ConvictionPanel 의 7축 (차트/유동성/정책/지정학/모멘텀/애널리스트/매크로) 정합 점수가 ±7 범위로 표시됩니다. +3 이상이면 공격적 진입, -3 이하면 방어 우선.',
-    cite: 'video1 §2부 "5가지가 같은 방향" + video4 §7축',
+    title: '💰 2단계 — 비중 정의 (총알 보존)',
+    body: '/plan 에서 totalCapitalKRW + currentHoldings 8자산 비중 입력. video6: "총알을 처음에 다 써 버리면 진짜 기회가 왔을 때 쏠 게 없다." 분할매수로 평균 단가를 낮추고 반등 시 수익.',
+    cite: 'video6 §"마트 삼겹살 반값이면 더 산다 vs 주식 반값에는 판다"',
   },
   {
-    title: '📊 내 보유 비중 입력',
-    body: '/plan 페이지에서 cash/nasdaq/gold 등 8자산의 현재 보유 % 를 입력하면 시스템 권고와 ≥10%p 차이 시 weekly-report 가 경고합니다.',
-    cite: 'video1 §5부 "비중 기준 없으면 결국 그때그때 감정"',
+    title: '🎬 3단계 — 시나리오 작성 (심리 이김)',
+    body: '시스템이 SCENARIO_GATE_A_B 로 시나리오 A (협상 타결 → 외인 복귀) / B (협상 결렬 → 현금 비중) 자동 분기. video6: "시나리오가 있다면 탐욕도 공포도 군중심리도 이길 수 있습니다."',
+    cite: 'video6 §"시나리오 = 심리를 이기는 유일한 방법"',
   },
   {
-    title: '🤖 텔레그램 봇 연결',
-    body: '텔레그램에서 /status /signal NASDAQ /plan /weekly /log <ASSET> <BUY|SELL> 5종 명령 사용 가능. /log 는 즉시 trade-log 기록 + 시스템 권고 vs 사용자 행동 자동 비교.',
-    cite: 'video4 §매매일지',
+    title: '📊 4단계 — 시스템 신호 활용',
+    body: '레짐 신호등 + 7축 확신 게이지 + Telegram /status /log 5종 명령. ConvictionPanel 핵심 카드는 collapsible 6영역으로 모바일 최적화. /log 는 즉시 trade-log + horizon 정합 체크.',
+    cite: 'video6 §"오늘 내용만 알면 상위 10%"',
   },
 ];
 

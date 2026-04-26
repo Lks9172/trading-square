@@ -263,7 +263,14 @@ export async function detectRuleViolations(snapshot: SystemSnapshot): Promise<st
     if (discipline.impulsiveWarning) violations.push(discipline.impulsiveWarning);
     if (discipline.patternWarning) violations.push(discipline.patternWarning);
     if (discipline.horizonChangeCount30d >= 2) {
-      violations.push(`⚠️ 30일간 horizon ${discipline.horizonChangeCount30d}회 변경 — video1 §5부 "흔들리지 않는다" 위반`);
+      violations.push(`⚠️ 30일간 horizon ${discipline.horizonChangeCount30d}회 변경 — video1 §5부 + video6 §"시간프레임 정해야 전략" 위반`);
+    }
+    // 28차 영상6 인용 — 손실 회피 / 군중심리 / 손익비 위반 패턴
+    if (discipline.againstSystemCount4w >= 5) {
+      violations.push(`⚠️ video6 §"강해 보이는 리더 따라가면 손실만" — 4주 against_system ${discipline.againstSystemCount4w}회`);
+    }
+    if (discipline.impulsiveTrades24h >= 2) {
+      violations.push(`⚠️ video6 §"수익은 작게 손실은 크게 — 수익 난 주식은 너무 빨리 팔게 된다" 패턴 의심`);
     }
   } catch { /* skip */ }
 
@@ -346,13 +353,12 @@ export async function autoLogSnapshotDelta(
 /** Telegram 전송용 포맷 */
 export function formatWeeklyReportText(report: WeeklyReport): string {
   const lines: string[] = [];
-  // 22차 P2#24: 운영자 한마디 회전 헤더
+  // 22차 P2#24: 운영자 한마디 회전 헤더 + 28차 영상6 §우선순위
   try {
-    // 동적 import 에러는 무시 (formatWeeklyReportText 는 동기 함수라 require)
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getDailyQuote } = require('./operator-quotes');
     const q = getDailyQuote();
     lines.push(`💬 ${q.short} — 자산제곱`);
+    lines.push('🎯 video6: 종목 < 타이밍 < 비중 < 심리 — 이 순서로 우선순위');
     lines.push('');
   } catch { /* skip */ }
   lines.push(`📊 MacroSquare Weekly Report (${report.period.from} ~ ${report.period.to})`);

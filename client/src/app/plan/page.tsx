@@ -54,10 +54,13 @@ export default async function PlanPage() {
 
   const conviction = snapshot?.derived?.CONVICTION_SCORE_7AXIS?.value ?? null;
   const trancheUsed = snapshot?.meta?.profile?.manualInputs?.trancheUsedPct;
-  // 22차 P1#4: 운영자 한마디 — derived formula 에서 short 추출
   const quoteFormula = snapshot?.derived?.OPERATOR_PHILOSOPHY_QUOTE_INDEX?.formula ?? '';
   const shortMatch = quoteFormula.match(/오늘의 운영자 한마디: "([^"]+)"/);
   const operatorQuote = shortMatch ? { short: shortMatch[1], full: shortMatch[1] } : null;
+  // 28차 영상6: 4단 우선순위 + 손익비 + 오해
+  const priorityOrderScore = snapshot?.derived?.INVESTOR_PRIORITY_ORDER_SCORE?.value ?? null;
+  const riskRewardRatio = snapshot?.derived?.NASDAQ_RISK_REWARD_RATIO?.value ?? null;
+  const misconceptionFlags = snapshot?.derived?.INVESTOR_MISCONCEPTION_FLAGS?.value ?? null;
 
   return (
     <main className="flex-1 p-4 md:p-6 max-w-6xl mx-auto w-full">
@@ -69,6 +72,9 @@ export default async function PlanPage() {
         convictionScore={conviction}
         trancheUsedPct={trancheUsed}
         operatorQuote={operatorQuote}
+        priorityOrderScore={priorityOrderScore}
+        riskRewardRatio={riskRewardRatio}
+        misconceptionFlags={misconceptionFlags}
       />
     </main>
   );

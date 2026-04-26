@@ -3973,12 +3973,16 @@ export async function computeDerived(
     axes.macro = macroSum >= 1 ? 1 : macroSum <= -1 ? -1 : 0;
 
     // 27차 Phase 1#7: 8번째 축 — 금/구리 비율 (video2 §3부 "주식 시장 방향 선행")
-    // GOLD_COPPER_RATIO ≥200 = 경기 둔화 (-1 위험자산), ≤80 = 회복 (+1)
     const goldCopperVal = d.GOLD_COPPER_RATIO?.value ?? null;
     if (goldCopperVal === null) axes.metal = 0;
-    else if (goldCopperVal >= 200) axes.metal = -1; // 경기 둔화 = 위험자산 약세
-    else if (goldCopperVal <= 80) axes.metal = 1;   // 경기 회복 = 위험자산 우호
+    else if (goldCopperVal >= 200) axes.metal = -1;
+    else if (goldCopperVal <= 80) axes.metal = 1;
     else axes.metal = 0;
+
+    // 28차 영상6 #4: 9번째 축 — Horizon 정합 (video6 §"시간 프레임이 정해지지 않으면 전략이 없음")
+    // USER_HORIZON_ALIGNMENT 결과 그대로 — 정합 +1 / 불일치 -1 / 관망 0
+    const horizonAlign = d.USER_HORIZON_ALIGNMENT?.value ?? 0;
+    axes.horizon = horizonAlign === 1 ? 1 : horizonAlign === -1 ? -1 : 0;
 
     const total = Object.values(axes).reduce((a, b) => a + b, 0);
     const positives = Object.values(axes).filter((v) => v > 0).length;
@@ -3996,7 +4000,7 @@ export async function computeDerived(
       name: 'conviction_score_7axis',
       value: total,
       date: today(),
-      formula: `차트${axes.chart > 0 ? '+' : ''}${axes.chart}/유동성${axes.liquidity > 0 ? '+' : ''}${axes.liquidity}/정책${axes.policy > 0 ? '+' : ''}${axes.policy}/지정학${axes.geo > 0 ? '+' : ''}${axes.geo}/모멘텀${axes.momentum > 0 ? '+' : ''}${axes.momentum}/애널${axes.analyst > 0 ? '+' : ''}${axes.analyst}/매크로${axes.macro > 0 ? '+' : ''}${axes.macro}/금구리${(axes.metal ?? 0) > 0 ? '+' : ''}${axes.metal ?? 0} = ${total} (${positives}강↑/${negatives}약↓, 8축). ${label}. video1+4 §확신 5/7+27차 8축.`,
+      formula: `차트${axes.chart > 0 ? '+' : ''}${axes.chart}/유동성${axes.liquidity > 0 ? '+' : ''}${axes.liquidity}/정책${axes.policy > 0 ? '+' : ''}${axes.policy}/지정학${axes.geo > 0 ? '+' : ''}${axes.geo}/모멘텀${axes.momentum > 0 ? '+' : ''}${axes.momentum}/애널${axes.analyst > 0 ? '+' : ''}${axes.analyst}/매크로${axes.macro > 0 ? '+' : ''}${axes.macro}/금구리${(axes.metal ?? 0) > 0 ? '+' : ''}${axes.metal ?? 0}/시계열${(axes.horizon ?? 0) > 0 ? '+' : ''}${axes.horizon ?? 0} = ${total} (${positives}강↑/${negatives}약↓, 9축). ${label}. video1+4+6 §확신 5/7+27차 8+28차 9축.`,
     };
   } catch { void 0; }
 
@@ -5544,6 +5548,140 @@ export async function computeDerived(
         formula: `KR 매크로 뉴스 마지막 ${daysSinceFresh.toFixed(1)}일 전 (proxy). ${label}. 노션 §"앞으로 풀어드릴 예정" 발신 추적.`,
       };
     }
+  } catch { void 0; }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 28차 영상6 (주린이 탈출) 정합
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // === 28차 #1: NASDAQ_RISK_REWARD_RATIO (손익비) ===
+  // video6 §"3일 30% 오른 주식 — 더 오를 폭 10% / 빠질 폭 30% = 1:3 손익비"
+  try {
+    const nHist = await fetchYahooHistory('^IXIC', 65);
+    if (nHist.length >= 60) {
+      const closes = nHist.map((h) => h.close);
+      const last = closes[closes.length - 1];
+      const ath30 = Math.max(...closes.slice(-30));
+      const low60 = Math.min(...closes.slice(-60));
+      const upside = Math.max(0, ath30 - last);
+      const downside = Math.max(0.01, last - low60);
+      const rr = upside / downside;
+      let level: number;
+      let label: string;
+      if (rr >= 3) { level = 2; label = `🟢 손익비 1:${rr.toFixed(1)} 우호`; }
+      else if (rr >= 1.5) { level = 1; label = `🔵 손익비 1:${rr.toFixed(1)} 양호`; }
+      else if (rr >= 0.5) { level = 0; label = `🟡 손익비 1:${rr.toFixed(2)} 균형`; }
+      else { level = -1; label = `🔴 손익비 1:${rr.toFixed(2)} 추격 위험 — video6 §"오를 폭 < 빠질 폭"`; }
+      d.NASDAQ_RISK_REWARD_RATIO = {
+        name: 'nasdaq_risk_reward_ratio',
+        value: parseFloat(rr.toFixed(2)),
+        date: today(),
+        formula: `30D ATH ${ath30.toFixed(0)} - 현재 ${last.toFixed(0)} = upside ${upside.toFixed(0)} / 60D 저점 ${low60.toFixed(0)} → downside ${downside.toFixed(0)} = RR ${rr.toFixed(2)}. ${label}. video6 §손익비.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 28차 #2: USER_USD_RETURN_PCT ===
+  // video6 §"서울 아파트 5억→10억 KRW 2배 vs USD 기준 34%"
+  try {
+    const { readInvestmentPlan } = await import('../services/investment-plan');
+    const plan = await readInvestmentPlan();
+    const usdkrw = val(raw, 'USDKRW') ?? 1400;
+    const startingUSDDirect = plan.startingCapitalUSD ?? 0;
+    const startingKRWInUSD = (plan.startingCapitalKRW ?? 0) / usdkrw;
+    const startingUSDTotal = startingUSDDirect + startingKRWInUSD;
+    const currentUSD = (d.USER_USD_CAPITAL_TOTAL?.value ?? 0);
+    if (startingUSDTotal > 0 && currentUSD > 0 && plan.accountStartDate) {
+      const returnPct = ((currentUSD - startingUSDTotal) / startingUSDTotal) * 100;
+      const startMs = new Date(plan.accountStartDate).getTime();
+      const days = Math.max(1, (Date.now() - startMs) / 86400000);
+      const annualPct = returnPct * (365 / days);
+      d.USER_USD_RETURN_PCT = {
+        name: 'user_usd_return_pct',
+        value: parseFloat(returnPct.toFixed(2)),
+        date: today(),
+        formula: `시작 ${plan.accountStartDate} ${startingUSDTotal.toFixed(0)} USD → 현재 ${currentUSD.toFixed(0)} USD = ${returnPct.toFixed(2)}% (${days.toFixed(0)}일 / 연환산 ${annualPct.toFixed(1)}%). video6 §"진짜 자산은 달러로".`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 28차 #3: INVESTOR_PRIORITY_ORDER_SCORE (4단 메타 체크) ===
+  try {
+    const { readInvestmentPlan, readRecentTradeLog } = await import('../services/investment-plan');
+    const plan = await readInvestmentPlan();
+    const log = await readRecentTradeLog(200);
+    let score = 0;
+    const checks: string[] = [];
+    if (plan.horizon && plan.horizon !== 'medium') { score++; checks.push('✓ 시간프레임'); }
+    else if (plan.horizon) { checks.push('horizon=medium (default)'); }
+    const hasHoldings = plan.currentHoldings && Object.values(plan.currentHoldings).some((v) => typeof v === 'number' && v > 0);
+    const hasTranche = typeof (manualInputs?.trancheUsedPct) === 'number';
+    if (hasHoldings || hasTranche) { score++; checks.push('✓ 비중'); }
+    const cutoff7d = Date.now() - 7 * 86400000;
+    const recentObs = log.filter((e) => e.kind === 'observation' && new Date(e.ts).getTime() >= cutoff7d).length;
+    const dcaUsed = manualInputs?.trancheUsedPct ?? 0;
+    if (dcaUsed >= 30 || recentObs >= 1) { score++; checks.push('✓ 시나리오/복기'); }
+    const cutoff4w = Date.now() - 28 * 86400000;
+    const recent4w = log.filter((e) => e.kind === 'user_action' && new Date(e.ts).getTime() >= cutoff4w);
+    const against = recent4w.filter((e) => e.againstSystemRecommendation === true).length;
+    const totalActions = recent4w.length;
+    const againstPct = totalActions > 0 ? (against / totalActions) * 100 : 0;
+    if (totalActions === 0 || againstPct < 30) { score++; checks.push('✓ 신호정합'); }
+    let label: string;
+    if (score === 4) label = '🟢 4단 우선순위 모두 정합';
+    else if (score === 3) label = '🔵 3단 정합 — 1단계 보강 필요';
+    else if (score === 2) label = '🟡 2단 정합 — 절반';
+    else if (score === 1) label = '🟠 1단 정합 — 시작 단계';
+    else label = '🔴 우선순위 미정의 — 시간프레임부터';
+    d.INVESTOR_PRIORITY_ORDER_SCORE = {
+      name: 'investor_priority_order_score',
+      value: score,
+      date: today(),
+      formula: `${checks.join(' / ')}. ${score}/4. ${label}. video6 §"종목 < 타이밍 < 비중 < 심리".`,
+    };
+  } catch { void 0; }
+
+  // === 28차 #5: INVESTOR_MISCONCEPTION_FLAGS (오해 4종 자동 감지) ===
+  try {
+    const { readRecentTradeLog, readInvestmentPlan } = await import('../services/investment-plan');
+    const log = await readRecentTradeLog(200);
+    const plan = await readInvestmentPlan();
+    const cutoff30d = Date.now() - 30 * 86400000;
+    const userActions30d = log.filter((e) => e.kind === 'user_action' && new Date(e.ts).getTime() >= cutoff30d);
+    const flags: string[] = [];
+    // (b) 급등주 추격
+    const nHist = await fetchYahooHistory('^IXIC', 35);
+    if (nHist.length >= 30) {
+      const closes = nHist.map((h) => h.close);
+      const ret30 = ((closes[closes.length - 1] - closes[0]) / closes[0]) * 100;
+      const buys30d = userActions30d.filter((e) => /BUY|ADD/i.test(e.to ?? ''));
+      if (ret30 >= 30 && buys30d.length > 0) {
+        flags.push(`급등주 추격 (NASDAQ 30D +${ret30.toFixed(1)}% 시 매수 ${buys30d.length}건)`);
+      }
+    }
+    // (c) 분산 = 안전
+    const heldAssets = plan.currentHoldings
+      ? Object.entries(plan.currentHoldings).filter(([, v]) => typeof v === 'number' && v > 0).length
+      : 0;
+    const againstAny = userActions30d.some((e) => e.againstSystemRecommendation === true);
+    if (heldAssets >= 4 && againstAny) {
+      flags.push(`분산만으로 안전 가정 (${heldAssets}자산 + 시스템 반대)`);
+    }
+    // (d) 차트만
+    const obs30d = log.filter((e) => e.kind === 'observation' && new Date(e.ts).getTime() >= cutoff30d);
+    const macroKeywords = /M2|금리|CPI|연준|Fed|관세|환율|FOMC/i;
+    const obsWithMacro = obs30d.filter((e) => macroKeywords.test(e.notes ?? ''));
+    if (obs30d.length >= 3 && obsWithMacro.length === 0) {
+      flags.push(`차트 중심 (observation ${obs30d.length}건 매크로 인용 0)`);
+    }
+    d.INVESTOR_MISCONCEPTION_FLAGS = {
+      name: 'investor_misconception_flags',
+      value: flags.length,
+      date: today(),
+      formula: flags.length > 0
+        ? `🟠 오해 ${flags.length}종: ${flags.join(' / ')}. video6 §오해 4종.`
+        : '⚪ 오해 패턴 미감지',
+    };
   } catch { void 0; }
 
   // ═══════════════════════════════════════════════════════════════════════

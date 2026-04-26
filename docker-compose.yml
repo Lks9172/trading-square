@@ -1,10 +1,11 @@
 services:
   # MacroSquare 전용 Jaeger (기존 호스트 jaeger 컨테이너와 완전 분리).
-  # 포트: UI 16687 / OTLP HTTP 4328 — 기존 jaeger :16686/:4318 과 충돌 없음.
+  # 포트: UI 16687 / OTLP HTTP 4328 — 기존 jaeger :16686/:4318 과 완전 분리.
   # Badger 영속 스토리지 → ./jaeger-data (홈서버 재부팅 후에도 trace 복구).
   jaeger:
     image: jaegertracing/all-in-one:1.76.0
     container_name: macrosquare-jaeger
+    user: "0:0"
     environment:
       - SPAN_STORAGE_TYPE=badger
       - BADGER_EPHEMERAL=false
@@ -13,10 +14,9 @@ services:
       - COLLECTOR_OTLP_ENABLED=true
     ports:
       - "16687:16686"   # UI (외부 http://192.168.0.200:16687)
-    expose:
-      - "4318"          # OTLP HTTP — compose network 내부만 노출 (server→jaeger)
+      - "4328:4318"     # OTLP HTTP (외부/내부 분리용 전용 포트)
     volumes:
-      - ./jaeger-data:/badger
+      - jaeger-data:/badger
     logging:
       driver: json-file
       options:
@@ -75,3 +75,6 @@ services:
         max-size: "10m"
         max-file: "5"
     restart: unless-stopped
+
+volumes:
+  jaeger-data:
