@@ -27,6 +27,21 @@ export interface InvestmentPlan {
   profitTakeTargetPct: number;           // 익절 목표 (video1 §전략C "20~30%")
   stopLossPct: number;                   // 손절 기준
   monthlyDCA_KRW: number;                // 월간 분할매수 금액
+  // 21차 Phase 1#2: 사용자 실제 보유 비중 (allocKey → %)
+  currentHoldings?: {
+    cash?: number;
+    nasdaq?: number;
+    leverage?: number;
+    gold?: number;
+    silver?: number;
+    copper?: number;
+    korea?: number;
+    emerging?: number;
+  };
+  // 21차 Phase 1#8: 자본 규모 / 투자 연차 / 계좌 종류
+  totalCapitalKRW?: number;
+  investmentExperienceYears?: number;
+  accountType?: 'general' | 'isa' | 'pension' | 'foreign';
   notes?: string;
   updatedAt: string;
 }
@@ -50,7 +65,13 @@ export interface TradeLogEntry {
   from?: string;
   to?: string;
   notes?: string;
-  context?: Record<string, unknown>;
+  // 21차 Phase 2#14: 시스템 권고와 반대 행동 여부 (user_action 기록 시)
+  againstSystemRecommendation?: boolean;
+  // 21차: 행동 시점의 시스템 상태 스냅샷 (regime/signal) — 반복 패턴 분석용
+  context?: Record<string, unknown> & {
+    regimeAtAction?: string;
+    signalAtAction?: string;
+  };
 }
 
 async function ensureDir() {

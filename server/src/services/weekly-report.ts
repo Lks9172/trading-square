@@ -94,23 +94,29 @@ export function buildWeeklyReport(snapshot: SystemSnapshot): WeeklyReport {
   };
 }
 
-// 20차 D1: 7일간 복기 빈도 + 24h impulsive trade 감지
+// 20차 D1 + 21차 P1#5: 7일간 복기 빈도 + 24h impulsive + 4주 동일실수 패턴 감지
 export interface PlanDiscipline {
   reviewsLast7d: number;
   reviewWarning: string | null;
   impulsiveTrades24h: number;
   impulsiveWarning: string | null;
+  // 21차 P1#5: 반복 동일 실수 — 시스템 권고와 반대 행동 횟수
+  againstSystemCount4w: number;
+  patternWarning: string | null;
+  // 21차 P2#15: horizon 변경 횟수
+  horizonChangeCount30d: number;
 }
 
 export async function computePlanDiscipline(): Promise<PlanDiscipline> {
-  const log = await readRecentTradeLog(200);
+  const log = await readRecentTradeLog(500);
   const cutoff7d = Date.now() - 7 * 86400000;
   const cutoff24h = Date.now() - 86400000;
+  const cutoff4w = Date.now() - 28 * 86400000;
+  const cutoff30d = Date.now() - 30 * 86400000;
   const reviews7d = log.filter((e) => {
     const t = new Date(e.ts).getTime();
     return Number.isFinite(t) && t >= cutoff7d && (e.kind === 'observation' || e.kind === 'user_action');
   });
-  // impulsive: 24h 내 동일 자산에 reverse trade (buy→sell→buy)
   const recent24h = log.filter((e) => {
     const t = new Date(e.ts).getTime();
     return Number.isFinite(t) && t >= cutoff24h;
@@ -124,9 +130,22 @@ export async function computePlanDiscipline(): Promise<PlanDiscipline> {
   let impulsive = 0;
   for (const [, trail] of byAsset.entries()) {
     if (trail.length < 3) continue;
-    // 단순 휴리스틱: 같은 자산에 3+ 변경
     impulsive++;
   }
+
+  // 21차 P1#5: 4주간 시스템 권고와 반대 행동 카운트
+  const recent4w = log.filter((e) => {
+    const t = new Date(e.ts).getTime();
+    return Number.isFinite(t) && t >= cutoff4w && e.kind === 'user_action';
+  });
+  const againstCount = recent4w.filter((e) => e.againstSystemRecommendation === true).length;
+
+  // 21차 P2#15: 30일 horizon 변경 횟수
+  const horizonChanges = log.filter((e) => {
+    const t = new Date(e.ts).getTime();
+    return Number.isFinite(t) && t >= cutoff30d && e.kind === 'observation' && /horizon change/i.test(e.notes ?? '');
+  });
+
   return {
     reviewsLast7d: reviews7d.length,
     reviewWarning: reviews7d.length === 0
@@ -138,6 +157,11 @@ export async function computePlanDiscipline(): Promise<PlanDiscipline> {
     impulsiveWarning: impulsive >= 1
       ? `⚠️ 24h 내 ${impulsive}개 자산에서 빈번한 변경 — 노션 §"성급한 매매" 가드`
       : null,
+    againstSystemCount4w: againstCount,
+    patternWarning: againstCount >= 3
+      ? `⚠️ 4주간 시스템 권고 반대 ${againstCount}회 — 반복 패턴 점검 필요 (video1 §1부 "패닉 매도+추격 매수")`
+      : null,
+    horizonChangeCount30d: horizonChanges.length,
   };
 }
 
@@ -147,11 +171,15 @@ export async function detectRuleViolations(snapshot: SystemSnapshot): Promise<st
   const alloc = snapshot.allocation?.allocations || {};
   const violations: string[] = [];
 
-  // 20차 D1: 복기 빈도 + impulsive 가드 통합
+  // 20차 D1 + 21차 P1#5: 복기·impulsive·반복 패턴·horizon 변경 가드
   try {
     const discipline = await computePlanDiscipline();
     if (discipline.reviewWarning) violations.push(discipline.reviewWarning);
     if (discipline.impulsiveWarning) violations.push(discipline.impulsiveWarning);
+    if (discipline.patternWarning) violations.push(discipline.patternWarning);
+    if (discipline.horizonChangeCount30d >= 2) {
+      violations.push(`⚠️ 30일간 horizon ${discipline.horizonChangeCount30d}회 변경 — video1 §5부 "흔들리지 않는다" 위반`);
+    }
   } catch { /* skip */ }
 
   const leverage = alloc.leverage ?? 0;

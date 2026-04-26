@@ -228,6 +228,17 @@ router.get('/plan', async (_req: Request, res: Response) => {
 
 router.post('/plan', async (req: Request, res: Response) => {
   const patch = (req.body || {}) as Partial<InvestmentPlan>;
+  // 21차 P2#15: horizon 변경 시 자동 trade-log 기록 — "흔들림 자체가 보임"
+  try {
+    const before = await readInvestmentPlan();
+    if (patch.horizon && patch.horizon !== before.horizon) {
+      await appendTradeLog({
+        kind: 'observation',
+        notes: `horizon change: ${before.horizon} → ${patch.horizon}`,
+        context: { before: before.horizon, after: patch.horizon },
+      });
+    }
+  } catch { /* skip */ }
   const plan = await writeInvestmentPlan(patch);
   res.json({ plan });
 });
@@ -244,8 +255,41 @@ router.post('/trade-log', async (req: Request, res: Response) => {
     asset?: string; from?: string; to?: string; notes?: string; context?: Record<string, unknown>;
   };
   if (!kind) { res.status(400).json({ error: 'kind required' }); return; }
-  await appendTradeLog({ kind, asset, from, to, notes, context });
-  res.json({ ok: true });
+  // 21차 P2#14: user_action 일 때 시스템 권고 vs 사용자 행동 자동 비교
+  let againstSystemRecommendation: boolean | undefined;
+  let regimeAtAction: string | undefined;
+  let signalAtAction: string | undefined;
+  if (kind === 'user_action' && asset) {
+    try {
+      const snap = await getSnapshot(DEFAULT_PROFILE);
+      regimeAtAction = snap.regime?.regime;
+      const sig = snap.signals?.find((s) => s.asset === asset);
+      signalAtAction = sig?.signal;
+      // 사용자가 SELL 했는데 시스템이 BUY/STRONG_BUY 였다면 against. 또는 BUY 했는데 시스템 SELL/REDUCE.
+      const userAction = (to || '').toUpperCase();
+      if (signalAtAction && userAction) {
+        const userBuy = /BUY|ADD|ENTER/i.test(userAction);
+        const userSell = /SELL|EXIT|REDUCE|TRIM/i.test(userAction);
+        const sysBuy = signalAtAction === 'BUY' || signalAtAction === 'STRONG_BUY';
+        const sysSell = signalAtAction === 'SELL' || signalAtAction === 'REDUCE';
+        if ((userSell && sysBuy) || (userBuy && sysSell)) {
+          againstSystemRecommendation = true;
+        } else if ((userBuy && sysBuy) || (userSell && sysSell)) {
+          againstSystemRecommendation = false;
+        }
+      }
+    } catch { /* skip */ }
+  }
+  await appendTradeLog({
+    kind,
+    asset,
+    from,
+    to,
+    notes,
+    againstSystemRecommendation,
+    context: { ...(context ?? {}), regimeAtAction, signalAtAction },
+  });
+  res.json({ ok: true, againstSystemRecommendation });
 });
 
 // 17차 Phase 3 B2/B3/B4: 국내 증권사 리서치 최신 발행일

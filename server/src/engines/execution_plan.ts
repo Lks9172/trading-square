@@ -42,6 +42,42 @@ function defaultTrancheWeight(stage: 1 | 2 | 3): number {
 // execution_plan 은 LEVERAGE 도 allocationPct 참조 대상이므로 포함된 채로 사용.
 const ASSET_ALLOC_KEY = ASSET_TO_ALLOC_KEY;
 
+// 21차 P1#4: tranche store entries 기반 stage status 동기화 헬퍼.
+function applyExecutedStages(stages: ExecutionStage[], asset: string, entries: Array<{ asset: string; stage: number; executedAt?: string; priceAtEntry?: number | null; weightPct?: number }>): void {
+  const assetEntries = entries.filter((e) => e.asset === asset);
+  if (assetEntries.length === 0) return;
+  const executedStageNumbers = new Set(assetEntries.map((e) => e.stage));
+  for (const stage of stages) {
+    if (executedStageNumbers.has(stage.stage)) {
+      stage.status = 'filled';
+    }
+  }
+}
+
+// 21차 P1#1: avgEntry 기반 stop-loss/take-profit 절대값 계산.
+function applyAbsoluteStopTake(
+  asset: string,
+  entries: Array<{ asset: string; stage: number; priceAtEntry?: number | null; weightPct?: number }>,
+  fallbackStop: number | null,
+  fallbackTake: number | null,
+  stopLossPct = 5,
+  takeProfitPct = 25,
+): { stopPrice: number | null; takePrice: number | null; basedOnEntry: boolean } {
+  const assetEntries = entries.filter(
+    (e) => e.asset === asset && typeof e.priceAtEntry === 'number' && (e.priceAtEntry as number) > 0,
+  );
+  if (assetEntries.length === 0) {
+    return { stopPrice: fallbackStop, takePrice: fallbackTake, basedOnEntry: false };
+  }
+  const sumWeight = assetEntries.reduce((s, e) => s + (e.weightPct ?? 33), 0);
+  const wAvgEntry = sumWeight > 0
+    ? assetEntries.reduce((s, e) => s + (e.priceAtEntry as number) * (e.weightPct ?? 33), 0) / sumWeight
+    : assetEntries.reduce((s, e) => s + (e.priceAtEntry as number), 0) / assetEntries.length;
+  const stopPrice = round(wAvgEntry * (1 - stopLossPct / 100));
+  const takePrice = round(wAvgEntry * (1 + takeProfitPct / 100));
+  return { stopPrice, takePrice, basedOnEntry: true };
+}
+
 function actionLabel(action: ExecutionAction): string {
   const map: Record<ExecutionAction, string> = {
     BUY_NOW: '🟢 지금 1차 매수',
@@ -418,13 +454,13 @@ function genericAssetPlan(
   };
 }
 
-export function computeExecutionPlans(
+export async function computeExecutionPlans(
   raw: Record<string, MarketDataPoint>,
   derived: Record<string, DerivedIndicator>,
   signals: AssetSignal[],
   allocation: AllocationPlan,
   _regime: RegimeState,
-): ExecutionPlan[] {
+): Promise<ExecutionPlan[]> {
   const allocMap = allocation.allocations;
   const plans: ExecutionPlan[] = [];
 
@@ -441,6 +477,24 @@ export function computeExecutionPlans(
     else if (sig.asset === 'EMERGING') plans.push(emergingPlan(raw, derived, sig, alloc));
     // CASH 는 플레이북 없음 (보조 자산)
   }
+
+  // 21차 P1#1+P1#4: trancheStore entries 기반 stage status 동기화 + avgEntry 절대 stop/take.
+  try {
+    const { listTranches } = await import('../services/trancheStore');
+    const { readInvestmentPlan } = await import('../services/investment-plan');
+    const entries = await listTranches();
+    const plan = await readInvestmentPlan();
+    const stopPct = plan.stopLossPct ?? 5;
+    const takePct = plan.profitTakeTargetPct ?? 25;
+    for (const p of plans) {
+      applyExecutedStages(p.stages, p.asset, entries);
+      const result = applyAbsoluteStopTake(p.asset, entries, p.stopLoss?.price ?? null, p.takeProfit?.price ?? null, stopPct, takePct);
+      if (result.basedOnEntry) {
+        p.stopLoss = { price: result.stopPrice, condition: `진입가 평균 -${stopPct}% (21차 P1#1)` };
+        p.takeProfit = { price: result.takePrice, condition: `진입가 평균 +${takePct}% (video1 §전략C)` };
+      }
+    }
+  } catch { /* trancheStore 미사용 시 plans 그대로 반환 */ }
 
   return plans;
 }

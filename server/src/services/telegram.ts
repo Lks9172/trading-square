@@ -40,6 +40,9 @@ let previousRegime: string = '';
 let previousRegimeComponents: Record<string, number> = {};
 let previousAllocations: Record<string, number> = {};
 let previousOverallSignal: string = '';
+// 21차 P2#12: regime 변경 cooldown (60분) — single tick spam 방지
+let lastRegimeChangeAt = 0;
+const REGIME_COOLDOWN_MS = 60 * 60 * 1000;
 
 const REGIME_COMPONENT_LABELS: Record<string, string> = {
   vix: 'VIX',
@@ -185,7 +188,14 @@ export async function checkAndNotify(
   const overallSignal = overallSignalFromAllocation(allocation);
 
   if (previousRegime && previousRegime !== regime.regime) {
-    messages.push(formatRegimeChange(previousRegime, regime.regime, regime.score, previousRegimeComponents, regime.components));
+    // 21차 P2#12: 60분 내 재변경은 알림 무시 (whipsaw 방지). 단 처음 변경은 항상 알림.
+    const sinceLastChange = Date.now() - lastRegimeChangeAt;
+    if (lastRegimeChangeAt === 0 || sinceLastChange >= REGIME_COOLDOWN_MS) {
+      messages.push(formatRegimeChange(previousRegime, regime.regime, regime.score, previousRegimeComponents, regime.components));
+      lastRegimeChangeAt = Date.now();
+    } else {
+      console.log(`[regime-cooldown] ${previousRegime} → ${regime.regime} suppressed (since ${Math.floor(sinceLastChange / 60000)}min)`);
+    }
   }
   previousRegime = regime.regime;
   previousRegimeComponents = { ...regime.components };

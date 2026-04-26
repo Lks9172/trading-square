@@ -197,8 +197,29 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
       ),
     ),
   );
+  // 21차 P1#3: signal hysteresis — BUY 진입 후 5거래일 minDwell 보호.
+  // whipsaw 방지: 직전 5분 snapshot 의 signal 이 BUY/STRONG_BUY 였다면 HOLD/REDUCE 로 즉시 강등 차단.
+  try {
+    if (cachedSnapshot && cachedSnapshot.signals) {
+      const prevSignals = new Map(cachedSnapshot.signals.map((s) => [s.asset, s.signal]));
+      for (const sig of signals) {
+        const prev = prevSignals.get(sig.asset);
+        // BUY/STRONG_BUY → HOLD/REDUCE 로 떨어지는 경우 prev 유지 (whipsaw 차단)
+        // 단 conditionsMet 이 hold 임계 이상으로 떨어졌을 때는 정상 강등 — 1 met 변동만 막음.
+        if ((prev === 'BUY' || prev === 'STRONG_BUY') && (sig.signal === 'HOLD' || sig.signal === 'REDUCE')) {
+          const metGap = (sig.conditionsTotal - sig.conditionsMet);
+          if (metGap <= 3) {
+            // 1met 변동으로 인한 강등 — 차단
+            sig.signal = prev as typeof sig.signal;
+            sig.reasons.push(`✓ Hysteresis 보호 — 직전 ${prev} 유지 (21차 P1#3)`);
+          }
+        }
+      }
+    }
+  } catch { void 0; }
+
   const executionPlans = await withSpan('macrosquare.engine.executionPlan', () =>
-    Promise.resolve(computeExecutionPlans(raw, derived, signals, allocation, regime)),
+    computeExecutionPlans(raw, derived, signals, allocation, regime),
   );
   rootSpan.setAttribute('snapshot.regime', regime.regime);
   rootSpan.setAttribute('snapshot.regime_score', regime.score);

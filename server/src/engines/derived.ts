@@ -111,6 +111,8 @@ export async function computeDerived(
     investmentHorizon?: 'short' | 'medium' | 'long';
     trancheUsedPct?: number;
     etfInflowTheme?: string;
+    // 21차 Phase 2#11: 지정학 카운트다운 이벤트
+    geopoliticalCountdown?: Array<{ event: string; targetDate: string }>;
   },
 ): Promise<Record<string, DerivedIndicator>> {
   const d: Record<string, DerivedIndicator> = {};
@@ -4468,6 +4470,152 @@ export async function computeDerived(
       date: today(),
       formula: `≥$500k 단일 매수 ${lb}건 24h. top amounts: $${(ins?.largeBuyTopAmounts ?? []).slice(0, 3).map((a) => Math.round(a / 1000) + 'k').join(', ') || '-'}. 노션 §OpenInsider.`,
     };
+  } catch { void 0; }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 21차 신규 derived
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // === 21차 P1#2: PORTFOLIO_DRIFT (사용자 보유 vs 권장) ===
+  // video1 §5부 "비중 기준 없으면 결국 그때그때 감정". InvestmentPlan.currentHoldings 와
+  // 시스템 allocation 권고의 절대 차이 합 / 2 → drift % (동일 시 0, 완전 다름 시 100).
+  try {
+    const { readInvestmentPlan } = await import('../services/investment-plan');
+    const plan = await readInvestmentPlan();
+    const holdings = plan.currentHoldings;
+    if (holdings && Object.keys(holdings).length > 0) {
+      // 권고 비중은 derived 계산 시점에 직접 접근 불가 — manualInputs 외부에서 처리.
+      // 여기서는 holdings 합산만 가시화 (allocation drift 는 weekly-report 가 계산).
+      const total = Object.values(holdings).reduce((s, v) => s + (typeof v === 'number' ? v : 0), 0);
+      const usedSlots = Object.values(holdings).filter((v) => typeof v === 'number' && v > 0).length;
+      d.PORTFOLIO_HOLDINGS_TOTAL_PCT = {
+        name: 'portfolio_holdings_total_pct',
+        value: parseFloat(total.toFixed(1)),
+        date: today(),
+        formula: `사용자 보유 합계 ${total.toFixed(1)}% (${usedSlots} 자산). 100% 미만 시 미할당 유동현금 가능성. 21차 P1#2.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 21차 P2#10: KOSPI_YEARLY_LOWER_WICK_PCT ===
+  // stt_kospi §"계단에 짐 한번 내려놓고" — 연봉 아래꼬리 / 전체폭 비율.
+  // 5% 미만 = 매수 누적 미소화 → 추가 조정 우려.
+  try {
+    const ksHist = await fetchYahooHistory('^KS11', 280);
+    if (ksHist.length >= 250) {
+      const closes = ksHist.map((h) => h.close);
+      const yearStart = closes[0];
+      const yearMin = Math.min(...closes);
+      const yearMax = Math.max(...closes);
+      const last = closes[closes.length - 1];
+      const range = Math.max(0.01, yearMax - yearMin);
+      const lowerWick = Math.max(0, Math.min(yearStart, last) - yearMin);
+      const lowerWickPct = (lowerWick / range) * 100;
+      let level: number;
+      let label: string;
+      if (lowerWickPct >= 15) { level = 1; label = '🟢 정상 (≥15%)'; }
+      else if (lowerWickPct >= 5) { level = 0; label = '🟡 보통 (5~15%)'; }
+      else { level = -1; label = '🟠 매수 미소화 (<5%) — 추가 조정 우려'; }
+      d.KOSPI_YEARLY_LOWER_WICK_PCT = {
+        name: 'kospi_yearly_lower_wick_pct',
+        value: parseFloat(lowerWickPct.toFixed(1)),
+        date: today(),
+        formula: `연봉 아래꼬리 ${lowerWick.toFixed(0)} / 전체폭 ${range.toFixed(0)} = ${lowerWickPct.toFixed(1)}%. ${label}. stt_kospi §"계단에 짐 내려놓기".`,
+      };
+      d.KOSPI_YEARLY_LOWER_WICK_LEVEL = {
+        name: 'kospi_yearly_lower_wick_level',
+        value: level,
+        date: today(),
+        formula: `1=정상, 0=보통, -1=매수 미소화.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 21차 P2#9: DCA_STAGE_STAGNATION (분할 정체 경고) ===
+  // tranche store entries 기반 — stage 1 진입 후 15일 + stage 2 미진입 시 경고.
+  try {
+    const { listTranches } = await import('../services/trancheStore');
+    const entries = await listTranches();
+    // 자산별 stage 1 / stage 2 진입 여부 집계
+    const stage1ByAsset = new Map<string, string>();
+    const stage2By = new Set<string>();
+    for (const e of entries) {
+      if (e.stage === 1 && !stage1ByAsset.has(e.asset)) stage1ByAsset.set(e.asset, e.executedAt);
+      if (e.stage >= 2) stage2By.add(e.asset);
+    }
+    let stagnantCount = 0;
+    const stagnantAssets: string[] = [];
+    for (const [asset, executedAt] of stage1ByAsset.entries()) {
+      if (stage2By.has(asset)) continue;
+      const ageDays = Math.floor((Date.now() - new Date(executedAt).getTime()) / 86400000);
+      if (ageDays >= 15) {
+        stagnantCount++;
+        stagnantAssets.push(`${asset}(${ageDays}d)`);
+      }
+    }
+    d.DCA_STAGE_STAGNATION_COUNT = {
+      name: 'dca_stage_stagnation_count',
+      value: stagnantCount,
+      date: today(),
+      formula: `${stagnantCount}개 자산이 stage1 진입 후 15일+ 2차 미진입${stagnantAssets.length > 0 ? `: ${stagnantAssets.join(', ')}` : ''}. video3 §"분할매수 적기" 가드.`,
+    };
+  } catch { void 0; }
+
+  // === 21차 P2#20: 한국 거시 뉴스 RSS (한경 글로벌마켓 / sedaily 증권) ===
+  try {
+    const { fetchKrNewsHeadlines } = await import('../collectors/kr-news');
+    const kr = await fetchKrNewsHeadlines();
+    if (kr) {
+      d.KR_NEWS_TOTAL_COUNT_24H = {
+        name: 'kr_news_total_count_24h',
+        value: kr.totalCount24h,
+        date: today(),
+        formula: `한국 매크로 뉴스 24h 합계 ${kr.totalCount24h}건. 소스: ${Object.keys(kr.bySource).join(', ')}. 노션 §한경 글로벌마켓.`,
+      };
+      // 가장 최신 헤드라인의 minutesAgo
+      const minutes = Math.min(...Object.values(kr.bySource).map((s) => s.minutesAgo));
+      d.KR_NEWS_FRESHNESS_MINUTES = {
+        name: 'kr_news_freshness_minutes',
+        value: Number.isFinite(minutes) ? minutes : 999,
+        date: today(),
+        formula: `한국 매크로 뉴스 최신 ${minutes}분 전.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 21차 P2#19: NAVER 시황속보 / 투자정보 D-day (도메스틱 리포트 활용) ===
+  try {
+    const { fetchDomesticReportsLatest } = await import('../collectors/domestic-reports');
+    const dom = await fetchDomesticReportsLatest();
+    if (dom?.investInfo) {
+      d.NAVER_INVEST_INFO_REPORT_DAYS_AGO = {
+        name: 'naver_invest_info_report_days_ago',
+        value: dom.investInfo.daysAgo,
+        date: today(),
+        formula: `네이버금융 투자정보 최신 "${dom.investInfo.title ?? '-'}" (D-${dom.investInfo.daysAgo}).`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 21차 P2#11: GEOPOLITICAL_COUNTDOWN_DDAY (사용자 manual events 중 가장 가까운 D-day) ===
+  try {
+    const events = manualInputs?.geopoliticalCountdown;
+    if (Array.isArray(events) && events.length > 0) {
+      const todayMs = Date.now();
+      const future = events
+        .map((e) => ({ event: e.event, dday: Math.ceil((new Date(e.targetDate).getTime() - todayMs) / 86400000) }))
+        .filter((x) => Number.isFinite(x.dday) && x.dday >= 0)
+        .sort((a, b) => a.dday - b.dday);
+      if (future.length > 0) {
+        const next = future[0];
+        d.GEOPOLITICAL_COUNTDOWN_DDAY = {
+          name: 'geopolitical_countdown_dday',
+          value: next.dday,
+          date: today(),
+          formula: `다가오는 지정학 이벤트: ${next.event} (D-${next.dday}). 전체 ${future.length}개 등록.`,
+        };
+      }
+    }
   } catch { void 0; }
 
   // === 20차 노션 A5: TradingEconomics stream 신선도 + 24h 카운트 ===

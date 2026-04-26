@@ -2,7 +2,7 @@ import { computeExecutionPlans, DEFAULT_TRANCHE_WEIGHTS } from '../engines/execu
 import { AllocationPlan, AssetSignal, DerivedIndicator, MarketDataPoint, RegimeState } from '../types/indicators';
 
 describe('computeExecutionPlans', () => {
-  it('applies the 30/30/40 default tranche standard to 3-stage plans', () => {
+  it('applies the 30/30/40 default tranche standard to 3-stage plans', async () => {
     const raw: Record<string, MarketDataPoint> = {
       NASDAQ: { code: 'NASDAQ', value: 20000, date: '2026-01-01', source: 'YAHOO' },
       VIXCLS: { code: 'VIXCLS', value: 32, date: '2026-01-01', source: 'FRED' },
@@ -37,13 +37,13 @@ describe('computeExecutionPlans', () => {
     };
     const regime: RegimeState = { regime: 'CORRECTION', score: 42, components: {}, date: '2026-01-01' };
 
-    const plans = computeExecutionPlans(raw, derived, signals, allocation, regime);
+    const plans = await computeExecutionPlans(raw, derived, signals, allocation, regime);
     const nasdaq = plans.find((plan) => plan.asset === 'NASDAQ');
 
     expect(nasdaq?.stages.map((stage) => stage.weightPct)).toEqual([...DEFAULT_TRANCHE_WEIGHTS]);
   });
 
-  it('keeps BUY playbooks aligned to the 30/30/40 tranche standard', () => {
+  it('keeps BUY playbooks aligned to the 30/30/40 tranche standard', async () => {
     const raw: Record<string, MarketDataPoint> = {
       GOLD: { code: 'GOLD', value: 3000, date: '2026-01-01', source: 'YAHOO' },
       EWZ: { code: 'EWZ', value: 35, date: '2026-01-01', source: 'YAHOO' },
@@ -103,7 +103,7 @@ describe('computeExecutionPlans', () => {
     };
     const regime: RegimeState = { regime: 'NEUTRAL', score: 60, components: {}, date: '2026-01-01' };
 
-    const plans = computeExecutionPlans(raw, derived, signals, allocation, regime);
+    const plans = await computeExecutionPlans(raw, derived, signals, allocation, regime);
     expect(plans.find((plan) => plan.asset === 'GOLD')?.stages.map((stage) => stage.weightPct)).toEqual([...DEFAULT_TRANCHE_WEIGHTS]);
     expect(plans.find((plan) => plan.asset === 'EMERGING')?.stages.map((stage) => stage.weightPct)).toEqual([...DEFAULT_TRANCHE_WEIGHTS]);
     expect(plans.find((plan) => plan.asset === 'SILVER')?.stages.map((stage) => stage.weightPct)).toEqual([...DEFAULT_TRANCHE_WEIGHTS]);

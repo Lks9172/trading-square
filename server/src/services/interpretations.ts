@@ -309,6 +309,44 @@ export function interpretDerived(
   }
   // 19차 신규
   // 20차 신규
+  // 21차 신규
+  if (key === 'PORTFOLIO_HOLDINGS_TOTAL_PCT') {
+    if (value < 80) return '🟡 사용자 보유 합 80% 미만 — 미할당 자산 또는 입력 누락';
+    if (value > 110) return '🔴 사용자 보유 합 110% 초과 — 입력 오류 가능';
+    return null;
+  }
+  if (key === 'KOSPI_YEARLY_LOWER_WICK_PCT') {
+    if (value < 5) return '🟠 KOSPI 연봉 아래꼬리 <5% — stt_kospi §"매수 미소화, 추가 조정 우려"';
+    if (value >= 15) return '🟢 KOSPI 연봉 아래꼬리 ≥15% — 정상';
+    return null;
+  }
+  if (key === 'DCA_STAGE_STAGNATION_COUNT') {
+    if (value >= 2) return '🟠 분할매수 정체 ≥2개 자산 — video3 §"분할 적기" 가드';
+    if (value === 1) return '🟡 분할매수 정체 1건';
+    return null;
+  }
+  if (key === 'NAVER_INVEST_INFO_REPORT_DAYS_AGO') {
+    if (value <= 1) return '🟢 네이버 투자정보 최신 (1일 이내)';
+    if (value >= 7) return '🟡 네이버 투자정보 7일+ 공백';
+    return null;
+  }
+  if (key === 'KR_NEWS_TOTAL_COUNT_24H') {
+    if (value >= 50) return '🔴 한국 매크로 뉴스 24h 50건+ — 노이즈 폭증';
+    if (value >= 20) return '🟡 한국 매크로 뉴스 활발';
+    return null;
+  }
+  if (key === 'KR_NEWS_FRESHNESS_MINUTES') {
+    if (value <= 30) return '🟢 한국 매크로 뉴스 30분 이내';
+    if (value >= 360) return '🟡 한국 매크로 뉴스 6시간+ 공백';
+    return null;
+  }
+  if (key === 'GEOPOLITICAL_COUNTDOWN_DDAY') {
+    if (value === 0) return '🔴 지정학 이벤트 오늘 — 변동성 주의';
+    if (value <= 3) return '🟠 지정학 이벤트 D-3 이내 — 사전 대비';
+    if (value <= 14) return '🟡 지정학 이벤트 D-14 이내 — 모니터링';
+    return null;
+  }
+
   if (key === 'TE_STREAM_MINUTES_AGO') {
     if (value <= 30) return '🟢 TE 헤드라인 30분 이내 — 시장 정보 즉시성';
     if (value >= 360) return '🟡 TE 헤드라인 6시간+ 공백';

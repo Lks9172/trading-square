@@ -133,6 +133,8 @@ export interface UserProfile {
     trancheUsedPct?: number;
     // 19차 P2#10: 주간 마이핀플 ETF inflow 테마 (수동 입력)
     etfInflowTheme?: string;
+    // 21차 Phase 2#11: 지정학 카운트다운 이벤트 (이름 + 목표일)
+    geopoliticalCountdown?: Array<{ event: string; targetDate: string }>;
   };
 }
 
@@ -184,7 +186,7 @@ export interface ExecutionStage {
   weightPct: number;          // 해당 자산 할당 중 N% 집행
   triggerCondition: string;   // 인간 가독 조건 ("현재가에서 즉시" / "-5% 추가 하락 시" 등)
   triggerPrice?: number;      // 조건이 가격 기반일 때 구체 값
-  status: 'pending' | 'ready' | 'triggered';
+  status: 'pending' | 'ready' | 'triggered' | 'filled';
 }
 
 export interface ExecutionPlan {
