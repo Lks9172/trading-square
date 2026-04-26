@@ -26,6 +26,11 @@ interface InvestmentPlan {
   profitTakeTargetPct: number;
   stopLossPct: number;
   monthlyDCA_KRW: number;
+  // 21차
+  currentHoldings?: Record<string, number | undefined>;
+  totalCapitalKRW?: number;
+  investmentExperienceYears?: number;
+  accountType?: 'general' | 'isa' | 'pension' | 'foreign';
   notes?: string;
   updatedAt: string;
 }
@@ -57,38 +62,85 @@ interface Props {
   trancheUsedPct?: number;
 }
 
-// 19차 P3#15 + 20차 노션 정합 확장 — 25개 외부 링크 (URL 정정 포함)
-const EXTERNAL_LINKS = [
-  // 노션 §리서치 / 리포트
-  { label: '신한투자증권 리서치', url: 'https://siw.shinhansec.com/siw/insights/research/list/view-popup.do' },
-  { label: '미래에셋자산운용 ETF', url: 'https://www.miraeasset.com/etf/etfData.do' },
-  { label: '미래에셋 미국증시(hkr1003)', url: 'https://securities.miraeasset.com/' },
-  { label: '우리자산운용 리서치', url: 'https://www.wooriam.com/research/list.do' },
-  { label: 'Fidelity Korea Insights', url: 'https://www.fidelity.co.kr/insights/' },
-  { label: 'KCIF 국제금융센터', url: 'https://www.kcif.or.kr/finance/bondList' },
-  { label: 'KIF 금융브리프', url: 'https://www.kif.re.kr/kif4/publication/pub_list?mid=20' },
-  { label: 'KDI 한국개발연구원', url: 'https://www.kdi.re.kr/research/economy_outlook' },
-  { label: '한국은행 경제전망', url: 'https://www.bok.or.kr/portal/bbs/B0000245/list.do?menuNo=200066' },
-  { label: 'IMF World Economic Outlook', url: 'https://www.imf.org/en/Publications/WEO' },
-  // 노션 §주식·ETF·채권 + 거시 분석
-  { label: 'CME FedWatch Tool', url: 'https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html' },
-  { label: 'CME Market Insights', url: 'https://www.cmegroup.com/ko/education/market-insights.html' },
-  { label: 'TipRanks (월가 컨센서스)', url: 'https://www.tipranks.com/' },
-  { label: 'TradingEconomics', url: 'https://tradingeconomics.com/' },
-  { label: 'Investing 캘린더', url: 'https://www.investing.com/economic-calendar/' },
-  // 노션 §스마트머니
-  { label: 'Dataroma 슈퍼인베스터', url: 'https://www.dataroma.com/m/home.php' },
-  { label: 'OpenInsider', url: 'http://openinsider.com/' },
-  { label: 'Insider Screener', url: 'https://www.insiderscreener.com/en/' },
-  { label: 'Fintel Institutional Ownership', url: 'https://fintel.io/so/us' },
-  { label: 'SEC EDGAR 8-K', url: 'https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K' },
-  // 노션 §자산제곱 자체 도구
-  { label: '자산제곱 유동성 대시보드', url: 'https://liquidity-dashboard-rho.vercel.app/' },
-  { label: '자산제곱 지정학 지도', url: 'https://assetx2-geomap.vercel.app/' },
-  { label: '마이핀플 ETF 순위', url: 'https://www.myfinpl.com/investment/etf' },
-  { label: 'Portfolio Visualizer', url: 'https://www.portfoliovisualizer.com/' },
-  // 노션 §실전 투자
-  { label: 'Threads @asset.x2', url: 'https://www.threads.net/@asset.x2' },
+// 21차 Phase 1#7: 외부 링크 6대 카테고리로 재구조화 — 노션 카테고리 정합.
+// 운영자 시그니처 자료 (구독·100명방·MALL²·TV preset)는 별도 그룹.
+interface LinkGroup {
+  title: string;
+  hint?: string;
+  links: Array<{ label: string; url: string }>;
+}
+const EXTERNAL_LINK_GROUPS: LinkGroup[] = [
+  {
+    title: '🏛️ 자산제곱 본가 (운영자 시그니처)',
+    hint: '노션 §실전투자 적용 — 운영자 본인 자료',
+    links: [
+      // 21차 P2#17: Threads .net → .com (Meta 도메인 전환 정합)
+      { label: 'Threads @asset.x2', url: 'https://www.threads.com/@asset.x2' },
+      { label: '자산제곱 유동성 대시보드', url: 'https://liquidity-dashboard-rho.vercel.app/' },
+      { label: '자산제곱 지정학 지도', url: 'https://assetx2-geomap.vercel.app/' },
+      { label: '🔒 100명 비공개 자료실', url: 'https://www.threads.com/@asset.x2' },
+      { label: '🔒 핵심 전략 구독 자료', url: 'https://naver.me/FxC5ffqp' },
+      { label: '🛒 따뜻한 제곱몰 (MALL²)', url: 'https://www.threads.com/@asset.x2' },
+    ],
+  },
+  {
+    title: '📊 기술적 분석 / 차트',
+    hint: '노션 §기술적 분석 — TradingView preset + 학습자료',
+    links: [
+      { label: 'TradingView 기본', url: 'https://www.tradingview.com/' },
+      { label: '🌟 자산제곱 TV 지표 (운영자 preset)', url: 'https://naver.me/FwGw5GKu' },
+      { label: '대신증권 기술적 분석 PDF', url: 'https://www.daishin.com/' },
+    ],
+  },
+  {
+    title: '🌍 거시 경제 분석',
+    hint: '노션 §거시경제 — 국내·해외 거시 리포트',
+    links: [
+      { label: 'KCIF 국제금융센터', url: 'https://www.kcif.or.kr/finance/bondList' },
+      { label: 'KIF 금융브리프', url: 'https://www.kif.re.kr/kif4/publication/pub_list?mid=20' },
+      { label: 'KDI 한국개발연구원', url: 'https://www.kdi.re.kr/research/economy_outlook' },
+      { label: '한국은행 경제전망', url: 'https://www.bok.or.kr/portal/bbs/B0000245/list.do?menuNo=200066' },
+      { label: 'IMF World Economic Outlook', url: 'https://www.imf.org/en/Publications/WEO' },
+      { label: 'Fidelity Korea Insights', url: 'https://www.fidelity.co.kr/insights/' },
+      { label: 'TradingEconomics', url: 'https://tradingeconomics.com/' },
+      { label: 'Investing 캘린더 (KR)', url: 'https://kr.investing.com/economic-calendar/' },
+    ],
+  },
+  {
+    title: '💼 주식·ETF·채권 (리서치 / 백테스트)',
+    hint: '노션 §주식·ETF·채권',
+    links: [
+      { label: '신한투자증권 리서치', url: 'https://siw.shinhansec.com/siw/insights/research/list/view-popup.do' },
+      { label: '미래에셋자산운용 ETF', url: 'https://www.miraeasset.com/etf/etfData.do' },
+      { label: '미래에셋 미국증시', url: 'https://securities.miraeasset.com/' },
+      { label: '우리자산운용 리서치', url: 'https://www.wooriam.com/research/list.do' },
+      { label: 'CME FedWatch Tool', url: 'https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html' },
+      { label: 'CME Market Insights', url: 'https://www.cmegroup.com/ko/education/market-insights.html' },
+      { label: 'Portfolio Visualizer', url: 'https://www.portfoliovisualizer.com/' },
+      { label: '마이핀플 ETF 순위', url: 'https://www.myfinpl.com/investment/etf' },
+      { label: 'TipRanks dashboard', url: 'https://www.tipranks.com/dashboard' },
+    ],
+  },
+  {
+    title: '🐳 스마트머니 / 내부자',
+    hint: '노션 §스마트머니',
+    links: [
+      { label: 'Dataroma 슈퍼인베스터', url: 'https://www.dataroma.com/m/home.php' },
+      { label: 'OpenInsider', url: 'http://openinsider.com/' },
+      { label: 'Insider Screener', url: 'https://www.insiderscreener.com/en/' },
+      { label: 'Fintel Institutional Ownership', url: 'https://fintel.io/so/us' },
+      { label: 'SEC EDGAR 8-K + Form 4', url: 'https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K' },
+    ],
+  },
+  {
+    title: '📰 한국 거시 뉴스',
+    hint: '노션 §해외증시 한국 뉴스',
+    links: [
+      { label: '한경 글로벌마켓', url: 'https://www.hankyung.com/globalmarket' },
+      { label: '서울경제 증권', url: 'https://www.sedaily.com/JList/Stock' },
+      { label: '글로벌마켓모니터 (einfomax)', url: 'https://news.einfomax.co.kr/' },
+    ],
+  },
 ];
 
 const LENSES = [
@@ -240,6 +292,46 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
             value={plan.monthlyDCA_KRW}
             onChange={(v) => savePlan({ monthlyDCA_KRW: v })}
           />
+          {/* 21차 Phase 1#8: 자본 / 연차 / 계좌 */}
+          <NumberField
+            label="총 운용자본 (KRW)"
+            value={plan.totalCapitalKRW ?? 0}
+            onChange={(v) => savePlan({ totalCapitalKRW: v })}
+            hint="개인화 산출용 (선택)"
+          />
+          <NumberField
+            label="투자 연차 (years)"
+            value={plan.investmentExperienceYears ?? 0}
+            onChange={(v) => savePlan({ investmentExperienceYears: v })}
+          />
+          <Field label="계좌 종류">
+            <select
+              value={plan.accountType ?? 'general'}
+              onChange={(e) => savePlan({ accountType: e.target.value as InvestmentPlan['accountType'] })}
+              className="bg-slate-800 text-slate-100 rounded px-3 py-2 w-full"
+            >
+              <option value="general">일반</option>
+              <option value="isa">ISA</option>
+              <option value="pension">연금저축/IRP</option>
+              <option value="foreign">해외주식 전용</option>
+            </select>
+          </Field>
+        </div>
+
+        {/* 21차 Phase 1#2: 사용자 실제 보유 비중 입력 — 권고 vs 현재 drift 측정용 */}
+        <div className="mt-4 rounded-lg border border-slate-700 bg-slate-950/50 p-3">
+          <h3 className="text-sm font-semibold text-slate-200 mb-2">📊 내 실제 보유 비중 (%)</h3>
+          <p className="text-[10px] text-slate-500 mb-2">권고 비중 대비 차이를 weekly-report 가 추적합니다 (≥10%p drift 시 경고).</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {(['cash','nasdaq','leverage','gold','silver','copper','korea','emerging'] as const).map((k) => (
+              <NumberField
+                key={k}
+                label={k}
+                value={plan.currentHoldings?.[k] ?? 0}
+                onChange={(v) => savePlan({ currentHoldings: { ...plan.currentHoldings, [k]: v } })}
+              />
+            ))}
+          </div>
         </div>
         <div className="mt-4 text-xs text-slate-500">
           최종 업데이트: {new Date(plan.updatedAt).toLocaleString('ko-KR')}
@@ -330,23 +422,31 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
         </section>
       )}
 
-      {/* 19차 P3#15: 외부 PDF 리포트 링크 카드 */}
+      {/* 21차 Phase 1#7: 외부 리서치 링크 — 6대 카테고리 그룹 */}
       <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 md:p-6">
-        <h2 className="text-lg font-semibold text-slate-100 mb-3">🔗 외부 리서치 / 노션 정합 링크</h2>
-        <p className="text-xs text-slate-400 mb-3">
-          노션 §주식·ETF·채권 + §경제 캘린더 정합. 데이터는 자동 수집되지 않으며 클릭 동선만 제공.
+        <h2 className="text-lg font-semibold text-slate-100 mb-1">🔗 외부 리서치 / 노션 정합 링크</h2>
+        <p className="text-xs text-slate-400 mb-4">
+          노션 6대 카테고리 정합. 자산제곱 본가 자료는 운영자 시그니처 그룹으로 분리.
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-          {EXTERNAL_LINKS.map((l) => (
-            <a
-              key={l.url}
-              href={l.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block rounded border border-slate-700 bg-slate-950/40 p-2 text-xs text-slate-200 hover:border-cyan-600 hover:bg-cyan-950/20 transition"
-            >
-              ↗ {l.label}
-            </a>
+        <div className="space-y-4">
+          {EXTERNAL_LINK_GROUPS.map((group) => (
+            <div key={group.title}>
+              <h3 className="text-sm font-semibold text-slate-200 mb-1">{group.title}</h3>
+              {group.hint && <p className="text-[10px] text-slate-500 mb-2">{group.hint}</p>}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {group.links.map((l) => (
+                  <a
+                    key={l.url + l.label}
+                    href={l.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block rounded border border-slate-700 bg-slate-950/40 p-2 text-xs text-slate-200 hover:border-cyan-600 hover:bg-cyan-950/20 transition"
+                  >
+                    ↗ {l.label}
+                  </a>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       </section>
