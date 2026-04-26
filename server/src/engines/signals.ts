@@ -395,7 +395,9 @@ function nasdaqSignal(
   // video6 §"오를 폭 < 빠질 폭"
   const rrRatio = dv(derived, 'NASDAQ_RISK_REWARD_RATIO');
   if (rrRatio !== null && rrRatio <= 0.5) {
-    overheatFlags.push(`손익비 1:${(1/rrRatio).toFixed(1)} 추격 위험 (video6 §"오를 폭 < 빠질 폭")`);
+    const rrLabel = rrRatio > 0 ? `1:${(1/rrRatio).toFixed(1)}` : '1:∞ (upside 0)';
+    overheatFlags.push(`손익비 ${rrLabel} 추격 위험 (video6 §"오를 폭 < 빠질 폭")`);
+    unmetReasons.push(`⚠️ 손익비 ${rrLabel} ≤ 1:2 — video6 §"오를 폭 < 빠질 폭" 추격 매수 주의 (보조조건)`);
   }
   // RR ≥ 3 시 BUY 가산 (저점 기회)
   if (rrRatio !== null && rrRatio >= 3 && disparity !== null && disparity < 0) {
