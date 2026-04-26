@@ -1177,11 +1177,18 @@ export async function computeDerived(
         (hyOasBp !== null && hyOasBp >= 500) ||
         (hygIefZ !== null && hygIefZ <= -1.5);
 
+      // 27차 Phase 1#6: BOND_VIGILANTE 4축 → 6축 확장.
+      // 추가: (5) IMF 2031 부채 trajectory ≥1 / (6) 트럼프 감세 누적 ≥1
+      // video4 §10:11+10:20 명시 — 두 trajectory 가 채권자경단 가속 압력
+      const axisDebtTrajectory = (d.US_DEBT_GDP_2031_PROJECTION?.value ?? 0) >= 1;
+      const axisTaxCutDeficit = (d.TRUMP_TAX_CUT_DEFICIT_PROJECTION?.value ?? 0) >= 1;
       const vigilanteScore =
         (axisSteepening ? 1 : 0) +
         (axisLongYieldLevel ? 1 : 0) +
         (axisDxyWeak ? 1 : 0) +
-        (axisHyWidening ? 1 : 0);
+        (axisHyWidening ? 1 : 0) +
+        (axisDebtTrajectory ? 1 : 0) +
+        (axisTaxCutDeficit ? 1 : 0);
 
       const missingAxes: string[] = [];
       if (!axisSteepening) {
@@ -1205,21 +1212,22 @@ export async function computeDerived(
         name: 'bond_vigilante_score',
         value: vigilanteScore,
         date: dt,
-        formula: `4축 [스티프닝${axisSteepening ? 'Y' : 'N'} · 장기금리레벨${axisLongYieldLevel ? 'Y' : 'N'} · DXY약세${axisDxyWeak ? 'Y' : 'N'} · HY확대${axisHyWidening ? 'Y' : 'N'}] 합계 (영상4 §137-147)`,
+        formula: `6축 [스티프닝${axisSteepening ? 'Y' : 'N'} · 장기금리${axisLongYieldLevel ? 'Y' : 'N'} · DXY약세${axisDxyWeak ? 'Y' : 'N'} · HY${axisHyWidening ? 'Y' : 'N'} · IMF2031${axisDebtTrajectory ? 'Y' : 'N'} · 감세${axisTaxCutDeficit ? 'Y' : 'N'}] 합계 (영상4 §137-147 + 27차 6축).`,
       };
-      if (vigilanteScore >= 3) {
+      // 27차: 6축 중 4축+ 면 WARNING (이전 3/4 → 4/6 비율 동일)
+      if (vigilanteScore >= 4) {
         d.BOND_VIGILANTE_WARNING = {
           name: 'bond_vigilante_warning',
           value: 1,
           date: dt,
-          formula: `채권 자경단 3축+ 충족 (${vigilanteScore}/4) — 정책 신뢰 이탈 프리커서 (영상4 §137-147)`,
+          formula: `채권 자경단 4축+ 충족 (${vigilanteScore}/6) — 정책 신뢰 이탈 프리커서 (27차 6축).`,
         };
       } else {
         d.BOND_VIGILANTE_WARNING = {
           name: 'bond_vigilante_warning',
           value: 0,
           date: dt,
-          formula: `4축 중 ${vigilanteScore}개만 충족 — 경보 미발동. 미충족: ${missingAxes.join(' / ') || '-'}`,
+          formula: `6축 중 ${vigilanteScore}개 충족 — 경보 미발동. 미충족: ${missingAxes.join(' / ') || '-'}.`,
         };
       }
     }
@@ -3952,9 +3960,25 @@ export async function computeDerived(
     const an = d.ANALYST_CONSENSUS_NASDAQ_MEGACAP?.value ?? null;
     axes.analyst = an === null ? 0 : (an >= 0.5 ? 1 : an <= -0.5 ? -1 : 0);
 
-    // 7) 매크로 — CPI YoY 범위 (2~3.5% 스위트스팟)
+    // 7) 매크로 — CPI YoY + 27차 IMF 2031 / 감세 trajectory 결합 (3 sub-축 평균)
+    // video4 §10:11+10:20 정합 — 부채 / 적자 trajectory 도 매크로 위협
     const cpi = d.CPI_YOY?.value ?? null;
-    axes.macro = cpi === null ? 0 : (cpi >= 2 && cpi <= 3.5 ? 1 : cpi > 5 || cpi < 0 ? -1 : 0);
+    const cpiAxis = cpi === null ? 0 : (cpi >= 2 && cpi <= 3.5 ? 1 : cpi > 5 || cpi < 0 ? -1 : 0);
+    const debtAxis = (d.US_DEBT_GDP_2031_PROJECTION?.value ?? 0) >= 2 ? -1
+                   : (d.US_DEBT_GDP_2031_PROJECTION?.value ?? 0) >= 1 ? 0 : 0;
+    const deficitAxis = (d.TRUMP_TAX_CUT_DEFICIT_PROJECTION?.value ?? 0) >= 2 ? -1
+                      : (d.TRUMP_TAX_CUT_DEFICIT_PROJECTION?.value ?? 0) >= 1 ? 0 : 0;
+    // 평균 후 -1/0/+1 양자화
+    const macroSum = cpiAxis + debtAxis + deficitAxis;
+    axes.macro = macroSum >= 1 ? 1 : macroSum <= -1 ? -1 : 0;
+
+    // 27차 Phase 1#7: 8번째 축 — 금/구리 비율 (video2 §3부 "주식 시장 방향 선행")
+    // GOLD_COPPER_RATIO ≥200 = 경기 둔화 (-1 위험자산), ≤80 = 회복 (+1)
+    const goldCopperVal = d.GOLD_COPPER_RATIO?.value ?? null;
+    if (goldCopperVal === null) axes.metal = 0;
+    else if (goldCopperVal >= 200) axes.metal = -1; // 경기 둔화 = 위험자산 약세
+    else if (goldCopperVal <= 80) axes.metal = 1;   // 경기 회복 = 위험자산 우호
+    else axes.metal = 0;
 
     const total = Object.values(axes).reduce((a, b) => a + b, 0);
     const positives = Object.values(axes).filter((v) => v > 0).length;
@@ -3972,7 +3996,7 @@ export async function computeDerived(
       name: 'conviction_score_7axis',
       value: total,
       date: today(),
-      formula: `차트${axes.chart > 0 ? '+' : ''}${axes.chart}/유동성${axes.liquidity > 0 ? '+' : ''}${axes.liquidity}/정책${axes.policy > 0 ? '+' : ''}${axes.policy}/지정학${axes.geo > 0 ? '+' : ''}${axes.geo}/모멘텀${axes.momentum > 0 ? '+' : ''}${axes.momentum}/애널${axes.analyst > 0 ? '+' : ''}${axes.analyst}/매크로${axes.macro > 0 ? '+' : ''}${axes.macro} = ${total} (${positives}강↑/${negatives}약↓). ${label}. video1+4 §확신 5/7축.`,
+      formula: `차트${axes.chart > 0 ? '+' : ''}${axes.chart}/유동성${axes.liquidity > 0 ? '+' : ''}${axes.liquidity}/정책${axes.policy > 0 ? '+' : ''}${axes.policy}/지정학${axes.geo > 0 ? '+' : ''}${axes.geo}/모멘텀${axes.momentum > 0 ? '+' : ''}${axes.momentum}/애널${axes.analyst > 0 ? '+' : ''}${axes.analyst}/매크로${axes.macro > 0 ? '+' : ''}${axes.macro}/금구리${(axes.metal ?? 0) > 0 ? '+' : ''}${axes.metal ?? 0} = ${total} (${positives}강↑/${negatives}약↓, 8축). ${label}. video1+4 §확신 5/7+27차 8축.`,
     };
   } catch { void 0; }
 
@@ -4611,8 +4635,9 @@ export async function computeDerived(
   // 21차 신규 derived
   // ═══════════════════════════════════════════════════════════════════════
 
-  // === 26차 P1#4: USER_USD_CAPITAL_TOTAL — 사용자 USD 자본 추적 ===
-  // KRW + USD 보유 합계를 USD 환산 (USDKRW 활용). 권고 vs 실제 USD 격차 측정 기반.
+  // === 26차 P1#4 + 27차 Phase 1#8: USER_USD_CAPITAL_TOTAL + 권고 vs 실제 USD 갭 ===
+  // KRW + USD 보유 합계를 USD 환산. allocation % × totalUSD = 권고 USD 금액.
+  // currentHoldingsUSD 입력 시 자산별 권고-실제 USD 갭 산출.
   try {
     const { readInvestmentPlan } = await import('../services/investment-plan');
     const plan = await readInvestmentPlan();
@@ -4625,8 +4650,20 @@ export async function computeDerived(
         name: 'user_usd_capital_total',
         value: parseFloat(totalUSD.toFixed(0)),
         date: today(),
-        formula: `KRW ${(plan.totalCapitalKRW ?? 0).toLocaleString()} / ${usdkrwRate.toFixed(0)} = ${krwInUSD.toFixed(0)} USD + USD ${usdDirect.toLocaleString()} = total ${totalUSD.toFixed(0)} USD. 26차 P1#4.`,
+        formula: `KRW ${(plan.totalCapitalKRW ?? 0).toLocaleString()} / ${usdkrwRate.toFixed(0)} = ${krwInUSD.toFixed(0)} USD + USD ${usdDirect.toLocaleString()} = ${totalUSD.toFixed(0)} USD. 26차 P1#4.`,
       };
+      // 27차 Phase 1#8: 권고-실제 USD 갭 합계 (currentHoldingsUSD 가 입력된 경우)
+      const userHoldingsUSD = plan.currentHoldingsUSD;
+      if (userHoldingsUSD && Object.keys(userHoldingsUSD).length > 0) {
+        const totalActualUSD = Object.values(userHoldingsUSD).reduce<number>((s, v) => s + (typeof v === 'number' ? v : 0), 0);
+        const gapUSD = totalUSD - totalActualUSD;
+        d.USER_USD_HOLDINGS_TOTAL = {
+          name: 'user_usd_holdings_total',
+          value: parseFloat(totalActualUSD.toFixed(0)),
+          date: today(),
+          formula: `사용자 USD 보유 합계 ${totalActualUSD.toFixed(0)} USD vs 자본 ${totalUSD.toFixed(0)} USD = 미할당 ${gapUSD.toFixed(0)} USD (${((gapUSD/totalUSD)*100).toFixed(1)}%). 27차 P1#8.`,
+        };
+      }
     }
   } catch { void 0; }
 
@@ -5505,6 +5542,104 @@ export async function computeDerived(
         value: level,
         date: today(),
         formula: `KR 매크로 뉴스 마지막 ${daysSinceFresh.toFixed(1)}일 전 (proxy). ${label}. 노션 §"앞으로 풀어드릴 예정" 발신 추적.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 27차 Phase 2 통합 derived
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // === 27차 Phase 2#11: SMART_MONEY_4FACTOR_CONSENSUS (13F + Dataroma + TipRanks + Insider) ===
+  // 노션 §"세력의 포트폴리오" 4팩터 단일 합의 점수
+  try {
+    const inst = d.INSTITUTIONAL_NASDAQ_FLOW?.value ?? null;
+    const dataromaScore = d.INSTITUTIONAL_CONSENSUS_STRONG_COUNT?.value ?? null;
+    const upside = d.ANALYST_TARGET_UPSIDE_PCT?.value ?? null;
+    const cluster = d.SMART_MONEY_CLUSTER_BUY?.value ?? null;
+    const factors: number[] = [];
+    if (inst !== null) factors.push(inst >= 1 ? 1 : inst <= -1 ? -1 : 0);
+    if (dataromaScore !== null) factors.push(dataromaScore >= 5 ? 1 : 0);
+    if (upside !== null) factors.push(upside >= 10 ? 1 : upside <= -5 ? -1 : 0);
+    if (cluster !== null) factors.push(cluster >= 3 ? 1 : 0);
+    if (factors.length >= 3) {
+      const consensus = factors.reduce((a, b) => a + b, 0);
+      let level: number;
+      let label: string;
+      if (consensus >= 3) { level = 2; label = '🟢 4팩터 강 합의 매수'; }
+      else if (consensus >= 2) { level = 1; label = '🔵 다수 합의'; }
+      else if (consensus <= -2) { level = -2; label = '🔴 4팩터 합의 매도'; }
+      else { level = 0; label = '⚪ 합의 분산'; }
+      d.SMART_MONEY_4FACTOR_CONSENSUS = {
+        name: 'smart_money_4factor_consensus',
+        value: level,
+        date: today(),
+        formula: `13F=${inst ?? '-'}, Dataroma 강합의=${dataromaScore ?? '-'}, TipRanks upside=${upside?.toFixed(1) ?? '-'}%, Insider cluster=${cluster ?? '-'}. ${factors.length}팩터 합의 ${consensus}. ${label}. 노션 §스마트머니 4축.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 27차 Phase 2#13: KR_EVENT_GAUGE (DART + KR_NEWS 합쳐 한국 이벤트) ===
+  try {
+    const dartLevel = d.KR_MATERIAL_DISCLOSURE_LEVEL?.value ?? null;
+    const krNewsCount = d.KR_NEWS_TOTAL_COUNT_24H?.value ?? null;
+    if (dartLevel !== null || krNewsCount !== null) {
+      let level = 0;
+      if ((dartLevel ?? 0) >= 2 || (krNewsCount ?? 0) >= 50) level = 2;
+      else if ((dartLevel ?? 0) >= 1 || (krNewsCount ?? 0) >= 20) level = 1;
+      d.KR_EVENT_GAUGE = {
+        name: 'kr_event_gauge',
+        value: level,
+        date: today(),
+        formula: `DART level=${dartLevel ?? '-'}, KR 뉴스 24h=${krNewsCount ?? '-'}건. ${level === 2 ? '🔴 한국 이벤트 폭증' : level === 1 ? '🟡 활발' : '⚪ 정상'}. 27차 P2#13 통합.`,
+      };
+    }
+  } catch { void 0; }
+
+  // === 27차 Phase 2#15: CPI_MoM_ANNUALIZED (CPI/PCE MoM 가속/감속) ===
+  // 노션 §경제 캘린더 MoM 정합 — 3개월 annualized vs 6개월 annualized 비교
+  try {
+    const cpiHist = await readHistory('fred', 'CPIAUCSL').catch(() => []);
+    if (cpiHist.length >= 7) {
+      const sorted = [...cpiHist].sort((a, b) => (a.date < b.date ? -1 : 1));
+      const last = sorted[sorted.length - 1].value;
+      const m3 = sorted[sorted.length - 4]?.value;
+      const m6 = sorted[sorted.length - 7]?.value;
+      if (typeof last === 'number' && typeof m3 === 'number' && typeof m6 === 'number' && m3 > 0 && m6 > 0) {
+        const ann3M = (Math.pow(last / m3, 12 / 3) - 1) * 100;
+        const ann6M = (Math.pow(last / m6, 12 / 6) - 1) * 100;
+        const accel = ann3M - ann6M;
+        let level: number;
+        let label: string;
+        if (accel >= 1) { level = 2; label = '🔴 인플레 가속 (3M ann > 6M ann +1%p)'; }
+        else if (accel >= 0.3) { level = 1; label = '🟡 인플레 약가속'; }
+        else if (accel <= -1) { level = -2; label = '🟢 인플레 감속'; }
+        else { level = 0; label = '⚪ 안정'; }
+        d.CPI_MOM_ACCELERATION = {
+          name: 'cpi_mom_acceleration',
+          value: level,
+          date: today(),
+          formula: `CPI 3M ann ${ann3M.toFixed(2)}% vs 6M ann ${ann6M.toFixed(2)}% = ${accel >= 0 ? '+' : ''}${accel.toFixed(2)}%p. ${label}. 노션 §경제 캘린더 MoM 정합 (27차 P2#15).`,
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // === 27차 Phase 2#17: ISM_CROSS_VALIDATION (proxy vs actual 격차) ===
+  try {
+    const ismProxy = d.ISM_PROXY?.value ?? null;
+    const ismActual = val(raw, 'ISM_MANUFACTURING') ?? (manualInputs?.ismPmi ?? null);
+    if (ismProxy !== null && ismActual !== null) {
+      const gap = Math.abs(ismProxy - ismActual);
+      let level: number;
+      let label: string;
+      if (gap >= 3) { level = -1; label = `🟠 proxy(${ismProxy.toFixed(1)}) vs actual(${ismActual.toFixed(1)}) 격차 ${gap.toFixed(1)}pt — actual 우선`; }
+      else { level = 0; label = `⚪ proxy/actual 정합 (격차 ${gap.toFixed(1)}pt)`; }
+      d.ISM_CROSS_VALIDATION = {
+        name: 'ism_cross_validation',
+        value: level,
+        date: today(),
+        formula: `INDPRO proxy ${ismProxy.toFixed(1)} vs actual ${ismActual.toFixed(1)}. ${label}. 27차 P2#17.`,
       };
     }
   } catch { void 0; }

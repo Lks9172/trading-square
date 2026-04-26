@@ -933,6 +933,36 @@ export async function recomputeFullDerivedForDate(
     }
   }
 
+  // 27차 Phase 2#9: 26차 신규 derived 중 raw 가 가용한 항목만 backfill 추가
+  // GOLD_COPPER_RATIO + GOLD_SILVER_RATIO_HISTORICAL_BAND 만 가능 (Yahoo GOLD/SILVER/COPPER raw 활용)
+  try {
+    const goldRaw = raw.GOLD?.value;
+    const silverRaw = raw.SILVER?.value;
+    const copperRaw = raw.COPPER?.value;
+    if (typeof goldRaw === 'number' && typeof silverRaw === 'number' && silverRaw > 0) {
+      const gsr = goldRaw / silverRaw;
+      let bandValue: number;
+      if (gsr < 60) bandValue = -1;
+      else if (gsr <= 80) bandValue = 0;
+      else if (gsr <= 100) bandValue = 1;
+      else bandValue = 2;
+      derived.GOLD_SILVER_RATIO_HISTORICAL_BAND = {
+        name: 'gold_silver_ratio_historical_band',
+        value: bandValue,
+        date,
+        formula: `(backfill) GSR=${gsr.toFixed(1)}. 27차 P2#9.`,
+      };
+    }
+    if (typeof goldRaw === 'number' && typeof copperRaw === 'number' && copperRaw > 0) {
+      derived.GOLD_COPPER_RATIO = {
+        name: 'gold_copper_ratio',
+        value: parseFloat((goldRaw / copperRaw).toFixed(2)),
+        date,
+        formula: '(backfill) GOLD / COPPER. 27차 P2#9.',
+      };
+    }
+  } catch { /* skip */ }
+
   return derived;
 }
 

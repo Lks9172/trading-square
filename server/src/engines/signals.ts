@@ -386,6 +386,11 @@ function nasdaqSignal(
   if (disparity !== null && disparity >= 25) overheatFlags.push(`이격도 +${disparity.toFixed(1)}% ≥ 25%`);
   if (fng !== null && fng >= 85) overheatFlags.push(`F&G ${fng} ≥ 85 극탐욕`);
   if (vix !== null && vix < 16) overheatFlags.push(`VIX ${vix.toFixed(1)} < 16 방심`);
+  // 27차 Phase 1#4: NASDAQ_LONGTERM_CHANNEL_RETURN ≥150 — video3 §11:03 "153% 역사상 최대"
+  const longChannelRet = dv(derived, 'NASDAQ_LONGTERM_CHANNEL_RETURN');
+  if (longChannelRet !== null && longChannelRet >= 150) {
+    overheatFlags.push(`5년 저점 +${longChannelRet.toFixed(0)}% ≥ 150% (video3 §"153% 역사상 최대" 임박)`);
+  }
   const chaseWarning = dv(derived, 'NASDAQ_CHASE_WARNING');
   if (chaseWarning === 1) overheatFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
 
@@ -582,6 +587,29 @@ function goldSignal(
     unmetReasons.push(`금 우선순위 스코어 ${goldPriority.toFixed(2)} ≤ 0.3 → 금 우호 축 부족 (보조조건)`);
   }
 
+  // 27차 Phase 1#1+#3+#5: 26차 신규 derived 의 goldSignal 가중치 합류
+  // GOLD_COPPER_RATIO ≥ 200 (경기 둔화 / 위험 회피) — video2 §3부 정합
+  const goldCopper = dv(derived, 'GOLD_COPPER_RATIO');
+  if (goldCopper !== null && goldCopper >= 200) {
+    score += 0.5; maxScore += 0.5;
+    reasons.push(`✓ GOLD/COPPER ${goldCopper.toFixed(0)} ≥ 200 → 경기 둔화 / 위험 회피 우세 (video2 §3부, +0.5)`);
+  }
+  // GOLD_YEARLY_RETURN_HISTORICAL_RANK ≥ 3 (역대 3위 73%+) — video2 §16:54
+  const goldRank = dv(derived, 'GOLD_YEARLY_RETURN_HISTORICAL_RANK');
+  if (goldRank !== null && goldRank >= 3) {
+    score += 0.5; maxScore += 0.5;
+    reasons.push(`✓ 금 연봉 역대 3위 73%+ 진입 (video2 §16:54 "1979 130/1973 90/2024 73", +0.5)`);
+  }
+  // GOLD_LONGTERM_CUP_HANDLE = 2 (rim 재탈환 + handle 돌파, video2 §18:20 13년)
+  const goldCup = dv(derived, 'GOLD_LONGTERM_CUP_HANDLE');
+  if (goldCup === 2) {
+    score += 1.0; maxScore += 1.0;
+    reasons.push('✓ 금 13년 컵앤핸들 완성 (rim+handle 돌파, video2 §18:20 +1.0)');
+  } else if (goldCup === 1) {
+    score += 0.5; maxScore += 0.5;
+    reasons.push('🔵 금 cup rim 재탈환 — handle 대기 (+0.5)');
+  }
+
   const pct = (score / maxScore) * 100;
 
   if (realYield !== null && realYield > 2.0 && dxy !== null && dxy > 106) {
@@ -688,6 +716,17 @@ function silverSignal(
   // 영상2 명시적 복합 플래그 (금은비 ≥70 + ISM ≥50) — STRONG_BUY 승격에 참고
   const outperformSetup = dv(derived, 'SILVER_OUTPERFORM_SETUP');
   if (outperformSetup === 1) reasons.push('은 아웃퍼폼 2조건 복합 (금은비≥70 + ISM≥50) 충족 — 영상2 명시 (보조조건)');
+
+  // 27차 Phase 1#2: GOLD_SILVER_RATIO_HISTORICAL_BAND value=2 (GSR≥100 극단) 시 STRONG_BUY 가산
+  // video2 §"코로나 130 → 4개월 150% 반등" 사례 정합 — 은 매수 강화
+  const gsrBand = dv(derived, 'GOLD_SILVER_RATIO_HISTORICAL_BAND');
+  if (gsrBand === 2) {
+    auxMet += 2; // STRONG_BUY 승격 ladder 보강
+    reasons.push('✓ GSR 100+ 극단 — video2 §"코로나 130→은 150%" 사례 구간 (auxMet +2, 27차)');
+  } else if (gsrBand === 1) {
+    auxMet += 1;
+    reasons.push('🟡 GSR 80-100 금 우세 — 은 매수 우호 (auxMet +1, 27차)');
+  }
 
   // Fix #6(2차 감사): REDUCE 분기 복구 — 기존에는 met=0 이어도 HOLD 만 부여하여 약세 강등이 없었다.
   //   signalFromScore 로 전환: total=2 기준 {strongBuy:2, buy:1, hold:1, reduce:1, sell:0}.

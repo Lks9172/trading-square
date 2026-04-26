@@ -330,6 +330,30 @@ export function interpretDerived(
     if (value >= 7) return '🟡 네이버 투자정보 7일+ 공백';
     return null;
   }
+  // 27차 신규
+  if (key === 'SMART_MONEY_4FACTOR_CONSENSUS') {
+    if (value === 2) return '🟢 4팩터 (13F+Dataroma+TipRanks+Insider) 강 합의 매수';
+    if (value === -2) return '🔴 4팩터 합의 매도';
+    return null;
+  }
+  if (key === 'KR_EVENT_GAUGE') {
+    if (value === 2) return '🔴 한국 이벤트 폭증 (DART + 뉴스)';
+    if (value === 1) return '🟡 한국 이벤트 활발';
+    return null;
+  }
+  if (key === 'CPI_MOM_ACCELERATION') {
+    if (value === 2) return '🔴 인플레 가속 (3M ann > 6M ann +1%p)';
+    if (value === -2) return '🟢 인플레 감속';
+    return null;
+  }
+  if (key === 'ISM_CROSS_VALIDATION') {
+    if (value === -1) return '🟠 ISM proxy vs actual 격차 3pt+ — actual 우선';
+    return null;
+  }
+  if (key === 'USER_USD_HOLDINGS_TOTAL') {
+    return null;
+  }
+
   // 26차 신규
   if (key === 'GOLD_SILVER_RATIO_HISTORICAL_BAND') {
     if (value === 2) return '🔴 GSR 100+ 극단 — video2 §"코로나 130→은 150%" 사례 구간';
