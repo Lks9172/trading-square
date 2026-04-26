@@ -448,19 +448,12 @@ function nasdaqSignal(
     }, 'SELL');
   }
 
-  // 19차: NASDAQ STRONG_BUY 임계 1단 상향 — BUY 영역 1 met → 2 met 확보.
-  //   기존 {strongBuy: total-2, buy: total-3} 는 BUY 영역이 1 met 폭만 차지해 HOLD→STRONG_BUY 직행 자주 발생.
-  //   변경 {strongBuy: total-1, buy: total-3} → base(total=7) 기준 BUY=4~5 (2 met), STRONG_BUY=6~7 (만점 근접).
-  //   PSYCH 보너스로 total=8 이 되면 +1 shift 동일.
+  // 29차 fix-E: baseSignal 결정 위치 정합성 — 신규 P1/P2 가산 (RECOVERY_TRIPLE,
+  //   HEALTHY_PULLBACK, TIMEFRAME_DECISION_SPLIT, EARNINGS_BEAT_RATIO 등) 이 met 표시값만
+  //   늘리고 signal 결정에 못 끼친 결함 발견. 기존 baseSignal 결정 (L455~462) + 모든 override
+  //   분기 (overheat REDUCE / CHASE_LEVEL / TRIPLE_GATE) 를 cap 직후 (L746) 로 이동.
+  //   흐름: 모든 met/total 가산 → 과열/조정 플래그 수집 → cap → baseSignal 결정 → override 분기.
   const overrides: string[] = [];
-  const baseSignal = signalFromScore(met, total, {
-    sell: 0,
-    reduce: Math.max(0, total - 5),
-    hold: Math.max(0, total - 4),
-    buy: Math.max(0, total - 3),
-    strongBuy: Math.max(1, total - 1),
-  });
-  let signal = baseSignal;
 
   // === Fix #2 + 13차 옵션 D 재설계 (2026-04): 과열 REDUCE override ===
   //
@@ -598,38 +591,6 @@ function nasdaqSignal(
     overheatFlags.push(...confirmFlags);
   }
 
-  if (overheatFlags.length >= 2 && signal !== 'SELL') {
-    signal = 'REDUCE';
-    const overrideReason = `과열 REDUCE override: ${overheatFlags.join(' · ')}`;
-    overrides.push(overrideReason);
-    unmetReasons.push(overrideReason);
-  }
-
-  // 9차 후속 Fix #2: NASDAQ_CHASE_LEVEL 계층화 override (binary CHASE_WARNING 보완).
-  //   level 0 → no-op
-  //   level 1 (soft): reason 경고만, 신호 불변
-  //   level 2 (medium): STRONG_BUY → BUY (한 단계 강등)
-  //   level 3 (hard): STRONG_BUY/BUY → HOLD (기존 CHASE_WARNING 동등)
-  //   level null: 기존 binary CHASE_WARNING 로직 유지 (하위 호환).
-  const chaseLevel = dv(derived, 'NASDAQ_CHASE_LEVEL');
-  if (chaseLevel !== null) {
-    const levelReason = derived.NASDAQ_CHASE_LEVEL?.formula ?? '';
-    if (chaseLevel >= 3 && (signal === 'STRONG_BUY' || signal === 'BUY')) {
-      const previous = signal;
-      signal = 'HOLD';
-      const overrideReason = `CHASE_LEVEL=3 (hard): ${levelReason} (${previous} → HOLD)`;
-      overrides.push(overrideReason);
-      unmetReasons.push(overrideReason);
-    } else if (chaseLevel >= 2 && signal === 'STRONG_BUY') {
-      signal = 'BUY';
-      const overrideReason = `CHASE_LEVEL=2 (medium): ${levelReason} (STRONG_BUY → BUY)`;
-      overrides.push(overrideReason);
-      unmetReasons.push(overrideReason);
-    } else if (chaseLevel >= 1) {
-      unmetReasons.push(`CHASE_LEVEL=1 (soft): ${levelReason} — 관측 경고 (신호 불변)`);
-    }
-  }
-
   // ★ === 29차 P3-C #14: COPPER_LEAD_DIVERGENCE_60D — 60D 명시 보강 ===
   const copperLead60 = dv(derived, 'COPPER_LEAD_DIVERGENCE_60D');
   if (copperLead60 === 1) {
@@ -714,7 +675,62 @@ function nasdaqSignal(
     }
   }
 
-  // ★ === 29차 P1-A #3: INVESTMENT_TRIPLE_GATE_SCORE — STRONG_BUY 게이트 정합성 ===
+  // 23차 Tier 1#3: NASDAQ signal met/total 정합 cap.
+  //   기존 met++ 만 하는 가점들 (NASDAQ_DRAWDOWN, RSI<30, 이격도 -25%, W_BOTTOM, econDiv, wtiCuLag 등) 이
+  //   total 동기화 안 돼 met/total > 100% 가능. PSYCH 외 가점은 "강도 가산"으로 보고 met cap = total.
+  //   비율 신뢰성 확보 + STRONG_BUY 자동 도달 차단.
+  if (met > total) met = total;
+
+  // 29차 fix-E: baseSignal 결정 — 모든 met/total 가산 + cap 후 호출.
+  //   19차: NASDAQ STRONG_BUY 임계 1단 상향 — BUY 영역 1 met → 2 met 확보.
+  //     기존 {strongBuy: total-2, buy: total-3} 는 BUY 영역이 1 met 폭만 차지해 HOLD→STRONG_BUY 직행 자주 발생.
+  //     변경 {strongBuy: total-1, buy: total-3} → base(total=7) 기준 BUY=4~5 (2 met), STRONG_BUY=6~7 (만점 근접).
+  //     PSYCH 보너스로 total=8 이 되면 +1 shift 동일.
+  const baseSignal = signalFromScore(met, total, {
+    sell: 0,
+    reduce: Math.max(0, total - 5),
+    hold: Math.max(0, total - 4),
+    buy: Math.max(0, total - 3),
+    strongBuy: Math.max(1, total - 1),
+  });
+  let signal = baseSignal;
+
+  // === Override 1: 과열 REDUCE (overheatFlags 2개+) ===
+  if (overheatFlags.length >= 2 && signal !== 'SELL') {
+    const previous = signal;
+    signal = 'REDUCE';
+    const overrideReason = `과열 REDUCE override: ${overheatFlags.join(' · ')} (${previous} → REDUCE)`;
+    overrides.push(overrideReason);
+    unmetReasons.push(overrideReason);
+  }
+
+  // === Override 2: 9차 후속 Fix #2: NASDAQ_CHASE_LEVEL 계층화 ===
+  //   level 0 → no-op
+  //   level 1 (soft): reason 경고만, 신호 불변
+  //   level 2 (medium): STRONG_BUY → BUY (한 단계 강등)
+  //   level 3 (hard): STRONG_BUY/BUY → HOLD (기존 CHASE_WARNING 동등)
+  //   level null: 기존 binary CHASE_WARNING 로직 유지 (하위 호환).
+  const chaseLevel = dv(derived, 'NASDAQ_CHASE_LEVEL');
+  if (chaseLevel !== null) {
+    const levelReason = derived.NASDAQ_CHASE_LEVEL?.formula ?? '';
+    if (chaseLevel >= 3 && (signal === 'STRONG_BUY' || signal === 'BUY')) {
+      const previous = signal;
+      signal = 'HOLD';
+      const overrideReason = `CHASE_LEVEL=3 (hard): ${levelReason} (${previous} → HOLD)`;
+      overrides.push(overrideReason);
+      unmetReasons.push(overrideReason);
+    } else if (chaseLevel >= 2 && signal === 'STRONG_BUY') {
+      const previous = signal;
+      signal = 'BUY';
+      const overrideReason = `CHASE_LEVEL=2 (medium): ${levelReason} (${previous} → BUY)`;
+      overrides.push(overrideReason);
+      unmetReasons.push(overrideReason);
+    } else if (chaseLevel >= 1) {
+      unmetReasons.push(`CHASE_LEVEL=1 (soft): ${levelReason} — 관측 경고 (신호 불변)`);
+    }
+  }
+
+  // === Override 3: 29차 P1-A #3 INVESTMENT_TRIPLE_GATE_SCORE 게이트 ===
   // video6 §04:48 "펀더 × 매크로 × 차트 3축 일치" — 3축 스코어 ≥0.66 시 STRONG_BUY 통과,
   // <0 시 STRONG_BUY → BUY 강등, ≤-0.33 시 STRONG_BUY 차단 + BUY → HOLD 강등.
   const tripleGate = dv(derived, 'INVESTMENT_TRIPLE_GATE_SCORE');
@@ -729,8 +745,9 @@ function nasdaqSignal(
       }
     } else if (tripleGate < 0.0) {
       if (signal === 'STRONG_BUY') {
+        const previous = signal;
         signal = 'BUY';
-        const overrideReason = `TRIPLE_GATE ${tripleGate.toFixed(2)} < 0 (3축 약분기, video6 §04:48) → STRONG_BUY → BUY`;
+        const overrideReason = `TRIPLE_GATE ${tripleGate.toFixed(2)} < 0 (3축 약분기, video6 §04:48) → ${previous} → BUY`;
         overrides.push(overrideReason);
         unmetReasons.push(overrideReason);
       }
@@ -738,12 +755,6 @@ function nasdaqSignal(
       reasons.push(`✓ TRIPLE_GATE ${tripleGate.toFixed(2)} ≥ 0.66 (3축 정합, video6 §04:48 "펀더×매크로×차트")`);
     }
   }
-
-  // 23차 Tier 1#3: NASDAQ signal met/total 정합 cap.
-  //   기존 met++ 만 하는 가점들 (NASDAQ_DRAWDOWN, RSI<30, 이격도 -25%, W_BOTTOM, econDiv, wtiCuLag 등) 이
-  //   total 동기화 안 돼 met/total > 100% 가능. PSYCH 외 가점은 "강도 가산"으로 보고 met cap = total.
-  //   비율 신뢰성 확보 + STRONG_BUY 자동 도달 차단.
-  if (met > total) met = total;
 
   return withSignalExplanation({
     asset: 'NASDAQ',
@@ -1555,12 +1566,12 @@ function kospiSignal(
     }, 'SELL');
   }
 
-  // Fix #1: total=7 기준 [2,3,4] 에 REDUCE/SELL 하한을 명시. 기존 HOLD 시작 met=2 는 유지하고
-  // met=1 만 REDUCE, met=0 만 SELL 로 강등. KOSPI 는 환율·외인·거래량 축이 하나라도 깨지면
-  // met 급락 가능하므로 total-5=2 대신 보수적으로 reduce=1 채택.
+  // 29차 fix-E: KOSPI baseSignal 결정 위치 정합성 — NASDAQ 와 동일 패턴.
+  //   기존 baseSignal (L1573) 이후에도 met += (월봉회복 / 외인 streak / FX reversal /
+  //   PBR / ROE / 회복 3축 / RSI / DRAWDOWN / W_BOTTOM / WGBI / 추경 / 연기금 / SHORT_INTEREST /
+  //   거래량 tier / 반기봉 윗꼬리 등) 이 다수 발생 — 이전엔 met 표시값만 늘리고 신호 결정에 못 끼침.
+  //   해결: 모든 met/total 가산 → cap → baseSignal 결정 → override 분기.
   const overrides: string[] = [];
-  const baseSignal = signalFromScore(met, total, { sell: 0, reduce: 1, hold: 2, buy: 3, strongBuy: 4 });
-  let signal = baseSignal;
 
   const trendRecovery = dv(derived, 'KOSPI_TREND_RECOVERY');
   const trendConfirmCount = [
@@ -1628,28 +1639,6 @@ function kospiSignal(
     met += 1;
   }
 
-  if (trendConfirmCount < 2 && (signal === 'STRONG_BUY')) {
-    // 29차 P1-B #5: kRecLevel=2 (5일+) 시 STRONG_BUY 보호 — 단발 trendConfirmCount 미충족 무시.
-    if (kRecLevel === 2) {
-      reasons.push('✓ KOSPI_RECOVERY_3AXIS_LEVEL=2 (5일+ 연속) → STRONG_BUY 보호 (stt_kospi §05:35)');
-    } else {
-      signal = 'BUY';
-      const overrideReason = `추세전환 3조건 ${trendConfirmCount}/3 미충족 → BUY 상한 (보조조건)`;
-      overrides.push(overrideReason);
-      reasons.push(overrideReason);
-    }
-  }
-  if (trendConfirmCount === 0 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
-    if (kRecLevel === 2) {
-      reasons.push('✓ KOSPI_RECOVERY_3AXIS_LEVEL=2 → HOLD 강등 면제');
-    } else {
-      signal = 'HOLD';
-      const overrideReason = '추세전환 3조건 전부 미충족 → HOLD 상한 (보조조건)';
-      overrides.push(overrideReason);
-      reasons.push(overrideReason);
-    }
-  }
-
   // 15차 Phase 1+2: KOSPI RSI + DRAWDOWN_ATH
   // ★ 29차 P2-D #24: RSI 임계 35 → 30 정렬 (NASDAQ RSI 기준 통일).
   const kRsi = dv(derived, 'KOSPI_RSI_14');
@@ -1680,33 +1669,6 @@ function kospiSignal(
     reasons.push('✓ KOSPI_YEARLY_AREA_INDEX ≥15% — 연봉 한 번 눌림 흡수 (video5_analysis §1부, 보조조건)');
   }
 
-  // 11차 신규 (2026-04): 지정학 급변 숏커버링 반등 가드 — stt_kospi §2부 정합.
-  // video5_analysis §3부: "환율 1,500 돌파 예상하고 코스피 하락 베팅한 세력이 휴전
-  //   뉴스에 놀라 급격히 손절" → 반등의 50% 는 숏커버링, 진짜 추세 아님.
-  // GEOPOLITICAL_UNWIND_EVENT=1 AND SHORT_COVER_SUSPECTED=1 동시 발동 시
-  //   KOSPI 신호 STRONG_BUY/BUY → HOLD 강제 (추세 재확인 필요).
-  const geoUnwind = dv(derived, 'GEOPOLITICAL_UNWIND_EVENT');
-  const shortCover = dv(derived, 'SHORT_COVER_SUSPECTED');
-  if (geoUnwind === 1 && shortCover === 1 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
-    signal = 'HOLD';
-    const overrideReason =
-      '⚠️ 지정학 급변 숏커버링 반등 (stt_kospi §2부) — 휴전/종전 뉴스 + 외인 1일 순매수 ≥1조. ' +
-      '반등의 질 감별 필요 → HOLD 강등 (추세 재개 3조건 확인 후 재진입)';
-    overrides.push(overrideReason);
-    reasons.push(overrideReason);
-  }
-
-  // ★ === 29차 P2-D #28: BOUNCE_QUALITY_FOLLOWTHROUGH_DAYS ===
-  // stt_kospi §05:40 — quality=0 (재하락) 시 BUY → HOLD 강등.
-  const bounceQuality = dv(derived, 'BOUNCE_QUALITY_FOLLOWTHROUGH_DAYS');
-  if (bounceQuality === 0 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
-    const previous = signal;
-    signal = 'HOLD';
-    const overrideReason = `⚠️ BOUNCE_QUALITY=0 (D+5 재하락 또는 거래량 미확인) → ${previous} → HOLD (stt_kospi §05:40)`;
-    overrides.push(overrideReason);
-    unmetReasons.push(overrideReason);
-  }
-
   // ★ === 29차 P2-D #29: FX_FOREIGN_BASELINE_GAP_TRILLION ===
   // stt_kospi §08:21 — 갭 ≥30조 → ATM 화 강 경고 (unmetReason).
   const fxForeignGap = dv(derived, 'FX_FOREIGN_BASELINE_GAP_TRILLION');
@@ -1714,16 +1676,9 @@ function kospiSignal(
     unmetReasons.push('⚠️ FX-외인 baseline 갭 ≥30조 — ATM 화 강 경고 (stt_kospi §08:21)');
   }
 
-  // ★ === 29차 P2-E #31: KOSPI_HALFYEAR_UPPER_WICK_THRESHOLD ===
-  // stt_kospi §03:18 — -1 (≥30%) 시 STRONG_BUY → BUY 강등.
+  // ★ === 29차 P2-E #31: KOSPI_HALFYEAR_UPPER_WICK_THRESHOLD (met 가산만 사전 처리, 강등은 override 단계) ===
   const kospiWickThr = dv(derived, 'KOSPI_HALFYEAR_UPPER_WICK_THRESHOLD');
-  if (kospiWickThr === -1 && signal === 'STRONG_BUY') {
-    const previous = signal;
-    signal = 'BUY';
-    const overrideReason = `⚠️ 반기봉 윗꼬리 ≥30% (매도압력 강) → ${previous} → BUY (stt_kospi §03:18)`;
-    overrides.push(overrideReason);
-    unmetReasons.push(overrideReason);
-  } else if (kospiWickThr === 1) {
+  if (kospiWickThr === 1) {
     reasons.push('✓ 반기봉 윗꼬리 < 15% (stt_kospi §03:18)');
     met += 1;
   }
@@ -1799,14 +1754,83 @@ function kospiSignal(
     unmetReasons.push('⚠️ KOSPI 거래량 tier-1 (<15조 관심 약화, stt_kospi)');
   }
 
-  // 코스피 완화 규칙:
+  // 29차 fix-B: KOSPI met cap (NASDAQ 와 동일 패턴) — 모든 가산 후 비율 정상화.
+  if (met > total) met = total;
+
+  // 29차 fix-E: baseSignal 결정 — 모든 met/total 가산 + cap 후 호출.
+  // Fix #1: total=7 기준 [2,3,4] 에 REDUCE/SELL 하한을 명시. 기존 HOLD 시작 met=2 는 유지하고
+  // met=1 만 REDUCE, met=0 만 SELL 로 강등. KOSPI 는 환율·외인·거래량 축이 하나라도 깨지면
+  // met 급락 가능하므로 total-5=2 대신 보수적으로 reduce=1 채택.
+  const baseSignal = signalFromScore(met, total, { sell: 0, reduce: 1, hold: 2, buy: 3, strongBuy: 4 });
+  let signal = baseSignal;
+
+  // === Override 1: trendConfirmCount + kRecLevel 게이트 ===
+  if (trendConfirmCount < 2 && (signal === 'STRONG_BUY')) {
+    // 29차 P1-B #5: kRecLevel=2 (5일+) 시 STRONG_BUY 보호 — 단발 trendConfirmCount 미충족 무시.
+    if (kRecLevel === 2) {
+      reasons.push('✓ KOSPI_RECOVERY_3AXIS_LEVEL=2 (5일+ 연속) → STRONG_BUY 보호 (stt_kospi §05:35)');
+    } else {
+      const previous = signal;
+      signal = 'BUY';
+      const overrideReason = `추세전환 3조건 ${trendConfirmCount}/3 미충족 → ${previous} → BUY 상한 (보조조건)`;
+      overrides.push(overrideReason);
+      reasons.push(overrideReason);
+    }
+  }
+  if (trendConfirmCount === 0 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
+    if (kRecLevel === 2) {
+      reasons.push('✓ KOSPI_RECOVERY_3AXIS_LEVEL=2 → HOLD 강등 면제');
+    } else {
+      const previous = signal;
+      signal = 'HOLD';
+      const overrideReason = `추세전환 3조건 전부 미충족 → ${previous} → HOLD 상한 (보조조건)`;
+      overrides.push(overrideReason);
+      reasons.push(overrideReason);
+    }
+  }
+
+  // === Override 2: 11차 신규 — 지정학 급변 숏커버링 반등 가드 ===
+  // video5_analysis §3부: "환율 1,500 돌파 예상하고 코스피 하락 베팅한 세력이 휴전
+  //   뉴스에 놀라 급격히 손절" → 반등의 50% 는 숏커버링, 진짜 추세 아님.
+  const geoUnwind = dv(derived, 'GEOPOLITICAL_UNWIND_EVENT');
+  const shortCover = dv(derived, 'SHORT_COVER_SUSPECTED');
+  if (geoUnwind === 1 && shortCover === 1 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
+    const previous = signal;
+    signal = 'HOLD';
+    const overrideReason =
+      `⚠️ 지정학 급변 숏커버링 반등 (stt_kospi §2부) — 휴전/종전 뉴스 + 외인 1일 순매수 ≥1조. ` +
+      `반등의 질 감별 필요 → ${previous} → HOLD (추세 재개 3조건 확인 후 재진입)`;
+    overrides.push(overrideReason);
+    reasons.push(overrideReason);
+  }
+
+  // === Override 3: 29차 P2-D #28 BOUNCE_QUALITY ===
+  const bounceQuality = dv(derived, 'BOUNCE_QUALITY_FOLLOWTHROUGH_DAYS');
+  if (bounceQuality === 0 && (signal === 'BUY' || signal === 'STRONG_BUY')) {
+    const previous = signal;
+    signal = 'HOLD';
+    const overrideReason = `⚠️ BOUNCE_QUALITY=0 (D+5 재하락 또는 거래량 미확인) → ${previous} → HOLD (stt_kospi §05:40)`;
+    overrides.push(overrideReason);
+    unmetReasons.push(overrideReason);
+  }
+
+  // === Override 4: 29차 P2-E #31 KOSPI_HALFYEAR_UPPER_WICK 강등 ===
+  if (kospiWickThr === -1 && signal === 'STRONG_BUY') {
+    const previous = signal;
+    signal = 'BUY';
+    const overrideReason = `⚠️ 반기봉 윗꼬리 ≥30% (매도압력 강) → ${previous} → BUY (stt_kospi §03:18)`;
+    overrides.push(overrideReason);
+    unmetReasons.push(overrideReason);
+  }
+
+  // === Override 5: 코스피 완화 규칙 (이격도/CHASE/FX_ELASTICITY) ===
   // - "실제 가격 과열"이 있는 경우에만 강한 다운그레이드를 허용한다.
   // - CHASE_WARNING 은 과열뿐 아니라 과매도 연속구간도 포함하므로, 단독으로는 REDUCE 근거로 쓰지 않는다.
   // - FX_ELASTICITY 는 흐름 경고로만 보고, 가격 과열이 없으면 최대 HOLD 까지만 캡한다.
   const kOverheatFlags: string[] = [];
   const kCautionFlags: string[] = [];
   const priceOverheated = disparity !== null && disparity >= 20;
-  if (priceOverheated) kOverheatFlags.push(`코스피 이격도 +${disparity.toFixed(1)}% ≥ 20%`);
+  if (priceOverheated) kOverheatFlags.push(`코스피 이격도 +${disparity!.toFixed(1)}% ≥ 20%`);
   const kOverheatStreak = dv(derived, 'KOSPI_DISPARITY_STREAK_OVERHEATED');
   if (kOverheatStreak !== null && kOverheatStreak >= 20) {
     kOverheatFlags.push(`과열 이격도 연속 ${kOverheatStreak.toFixed(0)}일`);
@@ -1833,7 +1857,7 @@ function kospiSignal(
     unmetReasons.push(overrideReason);
   }
 
-  // 9차 후속 Fix #2: KOSPI_CHASE_LEVEL 계층화 override (binary CHASE_WARNING 보완).
+  // === Override 6: 9차 후속 Fix #2 — KOSPI_CHASE_LEVEL 계층화 ===
   //   level 0 → no-op
   //   level 1 (soft): reason 경고만, 신호 불변
   //   level 2 (medium): STRONG_BUY → BUY
@@ -1849,8 +1873,9 @@ function kospiSignal(
       overrides.push(overrideReason);
       unmetReasons.push(overrideReason);
     } else if (kChaseLevel >= 2 && signal === 'STRONG_BUY') {
+      const previous = signal;
       signal = 'BUY';
-      const overrideReason = `CHASE_LEVEL=2 (medium): ${levelReason} (STRONG_BUY → BUY)`;
+      const overrideReason = `CHASE_LEVEL=2 (medium): ${levelReason} (${previous} → BUY)`;
       overrides.push(overrideReason);
       unmetReasons.push(overrideReason);
     } else if (kChaseLevel >= 1) {
