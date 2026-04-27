@@ -565,6 +565,39 @@ export function computeAllocation(
   // 후 실제 20% 까지 팽창 가능. 영상1 §전략C "짧게/20~30% 익절"의 상한을
   // 보호하기 위해 normalize 이후에 최종 clamp 한다(아래).
 
+  // ★ === 30차 P1-C #10: PORTFOLIO_ONE_WAY_RISK — 분산 붕괴 시 nasdaq 감축 + gold/cash 강화 ===
+  // video2 §02:09 "한 방향 동조 = 분산 붕괴". |ρ| 평균 ≥ 0.5 시 방어.
+  const oneWayRisk = derived.PORTFOLIO_ONE_WAY_RISK?.value ?? null;
+  if (oneWayRisk !== null) {
+    if (oneWayRisk >= 0.7) {
+      // level=-2: nasdaq -5%, gold +4%, cash +1%
+      const cut5 = Math.min(5, base.nasdaq || 0);
+      if (cut5 > 0) {
+        base.nasdaq = (base.nasdaq || 0) - cut5;
+        base.gold = (base.gold || 0) + cut5 * 0.8;
+        base.cash = (base.cash || 0) + cut5 * 0.2;
+        explanation?.adjustments.push({
+          step: 'one-way-risk-hard',
+          detail: `PORTFOLIO_ONE_WAY_RISK=${oneWayRisk.toFixed(2)} ≥ 0.7 -> nasdaq -5, gold +4, cash +1 (video2 §02:09)`,
+          allocKey: 'nasdaq', amount: cut5, before: (base.nasdaq || 0) + cut5, after: base.nasdaq || 0,
+        });
+      }
+    } else if (oneWayRisk >= 0.5) {
+      // level=-1: nasdaq -3%, gold +2%, cash +1%
+      const cut3 = Math.min(3, base.nasdaq || 0);
+      if (cut3 > 0) {
+        base.nasdaq = (base.nasdaq || 0) - cut3;
+        base.gold = (base.gold || 0) + cut3 * 0.67;
+        base.cash = (base.cash || 0) + cut3 * 0.33;
+        explanation?.adjustments.push({
+          step: 'one-way-risk-soft',
+          detail: `PORTFOLIO_ONE_WAY_RISK=${oneWayRisk.toFixed(2)} ≥ 0.5 -> nasdaq -3, gold +2, cash +1 (video2 §02:09)`,
+          allocKey: 'nasdaq', amount: cut3, before: (base.nasdaq || 0) + cut3, after: base.nasdaq || 0,
+        });
+      }
+    }
+  }
+
   if (explanation) {
     explanation.preNormalize = Object.fromEntries(
       Object.entries(base).map(([key, value]) => [key, parseFloat(value.toFixed(4))]),

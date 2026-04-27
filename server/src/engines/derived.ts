@@ -8771,6 +8771,240 @@ export async function computeDerived(
     }
   } catch { void 0; }
 
+  // ★ ════════════════════════════════════════════════════════════════════
+  // 30차 P1-C: 분산/포트폴리오 3건 + 운영자 대시보드 6건
+  // ════════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P1-C #10: PORTFOLIO_ONE_WAY_RISK ===
+  // video2 §02:09 "한 방향 동조 = 분산 붕괴"
+  // SP500/IEF/GOLD/DXY 4쌍 90D 일별 수익률 |ρ| 평균
+  try {
+    const sp500Hist = await fetchYahooHistory('^GSPC', 95);
+    const iefHist = await fetchYahooHistory('IEF', 95);
+    const goldHist10 = await fetchYahooHistory('GC=F', 95);
+    const dxyHist10 = await fetchYahooHistory('DX-Y.NYB', 95);
+    const seriesMap: Array<{name: string; hist: Array<{close:number}>}> = [
+      { name: 'SP500', hist: sp500Hist },
+      { name: 'IEF',   hist: iefHist },
+      { name: 'GOLD',  hist: goldHist10 },
+      { name: 'DXY',   hist: dxyHist10 },
+    ];
+    const returns: Record<string, number[]> = {};
+    for (const s of seriesMap) {
+      if (s.hist.length >= 90) {
+        const c = s.hist.slice(-90).map(h => h.close);
+        returns[s.name] = c.slice(1).map((v, i) => c[i] > 0 ? (v - c[i]) / c[i] : 0);
+      }
+    }
+    const keys = Object.keys(returns);
+    let totalRho = 0; let pairCount = 0;
+    const pairDetails: string[] = [];
+    for (let i = 0; i < keys.length; i++) {
+      for (let j = i + 1; j < keys.length; j++) {
+        const a = returns[keys[i]]; const b = returns[keys[j]];
+        const n = Math.min(a.length, b.length);
+        if (n < 20) continue;
+        const aSlice = a.slice(-n); const bSlice = b.slice(-n);
+        const meanA = aSlice.reduce((s, v) => s + v, 0) / n;
+        const meanB = bSlice.reduce((s, v) => s + v, 0) / n;
+        let num = 0; let dA = 0; let dB = 0;
+        for (let k = 0; k < n; k++) {
+          const da = aSlice[k] - meanA; const db = bSlice[k] - meanB;
+          num += da * db; dA += da * da; dB += db * db;
+        }
+        const rho = dA > 0 && dB > 0 ? num / Math.sqrt(dA * dB) : 0;
+        totalRho += Math.abs(rho); pairCount++;
+        pairDetails.push(`${keys[i]}/${keys[j]}:${rho.toFixed(2)}`);
+      }
+    }
+    if (pairCount > 0) {
+      const avgAbsRho = totalRho / pairCount;
+      let level10 = 0;
+      let label10: string;
+      if (avgAbsRho >= 0.7) { level10 = -2; label10 = `🔴🔴 분산 붕괴 강 (|ρ|=${avgAbsRho.toFixed(2)} ≥ 0.7)`; }
+      else if (avgAbsRho >= 0.5) { level10 = -1; label10 = `🔴 분산 붕괴 위기 (|ρ|=${avgAbsRho.toFixed(2)} ≥ 0.5)`; }
+      else { label10 = `⚪ 분산 양호 (|ρ|=${avgAbsRho.toFixed(2)})`; }
+      d.PORTFOLIO_ONE_WAY_RISK = {
+        name: 'portfolio_one_way_risk',
+        value: parseFloat(avgAbsRho.toFixed(3)),
+        date: today(),
+        formula: `SP500/IEF/GOLD/DXY 4쌍 90D |ρ| 평균 ${avgAbsRho.toFixed(3)}. 쌍별: ${pairDetails.join(', ')}. level=${level10}. ${label10}. ★ video2 §02:09 "한 방향 동조 = 분산 붕괴".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P1-C #11: BTC_REGIME_LEAD_INDICATOR ===
+  // video4 §01:46 "BTC 50% 폭락 = NASDAQ 후행 위협"
+  // (사용자 정책: 비트코인 보유 제외, 선행 지표 분석은 OK)
+  try {
+    const btcHist20 = await fetchYahooHistory('BTC-USD', 25);
+    const nqHist20 = await fetchYahooHistory('^IXIC', 25);
+    if (btcHist20.length >= 21 && nqHist20.length >= 21) {
+      const btcCloses = btcHist20.slice(-21).map(h => h.close);
+      const nqCloses = nqHist20.slice(-21).map(h => h.close);
+      const btcRet20 = btcCloses[0] > 0 ? (btcCloses[btcCloses.length-1] - btcCloses[0]) / btcCloses[0] * 100 : 0;
+      const nqRet20 = nqCloses[0] > 0 ? (nqCloses[nqCloses.length-1] - nqCloses[0]) / nqCloses[0] * 100 : 0;
+      let level11 = 0;
+      let label11: string;
+      if (btcRet20 <= -30 && nqRet20 >= -5) { level11 = 2; label11 = `🔴🔴 BTC ${btcRet20.toFixed(1)}% 폭락 + NASDAQ 미반응 → 선행 위험회피 경고`; }
+      else if (btcRet20 <= -15) { level11 = 1; label11 = `🔴 BTC ${btcRet20.toFixed(1)}% 하락 → 위험회피 선행 경고`; }
+      else { label11 = `⚪ BTC ${btcRet20.toFixed(1)}% (NASDAQ 후행 위협 없음)`; }
+      d.BTC_REGIME_LEAD_INDICATOR = {
+        name: 'btc_regime_lead_indicator',
+        value: level11,
+        date: today(),
+        formula: `BTC 20D ${btcRet20.toFixed(1)}%, NASDAQ 20D ${nqRet20.toFixed(1)}%. level=${level11}. ${label11}. ★ video4 §01:46 "BTC 50% 폭락 = NASDAQ 후행 위협". 보유 제외 / 선행 분석만.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P1-C #12: GOLD_TIMEFRAME_CONFLICT_LABEL ===
+  // video2 §23:00 "일봉 RSI 50 / 주봉 RSI 57 → 단기 보류 / 장기 매수 분리"
+  try {
+    const goldRsi = d.GOLD_RSI_14?.value ?? null;
+    const goldPrice = val(raw, 'GOLD');
+    const goldSma20w = d.GOLD_WEEKLY_20MA?.value ?? null;
+    const goldWeeklyRsi = d.GOLD_WEEKLY_RSI?.value ?? null;
+
+    // 일봉 부정: GOLD_RSI_14 < 50 OR GOLD 가격 < 20DMA 대용 (GOLD_ABOVE_200DMA 로 대용 — 20DMA 별도 없음)
+    // 20DMA 없으면 RSI < 50 단독으로 판단
+    const dailyNeg = (goldRsi !== null && goldRsi < 50);
+    // 주봉 긍정: GOLD_WEEKLY_RSI ≥ 55 AND 주봉 가격 > WEEKLY_20MA
+    const goldAbove200 = d.GOLD_ABOVE_200DMA?.value ?? null;
+    const weeklyPos = (goldWeeklyRsi !== null && goldWeeklyRsi >= 55) ||
+                      (goldSma20w !== null && goldPrice !== null && goldPrice > goldSma20w) ||
+                      (goldAbove200 === 1 && goldRsi !== null && goldRsi >= 50);
+
+    let labelTF = 'NEUTRAL';
+    let levelTF = 0;
+    if (dailyNeg && weeklyPos) {
+      labelTF = 'SHORT_TERM_HOLD_LONG_TERM_BUY'; levelTF = 1;
+    } else if (!dailyNeg && !weeklyPos) {
+      labelTF = 'SHORT_TERM_BUY_LONG_TERM_CAUTION'; levelTF = -1;
+    }
+    d.GOLD_TIMEFRAME_CONFLICT_LABEL = {
+      name: 'gold_timeframe_conflict_label',
+      value: levelTF,
+      date: today(),
+      formula: `일봉_부정=${dailyNeg}(RSI${goldRsi?.toFixed(0) ?? '-'}<50), 주봉_긍정=${weeklyPos}(wRSI${goldWeeklyRsi?.toFixed(0) ?? '-'}≥55). label=${labelTF}. level=${levelTF}. ★ video2 §23:00 "단기 보류/장기 매수 타임프레임 분리".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P1-C #13: DASHBOARD_SKEW_140_FLAG ===
+  // assetx2-dashboard "SKEW 140+ tail-risk"
+  try {
+    const skewVal = raw.SKEW?.value ?? null;
+    let level13 = 0;
+    let label13: string;
+    if (skewVal === null) { label13 = '⚪ SKEW 데이터 없음'; }
+    else if (skewVal >= 140) { level13 = 2; label13 = `🔴🔴 SKEW ${skewVal.toFixed(1)} ≥ 140 (tail-risk 경고)`; }
+    else if (skewVal >= 130) { level13 = 1; label13 = `🔴 SKEW ${skewVal.toFixed(1)} ≥ 130 (경계)`; }
+    else { label13 = `⚪ SKEW ${skewVal.toFixed(1)} < 130 (정상)`; }
+    d.DASHBOARD_SKEW_140_FLAG = {
+      name: 'dashboard_skew_140_flag',
+      value: level13,
+      date: today(),
+      formula: `SKEW=${skewVal?.toFixed(1) ?? 'n/a'}. level=${level13}. ${label13}. ★ assetx2-dashboard "SKEW 140+ tail-risk".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P1-C #14: DASHBOARD_VVIX_130_FLAG ===
+  // assetx2-dashboard "VVIX 130+ VIX 변동성 spike"
+  try {
+    const vvixVal = raw.VVIX?.value ?? null;
+    let level14 = 0;
+    let label14: string;
+    if (vvixVal === null) { label14 = '⚪ VVIX 데이터 없음'; }
+    else if (vvixVal >= 130) { level14 = 2; label14 = `🔴🔴 VVIX ${vvixVal.toFixed(1)} ≥ 130 (VIX spike 위험)`; }
+    else if (vvixVal >= 110) { level14 = 1; label14 = `🔴 VVIX ${vvixVal.toFixed(1)} ≥ 110 (경계)`; }
+    else { label14 = `⚪ VVIX ${vvixVal.toFixed(1)} < 110 (정상)`; }
+    d.DASHBOARD_VVIX_130_FLAG = {
+      name: 'dashboard_vvix_130_flag',
+      value: level14,
+      date: today(),
+      formula: `VVIX=${vvixVal?.toFixed(1) ?? 'n/a'}. level=${level14}. ${label14}. ★ assetx2-dashboard "VVIX 130+ VIX 변동성 spike".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P1-C #15: DASHBOARD_PUTCALL_RATIO_TIER ===
+  // assetx2-dashboard "1.0+ downside hedge / 0.7- call overheat"
+  // 기존 PC_RATIO_10D 사용, 없으면 sentiment 원시값 fallback
+  try {
+    const pcr = d.PC_RATIO_10D?.value ?? val(raw, 'PC_RATIO');
+    let level15 = 0;
+    let label15: string;
+    if (pcr === null) { label15 = '⚪ PCR 데이터 없음'; }
+    else if (pcr >= 1.0) { level15 = 1; label15 = `🟢 PCR ${pcr.toFixed(2)} ≥ 1.0 (hedge buying, contrarian buy 우호)`; }
+    else if (pcr <= 0.7) { level15 = -1; label15 = `🔴 PCR ${pcr.toFixed(2)} ≤ 0.7 (call overheat, 과열)`; }
+    else { label15 = `⚪ PCR ${pcr.toFixed(2)} 중립 (0.7~1.0)`; }
+    d.DASHBOARD_PUTCALL_RATIO_TIER = {
+      name: 'dashboard_putcall_ratio_tier',
+      value: level15,
+      date: today(),
+      formula: `PCR=${pcr?.toFixed(2) ?? 'n/a'}. level=${level15}. ${label15}. ★ assetx2-dashboard "1.0+ hedge / 0.7- call overheat".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P1-C #16: DATAROMA_BIG_BETS_5PCT_52W_LOW ===
+  // dataroma "5%+ portfolio + 52W low" cluster
+  try {
+    const manualCount = typeof (manualInputs as any)?.dataromaBigBets52WLowCount === 'number'
+      ? (manualInputs as any).dataromaBigBets52WLowCount
+      : null;
+    // fallback: INSTITUTIONAL_CONSENSUS_TOP_COUNT 가 있으면 proxy 사용
+    const instConsensus = d.INSTITUTIONAL_CONSENSUS_TOP_COUNT?.value ?? null;
+    const strongCount = d.INSTITUTIONAL_CONSENSUS_STRONG_COUNT?.value ?? null;
+    // 5%+ 포지션 + 52W low 근접 종목 수 = manualInputs 우선, fallback = strong consensus count
+    const count16 = manualCount ?? (strongCount !== null ? Math.max(0, strongCount - 2) : 0);
+    let level16 = 0;
+    let label16: string;
+    if (count16 >= 3) { level16 = 2; label16 = `🟢🟢 ${count16}종목 5%+ + 52W low 근접 (강한 contrarian buy)`; }
+    else if (count16 >= 1) { level16 = 1; label16 = `🟢 ${count16}종목 (contrarian buy 후보)`; }
+    else { label16 = `⚪ 해당 없음`; }
+    d.DATAROMA_BIG_BETS_5PCT_52W_LOW = {
+      name: 'dataroma_big_bets_5pct_52w_low',
+      value: level16,
+      date: today(),
+      formula: `5%+ 보유+52W low 근접 종목수=${count16} (manualInputs.dataromaBigBets52WLowCount=${manualCount ?? 'n/a'}, 기관합의proxy=${strongCount ?? 'n/a'}). level=${level16}. ${label16}. ★ dataroma "5%+ portfolio + 52W low cluster".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P1-C #17: HANKYUNG_GLOBAL_SUB_RSS ===
+  // hankyung GLOBAL "외환/채권/원자재" sub-카테고리 분리
+  // kr-news.ts 의 bySource 에서 hankyung-global 분기 + 신선도 판단
+  try {
+    const { fetchKrNewsHeadlines } = await import('../collectors/kr-news');
+    const kr17 = await fetchKrNewsHeadlines();
+    if (kr17) {
+      const hg = kr17.bySource['hankyung-global'];
+      const freshHours = hg ? hg.minutesAgo / 60 : null;
+      // 단일 피드 → 카테고리 분리 없이 전체 freshness 로 각 파생 통일
+      for (const subKey of ['FX', 'BOND', 'COMMODITY'] as const) {
+        const dKey = `HANKYUNG_${subKey}_FRESHNESS_HOURS`;
+        d[dKey] = {
+          name: dKey.toLowerCase(),
+          value: freshHours !== null ? parseFloat(freshHours.toFixed(2)) : null,
+          date: today(),
+          formula: `한경 글로벌 ${subKey} freshness ${freshHours?.toFixed(1) ?? 'n/a'}h. 12h 이내=${freshHours !== null && freshHours <= 12 ? '✓ 운영자 발신 활발' : '◻'}. ★ 30차 P1-C 한경 GLOBAL sub-RSS.`,
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P1-C #18: MIRAE_GLOBAL_ETF_RESEARCH_FRESHNESS_DAYS ===
+  // securities.miraeasset.com/.../1526 Global ETF Research
+  try {
+    const { fetchDomesticReportsLatest } = await import('../collectors/domestic-reports');
+    const dom18 = await fetchDomesticReportsLatest();
+    const miraeDays = dom18?.mirae?.daysAgo ?? null;
+    d.MIRAE_GLOBAL_ETF_RESEARCH_FRESHNESS_DAYS = {
+      name: 'mirae_global_etf_research_freshness_days',
+      value: miraeDays,
+      date: today(),
+      formula: `미래에셋 글로벌 ETF 리서치 최신 D-${miraeDays ?? 'n/a'}일. ≤7일 → freshness OK. ★ 30차 P1-C Mirae 1526 Global ETF Research.`,
+    };
+  } catch { void 0; }
+
   // ★ === 30차 P1-A #3: NASDAQ_3STAGE_TRIGGER_CHECKLIST ===
   // video3 §16:46 "200DMA / channel mid / W_BOTTOM 3축 분할매수"
   try {

@@ -965,6 +965,52 @@ function nasdaqSignal(
   // === Override 4: 29차 fix-F — 자산군 × regime 정합 게이트 ===
   signal = applyRegimeCoherenceGate('NASDAQ', signal, regime.regime, overrides, unmetReasons);
 
+  // ★ === 30차 P1-C: 대시보드/포트폴리오 derived NASDAQ 다운스트림 통합 ===
+
+  // #13 DASHBOARD_SKEW_140_FLAG — level=2 시 STRONG_BUY 차단
+  const skewFlag = dv(derived, 'DASHBOARD_SKEW_140_FLAG');
+  if (skewFlag !== null && skewFlag >= 2) {
+    unmetReasons.push(`⚠️ SKEW level=2 (tail-risk, assetx2-dashboard) → STRONG_BUY 차단`);
+    if (signal === 'STRONG_BUY') { signal = 'BUY'; overrides.push('SKEW_140_FLAG → STRONG_BUY → BUY'); }
+  } else if (skewFlag === 1) {
+    unmetReasons.push('⚠️ SKEW level=1 (경계, assetx2-dashboard)');
+  }
+
+  // #14 DASHBOARD_VVIX_130_FLAG — level=2 시 unmetReasons + REDUCE 가산
+  const vvixFlag = dv(derived, 'DASHBOARD_VVIX_130_FLAG');
+  if (vvixFlag !== null && vvixFlag >= 2 && signal !== 'SELL' && signal !== 'REDUCE') {
+    const prevVV = signal;
+    signal = 'REDUCE';
+    const rVV = `VVIX_130_FLAG level=2 (VIX 변동성 spike, assetx2-dashboard) → ${prevVV} → REDUCE`;
+    overrides.push(rVV); unmetReasons.push(rVV);
+  } else if (vvixFlag === 1) {
+    unmetReasons.push('⚠️ VVIX level=1 (경계, assetx2-dashboard)');
+  }
+
+  // #15 DASHBOARD_PUTCALL_RATIO_TIER — +1 시 met+0.7, -1 시 unmetReasons
+  const pcrTier = dv(derived, 'DASHBOARD_PUTCALL_RATIO_TIER');
+  if (pcrTier === 1) {
+    weightedMet += 0.7; weightedMax += 0.7;
+    reasons.push('✓ PCR ≥ 1.0 hedge buying (contrarian buy 우호, assetx2-dashboard, 가중치 0.7)');
+  } else if (pcrTier === -1) {
+    weightedMax += 0.7;
+    unmetReasons.push('⚠️ PCR ≤ 0.7 call overheat (assetx2-dashboard, 가중치 0.7 미충족)');
+  }
+
+  // #11 BTC_REGIME_LEAD_INDICATOR — level=2 시 unmetReasons + REDUCE 가산
+  const btcLead = dv(derived, 'BTC_REGIME_LEAD_INDICATOR');
+  if (btcLead !== null && btcLead >= 2 && signal !== 'SELL' && signal !== 'REDUCE') {
+    const prevBL = signal;
+    signal = 'REDUCE';
+    const rBL = `BTC_REGIME_LEAD level=2 (BTC 폭락+NASDAQ 미반응, video4 §01:46) → ${prevBL} → REDUCE`;
+    overrides.push(rBL); unmetReasons.push(rBL);
+  } else if (btcLead === 1) {
+    unmetReasons.push('⚠️ BTC 20D ≤-15% 위험회피 선행 경고 (video4 §01:46)');
+  }
+
+  // weightedMet cap 재적용 (PCR 등 가산 후)
+  if (weightedMet > weightedMax) weightedMet = weightedMax;
+
   // ★ === 30차 P1-A #1: SEVEN_LENS_AGREEMENT_LEVEL 영상 핵심 정합 가산 ===
   // video4 §03:33 — 5렌즈 이상 동조(level≥2) 시 weightedMet +1.5 (영상 핵심 정합).
   const sevenLens = dv(derived, 'SEVEN_LENS_AGREEMENT_LEVEL');
@@ -1287,6 +1333,15 @@ function goldSignal(
   // 29차 fix-B: GOLD weightedScore cap — score/maxScore 동시 증가 패턴이지만
   // 향후 신규 가산 도입 시 over-cap 방지 위해 명시 cap 일관 적용.
   if (score > maxScore) score = maxScore;
+
+  // ★ === 30차 P1-C #12: GOLD_TIMEFRAME_CONFLICT_LABEL — 정성 표시 (신호 불변) ===
+  // video2 §23:00 "일봉 RSI 50 / 주봉 RSI 57 → 단기 보류 / 장기 매수 분리"
+  const goldTFConflict = dv(derived, 'GOLD_TIMEFRAME_CONFLICT_LABEL');
+  if (goldTFConflict === 1) {
+    reasons.push('📌 GOLD 타임프레임 분리: 단기 보류 / 장기 매수 (video2 §23:00)');
+  } else if (goldTFConflict === -1) {
+    unmetReasons.push('📌 GOLD 타임프레임 분리: 단기 매수 / 장기 주의 (video2 §23:00)');
+  }
 
   // ★ === 30차 P1-B #4: GOLD_OVERHEAT_EXIT_TRIGGER — level=2 시 REDUCE 강등 ===
   // video1 §08:57 + video2 §20:01.
