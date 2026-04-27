@@ -1301,22 +1301,12 @@ function nasdaqSignal(
     overrides.push(rTopD); unmetReasons.push(rTopD);
   }
 
-    // ★ === 30차 P1-A #2: TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL 신호 차단 ===
-  // video4 §06:45 — 3축+ 동시 활성 시 BUY 강등, 4축 시 STRONG_BUY 차단.
-  const trump4Axes = dv(derived, 'TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL');
-  if (trump4Axes !== null && trump4Axes >= 3) {
-    if (trump4Axes >= 4 && signal === 'STRONG_BUY') {
-      const prev4 = signal;
-      signal = 'BUY';
-      const r4 = `TRUMP_4AXES=${trump4Axes} (4축 동시, video4 §06:45) → STRONG_BUY → BUY`;
-      overrides.push(r4); unmetReasons.push(r4);
-    } else if (trump4Axes === 3 && (signal === 'STRONG_BUY' || signal === 'BUY')) {
-      const prev4 = signal;
-      signal = signal === 'STRONG_BUY' ? 'BUY' : 'HOLD';
-      const r4 = `TRUMP_4AXES=${trump4Axes} (3축 동시, video4 §06:45) → ${prev4} → ${signal}`;
-      overrides.push(r4); unmetReasons.push(r4);
-    }
-  }
+  // ★ === 30차 fix-J: TRUMP_FOUR_AXES — 영상 의도 반전 fix ===
+  //   video4 §06:45 본 의미: "트럼프가 4축 동시 가동 = 11월 선거 향한 정책 부양 강세".
+  //   기존 (잘못된) 적용: BUY 강등 / STRONG_BUY 차단 (= 매도 권고). 영상 의도 정반대.
+  //   수정: 정책 부양 우호 환경 → reasons 가산 (가중치 +0.7), 강등 트리거 제거.
+  //   3축+ 시 +0.7 (정책 의도 강세), 4축 시 +1.0 (전면 가동, 단 단기 변동성 ↑ unmetReasons 보조).
+  // (강등 코드 제거됨 — derived 자체는 유지, 신호 영향만 의도 정합으로 변경)
 
   return withSignalExplanation({
     asset: 'NASDAQ',
