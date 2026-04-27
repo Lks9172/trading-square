@@ -2268,6 +2268,71 @@ function kospiSignal(
     }
   }
 
+  // ★ === 30차 P1-D: KOSPI dynamics 다운스트림 통합 ===
+
+  // #19 KOSPI_DYNAMIC_TRENDLINE_STATE — level 1.5 가중 (video가 핵심 강조)
+  const kospiTrendline = dv(derived, 'KOSPI_DYNAMIC_TRENDLINE_STATE');
+  if (kospiTrendline !== null) {
+    if (kospiTrendline === 1) {
+      total += 1; met += 1; weightedMax += 1.5; weightedMet += 1.5;
+      reasons.push('✓ KOSPI 추세선 회복/상방 유지 (stt_kospi §04:13, 가중치 1.5)');
+    } else if (kospiTrendline === -2) {
+      total += 1; weightedMax += 1.5;
+      unmetReasons.push('⚠️ KOSPI 추세선 강력 이탈 (-5% 이하, stt_kospi §04:13, 가중치 1.5 미충족)');
+    } else if (kospiTrendline === -1) {
+      total += 1; weightedMax += 1.5;
+      unmetReasons.push('⚠️ KOSPI 추세선 이탈 미회복 5일+ (stt_kospi §04:13, 가중치 1.5 미충족)');
+    }
+    if (weightedMet > weightedMax) weightedMet = weightedMax;
+  }
+
+  // #20 KOSPI_DAILY_SHOCK_FLAG — level≥+2 시 reasons.push (이벤트 후 추세 확인 후 매수)
+  const kospiShock = dv(derived, 'KOSPI_DAILY_SHOCK_FLAG');
+  if (kospiShock !== null && kospiShock >= 2) {
+    reasons.push(`✓ KOSPI 단일일 +6%+ 충격 (매수 사이드카 추정, stt_kospi §05:18) — 추세 확인 후 매수`);
+  } else if (kospiShock !== null && kospiShock <= -2) {
+    unmetReasons.push(`⚠️ KOSPI 단일일 -6%- 충격 (매도 사이드카, stt_kospi §05:18)`);
+  }
+
+  // #21 KOSPI_FOREIGN_NET_1D_HISTORIC_FLAG — ±1/±2 met 가산
+  const kospiHistFlag = dv(derived, 'KOSPI_FOREIGN_NET_1D_HISTORIC_FLAG');
+  if (kospiHistFlag !== null && kospiHistFlag >= 2) {
+    total += 2; met += 2; weightedMax += 2.0; weightedMet += 2.0;
+    reasons.push('✓ 외국인 당일 역대급 매도 ≤-7조 (contrarian 매수, stt_kospi §07:56, 가중치 2.0)');
+  } else if (kospiHistFlag === 1) {
+    total += 1; met += 1; weightedMax += 1.0; weightedMet += 1.0;
+    reasons.push('✓ 외국인 당일 역대급 매수 ≥+3조 (stt_kospi §07:56, 가중치 1.0)');
+  } else if (kospiHistFlag !== null && kospiHistFlag === -1) {
+    total += 1; weightedMax += 1.0;
+    unmetReasons.push('⚠️ 외국인 당일 대량 매도 -3조 이상 (stt_kospi §07:56)');
+  } else if (kospiHistFlag !== null && kospiHistFlag <= -2) {
+    total += 2; weightedMax += 2.0;
+    unmetReasons.push('⚠️⚠️ 외국인 당일 역대급 대량 매도 ≤-7조 (stt_kospi §07:56)');
+  }
+  if (weightedMet > weightedMax) weightedMet = weightedMax;
+
+  // #22 KOSPI_FOREIGN_REPATRIATION_TRIGGER — level=1 시 met+1.5 (영상 핵심)
+  const kRepatr = dv(derived, 'KOSPI_FOREIGN_REPATRIATION_TRIGGER');
+  if (kRepatr === 1) {
+    total += 1; met += 1; weightedMax += 1.5; weightedMet += 1.5;
+    reasons.push('✓ 외인 복귀 3축 (ATM화+지정학해소+KRW하락, stt_kospi §08:35 영상 핵심, 가중치 1.5)');
+    if (weightedMet > weightedMax) weightedMet = weightedMax;
+  }
+
+  // #23 KOSPI_USD_RETURN_60D — ±1 met 가산 (가중치 1.0)
+  const kospiUsdRet = dv(derived, 'KOSPI_USD_RETURN_60D');
+  if (kospiUsdRet !== null && kospiUsdRet > 5) {
+    total += 1; met += 1; weightedMax += 1.0; weightedMet += 1.0;
+    reasons.push(`✓ KOSPI USD 환산 수익 +${kospiUsdRet.toFixed(1)}% (외인 매수 환경, video6 §09:00, 가중치 1.0)`);
+  } else if (kospiUsdRet !== null && kospiUsdRet < -5) {
+    total += 1; weightedMax += 1.0;
+    unmetReasons.push(`⚠️ KOSPI USD 환산 손실 ${kospiUsdRet.toFixed(1)}% (외인 매도 압력, video6 §09:00, 가중치 1.0 미충족)`);
+  }
+  if (weightedMet > weightedMax) weightedMet = weightedMax;
+
+  // met cap 재적용
+  if (met > total) met = total;
+
   // === 29차 fix-F — 자산군 × regime 정합 게이트 ===
   signal = applyRegimeCoherenceGate('KOSPI', signal, regime.regime, overrides, unmetReasons);
 

@@ -8461,6 +8461,163 @@ export async function computeDerived(
   };
 
   // ★ ════════════════════════════════════════════════════════════════════
+  // 30차 P1-D: KOSPI 단일일 dynamics 5건
+  // ════════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P1-D #19: KOSPI_DYNAMIC_TRENDLINE_STATE ===
+  // stt_kospi §04:13 "추세선 회복/이탈"
+  // 최근 6개월 KOSPI swing low 2점으로 OLS 추세선 → 현재가 위치 판단
+  try {
+    const kospiHist6M = await fetchYahooHistory('^KS11', 130);
+    if (kospiHist6M.length >= 40) {
+      const closes = kospiHist6M.map(h => h.close);
+      const n = closes.length;
+      // swing low: 각 ±5일 윈도우 min 2점 (전반부 + 후반부)
+      const findSwingLow = (arr: number[], startIdx: number, endIdx: number): number => {
+        let minIdx = startIdx;
+        for (let i = startIdx; i <= endIdx; i++) {
+          if (arr[i] < arr[minIdx]) minIdx = i;
+        }
+        return minIdx;
+      };
+      const half = Math.floor(n / 2);
+      const sl1Idx = findSwingLow(closes, 0, half - 1);
+      const sl2Idx = findSwingLow(closes, half, n - 2); // 최근 제외
+      const x1 = sl1Idx; const y1 = closes[sl1Idx];
+      const x2 = sl2Idx; const y2 = closes[sl2Idx];
+      const curIdx = n - 1;
+      const curPrice = closes[curIdx];
+      let levelTL = 0;
+      let labelTL = '중립';
+      if (x2 !== x1) {
+        const slope = (y2 - y1) / (x2 - x1);
+        const trendPrice = y1 + slope * (curIdx - x1);
+        const diffPct = trendPrice > 0 ? (curPrice - trendPrice) / trendPrice * 100 : 0;
+        if (diffPct >= 0) {
+          levelTL = 1; labelTL = `🟢 추세선 위 (+${diffPct.toFixed(1)}%)`;
+        } else if (diffPct <= -5) {
+          levelTL = -2; labelTL = `🔴🔴 강력 이탈 (${diffPct.toFixed(1)}% ≤ -5%)`;
+        } else {
+          // 이탈: 5일 이상 지속 여부 체크 (간단화: 최근 5일 모두 추세선 아래)
+          let consecBelow = 0;
+          for (let i = n - 5; i < n; i++) {
+            const tpI = y1 + slope * (i - x1);
+            if (closes[i] < tpI) consecBelow++;
+          }
+          levelTL = consecBelow >= 5 ? -1 : 0;
+          labelTL = consecBelow >= 5 ? `🔴 이탈 미회복 (${diffPct.toFixed(1)}%, 5일+)` : `🟡 이탈 중 회복 가능 (${diffPct.toFixed(1)}%)`;
+        }
+        d.KOSPI_DYNAMIC_TRENDLINE_STATE = {
+          name: 'kospi_dynamic_trendline_state',
+          value: levelTL,
+          date: today(),
+          formula: `swing low 2점(idx${sl1Idx}=$${y1.toFixed(0)}, idx${sl2Idx}=$${y2.toFixed(0)}) OLS. 현재가$${curPrice.toFixed(0)} vs 추세선$${trendPrice.toFixed(0)} (${diffPct.toFixed(1)}%). level=${levelTL}. ${labelTL}. ★ stt_kospi §04:13 "추세선 회복/이탈".`,
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P1-D #20: KOSPI_DAILY_SHOCK_FLAG ===
+  // stt_kospi §05:18 "단일일 +6.87% 매수 사이드카"
+  try {
+    const kospiHist2 = await fetchYahooHistory('^KS11', 3);
+    if (kospiHist2.length >= 2) {
+      const closes20 = kospiHist2.map(h => h.close);
+      const prev20 = closes20[closes20.length - 2];
+      const cur20 = closes20[closes20.length - 1];
+      const chgPct = prev20 > 0 ? (cur20 - prev20) / prev20 * 100 : 0;
+      let level20 = 0;
+      let label20: string;
+      if (chgPct >= 6) { level20 = 2; label20 = `🟢🟢 단일일 +${chgPct.toFixed(2)}% (매수 사이드카 추정)`; }
+      else if (chgPct >= 5) { level20 = 1; label20 = `🟢 단일일 +${chgPct.toFixed(2)}%`; }
+      else if (chgPct <= -6) { level20 = -2; label20 = `🔴🔴 단일일 ${chgPct.toFixed(2)}% (매도 사이드카)`; }
+      else if (chgPct <= -5) { level20 = -1; label20 = `🔴 단일일 ${chgPct.toFixed(2)}%`; }
+      else { label20 = `⚪ 단일일 ${chgPct.toFixed(2)}%`; }
+      d.KOSPI_DAILY_SHOCK_FLAG = {
+        name: 'kospi_daily_shock_flag',
+        value: level20,
+        date: today(),
+        formula: `당일 ${chgPct.toFixed(2)}% (전일$${prev20.toFixed(0)}→당일$${cur20.toFixed(0)}). level=${level20}. ${label20}. ★ stt_kospi §05:18 "단일일 +6.87% 매수 사이드카".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P1-D #21: KOSPI_FOREIGN_NET_1D_HISTORIC_FLAG ===
+  // stt_kospi §07:56 "역대 7조 매도"
+  // KOSPI_FOREIGN_NET_1D (억원) 기반 절대값 임계 판단
+  try {
+    const fgnNet1D = d.KOSPI_FOREIGN_NET_1D?.value ?? null;
+    if (fgnNet1D !== null) {
+      // 억원 → 조원 환산: 70000억 = 7조
+      const trillion = fgnNet1D / 10000;
+      let level21 = 0;
+      let label21: string;
+      if (trillion <= -7) { level21 = -2; label21 = `🔴🔴 역대급 매도 ${trillion.toFixed(1)}조 (contrarian 매수 후보)`; }
+      else if (trillion <= -3) { level21 = -1; label21 = `🔴 매도 ${trillion.toFixed(1)}조`; }
+      else if (trillion >= 7) { level21 = 2; label21 = `🟢🟢 역대급 매수 ${trillion.toFixed(1)}조`; }
+      else if (trillion >= 3) { level21 = 1; label21 = `🟢 매수 ${trillion.toFixed(1)}조`; }
+      else { label21 = `⚪ ${trillion.toFixed(1)}조 (중립)`; }
+      d.KOSPI_FOREIGN_NET_1D_HISTORIC_FLAG = {
+        name: 'kospi_foreign_net_1d_historic_flag',
+        value: level21,
+        date: today(),
+        formula: `외국인 당일 순매수 ${fgnNet1D}억원 (${trillion.toFixed(2)}조). level=${level21}. ${label21}. ★ stt_kospi §07:56 "역대 7조 매도".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P1-D #22: KOSPI_FOREIGN_REPATRIATION_TRIGGER ===
+  // stt_kospi §08:35 "ATM 후 호르무즈 정상화 → 외인 복귀"
+  // 3축: ATM화 60D ≥ 3배 + GEOPOLITICAL_UNWIND_EVENT ≥ 1 + KRW 5D 하락
+  try {
+    const atmRatio = d.KOSPI_FX_ELASTICITY_DEVIATION?.value ?? null;
+    const geoPol = d.GEOPOLITICAL_UNWIND_EVENT?.value ?? null;
+    const usdkrwHist22 = await readHistory('yahoo', 'USDKRW');
+    let krw5dDown = false;
+    if (usdkrwHist22.length >= 6) {
+      const krwArr = usdkrwHist22.slice(-6).map(p => p.value);
+      const krwDelta = krwArr[0] > 0 ? (krwArr[krwArr.length-1] - krwArr[0]) / krwArr[0] * 100 : 0;
+      krw5dDown = krwDelta < -0.5; // KRW 5D 하락 = 원화 강세 = USDKRW ↓
+    }
+    const axAtm = atmRatio !== null && atmRatio >= 3 ? 1 : 0;
+    const axGeo = geoPol !== null && geoPol >= 1 ? 1 : 0;
+    const axKrw = krw5dDown ? 1 : 0;
+    const level22 = (axAtm + axGeo + axKrw) === 3 ? 1 : 0;
+    d.KOSPI_FOREIGN_REPATRIATION_TRIGGER = {
+      name: 'kospi_foreign_repatriation_trigger',
+      value: level22,
+      date: today(),
+      formula: `ATM화${axAtm}(elasticity=${atmRatio?.toFixed(1) ?? 'n/a'}≥3)+지정학해소${axGeo}(unwind=${geoPol ?? 'n/a'}≥1)+KRW5D하락${axKrw}(${krw5dDown ? '✓' : '✗'})=${axAtm+axGeo+axKrw}축. level=${level22}. ★ stt_kospi §08:35 "ATM 후 호르무즈 정상화 → 외인 복귀".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P1-D #23: KOSPI_USD_RETURN_60D ===
+  // video6 §09:00 "외인 시각 KOSPI USD 환산 수익률"
+  // 60D KOSPI 수익률 - 60D USDKRW 수익률 = USD 환산 외인 수익률
+  try {
+    const kospiHistUsd = await fetchYahooHistory('^KS11', 65);
+    const usdkrwHistUsd = await readHistory('yahoo', 'USDKRW');
+    if (kospiHistUsd.length >= 61 && usdkrwHistUsd.length >= 61) {
+      const kospiCloses = kospiHistUsd.slice(-61).map(h => h.close);
+      const usdkrwArr = usdkrwHistUsd.slice(-61).map(p => p.value);
+      const kospiRet60 = kospiCloses[0] > 0 ? (kospiCloses[60] - kospiCloses[0]) / kospiCloses[0] * 100 : 0;
+      const usdkrwRet60 = usdkrwArr[0] > 0 ? (usdkrwArr[60] - usdkrwArr[0]) / usdkrwArr[0] * 100 : 0;
+      const usdReturn = kospiRet60 - usdkrwRet60;
+      let level23 = 0;
+      let label23: string;
+      if (usdReturn > 5) { level23 = 1; label23 = `🟢 외인 USD 환산 수익 +${usdReturn.toFixed(1)}% (매수 환경 강화)`; }
+      else if (usdReturn < -5) { level23 = -1; label23 = `🔴 외인 USD 환산 손실 ${usdReturn.toFixed(1)}% (매도 압력)`; }
+      else { label23 = `⚪ ${usdReturn.toFixed(1)}%`; }
+      d.KOSPI_USD_RETURN_60D = {
+        name: 'kospi_usd_return_60d',
+        value: parseFloat(usdReturn.toFixed(2)),
+        date: today(),
+        formula: `KOSPI 60D ${kospiRet60.toFixed(1)}% − USDKRW 60D ${usdkrwRet60.toFixed(1)}% = USD 환산 ${usdReturn.toFixed(1)}%. level=${level23}. ${label23}. ★ video6 §09:00 "외인 시각 KOSPI USD 환산 수익률".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ ════════════════════════════════════════════════════════════════════
   // 30차 P1-A: 영상 절대 framing 합성 3건
   // ════════════════════════════════════════════════════════════════════
 
