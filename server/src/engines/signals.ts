@@ -252,33 +252,39 @@ function nasdaqSignal(
   //   수정: 각 핵심 조건 평가 전 total++ → 미충족도 total 합산 → 분수 정합.
   //   PSYCH 보너스 기존 total++ 동기화 패턴은 그대로 유지.
   let total = 0;
+  // 29차 fix-A part 2: 가중치 차등화 — weightedMet / weightedMax 추적.
+  //   영상 강조도 매트릭스: 2.0=역사적기회, 1.5=영상핵심, 1.0=표준, 0.7=보조, 0.5=참조.
+  //   met/total 정수 카운트는 유지 (baseSignal 임계치 계산에 사용).
+  //   weightedScore != conditionsMet 확인으로 차등화 활성 검증.
+  let weightedMet = 0;
+  let weightedMax = 0;
 
   // --- 저점 카테고리 (5) ---
   const above200 = dv(derived, 'NASDAQ_ABOVE_200DMA');
-  total += 1;
-  if (above200 === 0) { met++; reasons.push('200DMA 하회 (가중치 1.0)'); }
+  total += 1; weightedMax += 1.0;
+  if (above200 === 0) { met++; weightedMet += 1.0; reasons.push('200DMA 하회 (가중치 1.0)'); }
   else { unmetReasons.push('200DMA 하회 아님 (가중치 1.0 미충족)'); }
 
   const icsa = v(raw, 'ICSA');
-  total += 1;
-  if (icsa !== null && icsa < 300000) { met++; reasons.push(`실업수당 ${Math.round(icsa / 1000)}K < 300K (가중치 1.0)`); }
-  else { unmetReasons.push('실업수당 300K 미만 조건 미충족 (가중치 1.0 미충족)'); }
+  total += 1; weightedMax += 1.5;
+  if (icsa !== null && icsa < 300000) { met++; weightedMet += 1.5; reasons.push(`실업수당 ${Math.round(icsa / 1000)}K < 300K (가중치 1.5)`); }
+  else { unmetReasons.push('실업수당 300K 미만 조건 미충족 (가중치 1.5 미충족)'); }
 
   const vix = v(raw, 'VIXCLS');
-  total += 1;
-  if (vix !== null && vix > 30) { met++; reasons.push(`VIX ${vix.toFixed(1)} > 30 (가중치 1.0)`); }
-  else { unmetReasons.push('VIX 30 초과 조건 미충족 (가중치 1.0 미충족)'); }
+  total += 1; weightedMax += 1.5;
+  if (vix !== null && vix > 30) { met++; weightedMet += 1.5; reasons.push(`VIX ${vix.toFixed(1)} > 30 (가중치 1.5)`); }
+  else { unmetReasons.push('VIX 30 초과 조건 미충족 (가중치 1.5 미충족)'); }
 
   // 11차 이격도 계층화 (2026-04): 영상1 전략C "이격도 -25% 이하 = 평균회귀 최강" 정합.
   //   기존 -10% 저점 조건은 "관찰 시작" 레벨이라 영상 근거 약함. 극저점(-25%) 시 +1 추가
   //   가점으로 영상 정합 보강 (저점 확신도 차등화).
   const disparity = dv(derived, 'NASDAQ_DISPARITY');
-  total += 1;
+  total += 1; weightedMax += 1.0;
   if (disparity !== null && disparity <= -25) {
-    met += 2;
-    reasons.push(`✓ 이격도 ${disparity.toFixed(1)}% ≤ -25% (영상1 §전략C 극저점, 보너스 +1, 총 2점)`);
+    met += 2; weightedMet += 2.0;
+    reasons.push(`✓ 이격도 ${disparity.toFixed(1)}% ≤ -25% (영상1 §전략C 극저점, 보너스 +1, 총 2점, 가중치 2.0)`);
   } else if (disparity !== null && disparity < -10) {
-    met++;
+    met++; weightedMet += 1.0;
     reasons.push(`이격도 ${disparity.toFixed(1)}% < -10% (약한 저점 관찰, 가중치 1.0)`);
   } else if (disparity !== null) {
     unmetReasons.push(`이격도 ${disparity.toFixed(1)}% → -10% 미만 미충족 (가중치 1.0 미충족)`);
@@ -287,9 +293,9 @@ function nasdaqSignal(
   }
 
   const fng = v(raw, 'FEAR_GREED');
-  total += 1;
-  if (fng !== null && fng < 25) { met++; reasons.push(`F&G ${fng} < 25 (가중치 1.0)`); }
-  else { unmetReasons.push('Fear & Greed 25 미만 조건 미충족 (가중치 1.0 미충족)'); }
+  total += 1; weightedMax += 0.7;
+  if (fng !== null && fng < 25) { met++; weightedMet += 0.7; reasons.push(`F&G ${fng} < 25 (가중치 0.7)`); }
+  else { unmetReasons.push('Fear & Greed 25 미만 조건 미충족 (가중치 0.7 미충족)'); }
 
   // Fix #4: PSYCH_SUBSCORE 소비 — F&G · PC Ratio 10D · AAII · NAAIM 가중평균이 극공포(≤0.2) 면 보너스.
   // Fix #3(2차 감사): met++ 만 하던 것을 total++ 와 동기화 — "추가 조건 충족" 으로 승격.
@@ -298,12 +304,14 @@ function nasdaqSignal(
   if (psych !== null && psych <= 0.2) {
     met++;
     total++;
-    reasons.push(`심리 서브스코어 ${psych.toFixed(2)} ≤ 0.20 → 극공포 저점 가점 (+1 조건 추가)`);
+    weightedMet += 0.5;
+    weightedMax += 0.5;
+    reasons.push(`심리 서브스코어 ${psych.toFixed(2)} ≤ 0.20 → 극공포 저점 가점 (+1 조건 추가, 가중치 0.5)`);
   }
 
   // --- 유동성 카테고리 (1) ---
   // 단일 RRP tick 보다 완만한 유동성 종합점수 우선. 하루 내 잦은 flicker 를 줄이기 위해
-  total += 1;
+  total += 1; weightedMax += 1.0;
   // RRP/TGA/MMF/WRESBAL 평균 변화 + 글로벌 M2 를 합성한 LIQUIDITY_DIRECTION 을 본다.
   const liquidityDir = dv(derived, 'LIQUIDITY_DIRECTION');
   const rrpDir = dv(derived, 'RRP_DIRECTION');
@@ -312,7 +320,7 @@ function nasdaqSignal(
   const rrpLoosening = rrpDir !== null && rrpDir <= -1;
   const m2Expanding = globalM2 !== null && globalM2 > 0;
   if (liquidityExpanding || rrpLoosening || m2Expanding) {
-    met++;
+    met++; weightedMet += 1.0;
     reasons.push(
       `유동성 확장 (${liquidityExpanding ? `종합점수 ${liquidityDir?.toFixed(0)}` : ''}` +
       `${(liquidityExpanding && (rrpLoosening || m2Expanding)) ? ' · ' : ''}` +
@@ -326,19 +334,19 @@ function nasdaqSignal(
 
   // --- 정책 카테고리 (1) ---
   // 완화 방향 (policyDirection > 0: 금리인하·QE 기조) 이면 위험자산 우호.
-  total += 1;
+  total += 1; weightedMax += 1.5;
   const policy = profile.manualInputs?.policyDirection ?? 0;
   if (policy > 0) {
-    met++;
-    reasons.push(`정책 완화 방향 (policyDirection=${policy}, 가중치 1.0)`);
+    met++; weightedMet += 1.5;
+    reasons.push(`정책 완화 방향 (policyDirection=${policy}, 가중치 1.5)`);
   } else {
-    unmetReasons.push(`정책 완화 미충족 (policyDirection=${policy}, 가중치 1.0 미충족)`);
+    unmetReasons.push(`정책 완화 미충족 (policyDirection=${policy}, 가중치 1.5 미충족)`);
   }
 
   const cross = dv(derived, 'NASDAQ_CROSS');
   if (cross === -1) {
-    reasons.push('✓ 데드크로스 발생 → video3 §역발상 "공포 극점 = 분할매수 시작 구간" (보조조건 +1)');
-    met += 1;
+    reasons.push('✓ 데드크로스 발생 → video3 §역발상 "공포 극점 = 분할매수 시작 구간" (보조조건 +1, 가중치 0.7)');
+    met += 1; weightedMet += 0.7; weightedMax += 0.7;
   }
   else if (cross === 1) { unmetReasons.push('⚠️ 골든크로스 발생 → video3 §역발상 "이미 20-30% 오른 후 늦은 신호, 추격매수 주의" (보조조건)'); }
   else if (cross === -0.5) { reasons.push('역배열 유지 (50DMA < 200DMA, 보조조건)'); }
@@ -373,18 +381,19 @@ function nasdaqSignal(
   // video3 §15:02-15:55 — 3축 게이트 (RSI↑ + swing high break + W 패턴) → +2 (STRONG_BUY 가산).
   const wConfirmed = dv(derived, 'NASDAQ_W_BOTTOM_CONFIRMED');
   if (wConfirmed === 2) {
-    total += 2; met += 2;
-    reasons.push('✓ W_BOTTOM_CONFIRMED 3축 (RSI↑ + swing break + W 패턴, video3 §15:02)');
+    total += 2; met += 2; weightedMet += 2.0; weightedMax += 2.0;
+    reasons.push('✓ W_BOTTOM_CONFIRMED 3축 (RSI↑ + swing break + W 패턴, video3 §15:02, 가중치 2.0)');
   }
 
   // ★ === 29차 P2-C #19: EARNINGS_BEAT_RATIO_4Q ===
   // video6 §05:00 — megacap 어닝 평균 surprise.
   const earningsRatio = dv(derived, 'EARNINGS_BEAT_RATIO_4Q');
   if (earningsRatio === 1) {
-    total += 1; met += 1;
-    reasons.push('✓ 어닝 우호 — 평균 surprise ≥ +5% (video6 §05:00)');
+    total += 1; met += 1; weightedMet += 0.7; weightedMax += 0.7;
+    reasons.push('✓ 어닝 우호 — 평균 surprise ≥ +5% (video6 §05:00, 가중치 0.7)');
   } else if (earningsRatio === -1) {
-    unmetReasons.push('⚠️ 어닝 부정 — 평균 surprise ≤ -5% (video6 §05:00)');
+    weightedMax += 0.7;
+    unmetReasons.push('⚠️ 어닝 부정 — 평균 surprise ≤ -5% (video6 §05:00, 가중치 0.7 미충족)');
   }
 
   // ★ === 29차 P2-C #20: MULTIPLE_RATE_DECOUPLING_FLAG ===
@@ -398,16 +407,16 @@ function nasdaqSignal(
   // video6 §10:36 "VIX 80 = 10년 만의 매수 기회".
   const vixHistoric = dv(derived, 'VIX_HISTORIC_BUY_OPPORTUNITY');
   if (vixHistoric !== null && vixHistoric >= 2) {
-    total += 2; met += 2;
-    reasons.push(`✓ VIX_HISTORIC_BUY level=${vixHistoric} — video6 §10:36 "10년 매수 기회"`);
+    total += 2; met += 2; weightedMet += 2.0; weightedMax += 2.0;
+    reasons.push(`✓ VIX_HISTORIC_BUY level=${vixHistoric} — video6 §10:36 "10년 매수 기회" (가중치 2.0)`);
   }
 
   // ★ === 29차 P2-D #27: RETAIL_PANIC_SELL ===
   // video1 §03:06 "2020.3 저점 직후 한 달 개인 순매도 역대 최대" — 역발상 매수 신호.
   const retailPanic = dv(derived, 'RETAIL_PANIC_SELL');
   if (retailPanic === 1) {
-    total += 1; met += 1;
-    reasons.push('✓ RETAIL_PANIC_SELL — 개인 패닉 매도 환경 (역발상 매수, video1 §03:06)');
+    total += 1; met += 1; weightedMet += 0.7; weightedMax += 0.7;
+    reasons.push('✓ RETAIL_PANIC_SELL — 개인 패닉 매도 환경 (역발상 매수, video1 §03:06, 가중치 0.7)');
   }
 
   // ★ === 29차 P2-D #24: NASDAQ_RSI_OVERSOLD_DURATION_DAYS ===
@@ -421,11 +430,11 @@ function nasdaqSignal(
   // 노션 §OpenInsider — cluster 종목 수 ≥ 5 → +1 (역발상 buy 환경).
   const oiCluster = dv(derived, 'INSIDER_CLUSTER_PURCHASES_COUNT_50K');
   if (oiCluster === 2) {
-    total += 2; met += 2;
-    reasons.push('✓ OpenInsider $50K↑ cluster ≥10 종목 — 역발상 buy 환경 강 (노션 §OpenInsider)');
+    total += 2; met += 2; weightedMet += 1.4; weightedMax += 1.4;
+    reasons.push('✓ OpenInsider $50K↑ cluster ≥10 종목 — 역발상 buy 환경 강 (노션 §OpenInsider, 가중치 0.7×2)');
   } else if (oiCluster === 1) {
-    total += 1; met += 1;
-    reasons.push('✓ OpenInsider $50K↑ cluster ≥5 종목 — 역발상 buy 환경 (노션 §OpenInsider)');
+    total += 1; met += 1; weightedMet += 0.7; weightedMax += 0.7;
+    reasons.push('✓ OpenInsider $50K↑ cluster ≥5 종목 — 역발상 buy 환경 (노션 §OpenInsider, 가중치 0.7)');
   }
 
   const xlk = dv(derived, 'SECTOR_XLK');
@@ -435,8 +444,8 @@ function nasdaqSignal(
   // 14차 Phase B-2: W 반등 (video3 "W자 반등 저점 확인 후 진입")
   const wBottom = dv(derived, 'NASDAQ_W_BOTTOM');
   if (wBottom === 1) {
-    reasons.push('✓ NASDAQ_W_BOTTOM 감지 — 이중 저점 확인 후 반등 구조 (video3 분할매수 3차 타이밍)');
-    total += 1; met += 1;
+    reasons.push('✓ NASDAQ_W_BOTTOM 감지 — 이중 저점 확인 후 반등 구조 (video3 분할매수 3차 타이밍, 가중치 1.0)');
+    total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
   }
 
   // 15차 Phase 2 B3 + 23차 Tier 1#1: NASDAQ_DRAWDOWN_ATH 매수 본진 -34% 까지 확장
@@ -444,20 +453,22 @@ function nasdaqSignal(
   // 기회 구간: -20% ~ -34% (영상 명시 본진), 위험 구간: -34% 초과.
   const nqDd = dv(derived, 'NASDAQ_DRAWDOWN_ATH');
   if (nqDd !== null && nqDd <= -20 && nqDd >= -34) {
-    reasons.push(`✓ NASDAQ ATH 대비 ${nqDd.toFixed(1)}% 조정 (video1 §1부 "2020.3 -34% / 2022 -33% 본진 기회 구간")`);
-    total += 1; met += 1;
+    reasons.push(`✓ NASDAQ ATH 대비 ${nqDd.toFixed(1)}% 조정 (video1 §1부 "2020.3 -34% / 2022 -33% 본진 기회 구간", 가중치 1.5)`);
+    total += 1; met += 1; weightedMet += 1.5; weightedMax += 1.5;
   } else if (nqDd !== null && nqDd < -34 && nqDd >= -55) {
-    unmetReasons.push(`⚠️ NASDAQ ATH 대비 ${nqDd.toFixed(1)}% — 영상 본진(-30~-34%) 이탈, 시스템 위기(-55%) 경계`);
+    weightedMax += 1.5;
+    unmetReasons.push(`⚠️ NASDAQ ATH 대비 ${nqDd.toFixed(1)}% — 영상 본진(-30~-34%) 이탈, 시스템 위기(-55%) 경계 (가중치 1.5 미충족)`);
   } else if (nqDd !== null && nqDd < -55) {
-    unmetReasons.push(`🚨 NASDAQ ATH 대비 ${nqDd.toFixed(1)}% — video1 §"-55% 시스템 위기" 진입`);
+    weightedMax += 1.5;
+    unmetReasons.push(`🚨 NASDAQ ATH 대비 ${nqDd.toFixed(1)}% — video1 §"-55% 시스템 위기" 진입 (가중치 1.5 미충족)`);
   }
 
   // 15차 Phase 1 A1: NASDAQ_RSI_14 (video2 §22:51 RSI 중립/모멘텀 평가)
   const rsi = dv(derived, 'NASDAQ_RSI_14');
   if (rsi !== null) {
     if (rsi < 30) {
-      reasons.push(`✓ NASDAQ RSI ${rsi.toFixed(1)} < 30 과매도 — video2 §RSI 평균회귀 매수 구간`);
-      total += 1; met += 1;
+      reasons.push(`✓ NASDAQ RSI ${rsi.toFixed(1)} < 30 과매도 — video2 §RSI 평균회귀 매수 구간 (가중치 1.0)`);
+      total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
     } else if (rsi > 70) {
       unmetReasons.push(`⚠️ NASDAQ RSI ${rsi.toFixed(1)} > 70 과매수 — 추격 매수 주의`);
     }
@@ -483,12 +494,12 @@ function nasdaqSignal(
     const econDiv = dv(derived, 'ECONOMY_STOCK_DIVERGENCE');
     const wtiCuLag = dv(derived, 'WTI_COPPER_LAG_LEVEL');
     if (econDiv === 1) {
-      reasons.push('✓ ECONOMY_STOCK_DIVERGENCE 회복 저점 (ISM≥50 + 이격도<-10%) — 매수 기회');
-      total += 1; met += 1;
+      reasons.push('✓ ECONOMY_STOCK_DIVERGENCE 회복 저점 (ISM≥50 + 이격도<-10%) — 매수 기회 (가중치 1.0)');
+      total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
     }
     if (wtiCuLag === 1) {
-      reasons.push('✓ WTI_COPPER_LAG 회복 조기 (유가 과거 약세 → 구리 현재 강세, video2 §3부) +1');
-      total += 1; met += 1;
+      reasons.push('✓ WTI_COPPER_LAG 회복 조기 (유가 과거 약세 → 구리 현재 강세, video2 §3부, 가중치 1.0) +1');
+      total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
     }
   }
 
@@ -504,8 +515,8 @@ function nasdaqSignal(
       (stratChart ? 1 : 0) + (stratLiq ? 1 : 0) + (stratPolicy ? 1 : 0) +
       (stratGeo ? 1 : 0) + (stratMomentum ? 1 : 0);
     if (stratCount === 5) {
-      reasons.push('🟢🟢 video1 §전략B 5가지 동시 충족 (차트+유동성+정책+지정학+모멘텀) — 확신 깊이 최대, 보너스 +1');
-      total += 1; met += 1;
+      reasons.push('🟢🟢 video1 §전략B 5가지 동시 충족 (차트+유동성+정책+지정학+모멘텀) — 확신 깊이 최대, 보너스 +1 (가중치 0.5)');
+      total += 1; met += 1; weightedMet += 0.5; weightedMax += 0.5;
     } else if (stratCount >= 4) {
       reasons.push(`video1 §전략B 4/5 충족 — 관찰 수준 (보조조건)`);
     }
@@ -515,8 +526,8 @@ function nasdaqSignal(
   // 기존 <25 met++ 와 중복 피하기 위해 tier -1 (공포) 구간만 추가 가점.
   const fngTier = dv(derived, 'FNG_TIER');
   if (fngTier === -1) {
-    reasons.push('F&G 공포 구간 (tier -1, 25-44) — 매수 기회 보조조건 +1');
-    met += 1;
+    reasons.push('F&G 공포 구간 (tier -1, 25-44) — 매수 기회 보조조건 +1 (가중치 0.7)');
+    met += 1; weightedMet += 0.7; weightedMax += 0.7;
   } else if (fngTier === 1) {
     unmetReasons.push('⚠️ F&G 탐욕 구간 (tier +1, 56-74) — 신규 매수 주의 (보조조건)');
   }
@@ -534,18 +545,19 @@ function nasdaqSignal(
   // video2 §13:42-13:49 "ISM 반등 + 금구리비 하락 전환 + ICSA 감소" 동시 충족 시 +1.
   const recoveryLvl = dv(derived, 'RECOVERY_TRIPLE_SIGNAL');
   if (recoveryLvl !== null && recoveryLvl >= 2) {
-    reasons.push('✓ 회복 3축 충족 (video2 §13:42)');
-    total += 1; met += 1;
+    reasons.push('✓ 회복 3축 충족 (video2 §13:42, 가중치 2.0)');
+    total += 1; met += 1; weightedMet += 2.0; weightedMax += 2.0;
   } else if (recoveryLvl !== null && recoveryLvl >= 1) {
-    reasons.push('✓ 회복 2축 (video2 §13:42 보조)');
+    reasons.push('✓ 회복 2축 (video2 §13:42 보조, 가중치 1.0)');
+    weightedMet += 1.0; weightedMax += 1.0;
   }
 
   // ★ === 29차 P1-C #9: NASDAQ_HEALTHY_PULLBACK — 정배열 분할매수 가산 ===
   // video3 §05:12-05:25 "정배열에서 50DMA -3~-8% pullback".
   const healthyPullback = dv(derived, 'NASDAQ_HEALTHY_PULLBACK');
   if (healthyPullback === 1) {
-    reasons.push('✓ 정배열 healthy pullback (video3 §05:12)');
-    total += 1; met += 1;
+    reasons.push('✓ 정배열 healthy pullback (video3 §05:12, 가중치 1.0)');
+    total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
   } else if (healthyPullback === -1) {
     unmetReasons.push('⚠️ 역배열 + 50DMA pullback — 대기 (video3 §05:25)');
   }
@@ -556,8 +568,8 @@ function nasdaqSignal(
       signal: 'SELL',
       conditionsMet: met,
       conditionsTotal: total,
-      weightedScore: met,
-      weightedMaxScore: total,
+      weightedScore: weightedMet,
+      weightedMaxScore: weightedMax,
       reasons: ['200DMA 하회 + 실업수당 30만 초과 → 구조적 위험'],
       unmetReasons,
       date: new Date().toISOString().split('T')[0],
@@ -612,8 +624,8 @@ function nasdaqSignal(
   }
   // RR ≥ 3 시 BUY 가산 (저점 기회)
   if (rrRatio !== null && rrRatio >= 3 && disparity !== null && disparity < 0) {
-    met += 1; total += 1;
-    reasons.push(`✓ 손익비 1:${rrRatio.toFixed(1)} 우호 + 이격 음수 (video6 §"손익비 본진", +1)`);
+    met += 1; total += 1; weightedMet += 1.0; weightedMax += 1.0;
+    reasons.push(`✓ 손익비 1:${rrRatio.toFixed(1)} 우호 + 이격 음수 (video6 §"손익비 본진", +1, 가중치 1.0)`);
   }
   const chaseWarning = dv(derived, 'NASDAQ_CHASE_WARNING');
   if (chaseWarning === 1) overheatFlags.push('CHASE_WARNING (이격률 ±15% 20일 지속)');
@@ -622,11 +634,11 @@ function nasdaqSignal(
   // video2 §22:45 + video6 — horizon 별 daily/weekly 정합 평가.
   const timeframeSplit = dv(derived, 'TIMEFRAME_DECISION_SPLIT');
   if (timeframeSplit === 1) {
-    reasons.push('✓ TIMEFRAME_DECISION_SPLIT=+1 (horizon 정합, video2 §22:45)');
-    total += 1; met += 1;
+    reasons.push('✓ TIMEFRAME_DECISION_SPLIT=+1 (horizon 정합, video2 §22:45, 가중치 0.7)');
+    total += 1; met += 1; weightedMet += 0.7; weightedMax += 0.7;
   } else if (timeframeSplit === -1) {
-    unmetReasons.push('⚠️ TIMEFRAME_DECISION_SPLIT=-1 (horizon 미정합, video2 §22:45)');
-    total += 1; met = Math.max(0, met - 1);
+    unmetReasons.push('⚠️ TIMEFRAME_DECISION_SPLIT=-1 (horizon 미정합, video2 §22:45, 가중치 0.7 미충족)');
+    total += 1; met = Math.max(0, met - 1); weightedMax += 0.7;
   }
 
   // ★ === 29차 P1-D #11: NASDAQ_FORWARD_PER overheat / met 가산 ===
@@ -636,8 +648,8 @@ function nasdaqSignal(
     overheatFlags.push(`PER ${fwdPER.toFixed(1)}+ 멀티플 과열 (video6 §"좋은 가격")`);
   }
   if (fwdPER !== null && fwdPER <= 12) {
-    reasons.push(`✓ PER ${fwdPER.toFixed(1)} ≤ 12 매수 우호 (video6 §05:54)`);
-    total += 1; met += 1;
+    reasons.push(`✓ PER ${fwdPER.toFixed(1)} ≤ 12 매수 우호 (video6 §05:54, 가중치 1.0)`);
+    total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
   }
 
   // ★ === 29차 P1-C #7+#8+#10: NASDAQ 차트 패턴 overheat 가산 ===
@@ -710,8 +722,8 @@ function nasdaqSignal(
   // ★ === 29차 P3-C #14: COPPER_LEAD_DIVERGENCE_60D — 60D 명시 보강 ===
   const copperLead60 = dv(derived, 'COPPER_LEAD_DIVERGENCE_60D');
   if (copperLead60 === 1) {
-    total += 1; met += 1;
-    reasons.push('✓ 구리 60D ≥+5% + S&P 횡보 — 회복 선행 (video2 §13:08)');
+    total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
+    reasons.push('✓ 구리 60D ≥+5% + S&P 횡보 — 회복 선행 (video2 §13:08, 가중치 1.0)');
   } else if (copperLead60 === -1) {
     unmetReasons.push('⚠️ 구리 60D ≤-3% + S&P 양수 — 경고 선행 (video2 §13:08)');
   }
@@ -719,8 +731,8 @@ function nasdaqSignal(
   // ★ === 29차 P3-C #16: ENTRY_TIMING_QUINTILE ===
   const entryQ = dv(derived, 'ENTRY_TIMING_QUINTILE');
   if (entryQ === 1) {
-    total += 1; met += 1;
-    reasons.push('✓ ENTRY_TIMING_QUINTILE=하위 20% (매수 우호, video1 §01:24 "타이밍이 목적지 결정")');
+    total += 1; met += 1; weightedMet += 0.7; weightedMax += 0.7;
+    reasons.push('✓ ENTRY_TIMING_QUINTILE=하위 20% (매수 우호, video1 §01:24 "타이밍이 목적지 결정", 가중치 0.7)');
   } else if (entryQ === -1) {
     unmetReasons.push('⚠️ ENTRY_TIMING_QUINTILE=상위 20% (추격 주의, video1 §01:24)');
   }
@@ -729,8 +741,8 @@ function nasdaqSignal(
   const ch15y = dv(derived, 'NASDAQ_15Y_CHANNEL_POSITION');
   if (ch15y !== null) {
     if (ch15y <= -2) {
-      total += 1; met += 1;
-      reasons.push('✓ NASDAQ 15Y 채널 -1σ 이하 (구조적 매수 강, video3 §09:48)');
+      total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
+      reasons.push('✓ NASDAQ 15Y 채널 -1σ 이하 (구조적 매수 강, video3 §09:48, 가중치 1.0)');
     } else if (ch15y === -1) {
       reasons.push('✓ NASDAQ 15Y 채널 -1σ~0 (보조, video3 §09:48)');
     } else if (ch15y === 2) {
@@ -741,15 +753,15 @@ function nasdaqSignal(
   // ★ === 29차 P3-C #19: NASDAQ_PIN_BAR_NEXT_YEAR_BULLISH_RATE — 참조 통계 가산 ===
   const pinRate = dv(derived, 'NASDAQ_PIN_BAR_NEXT_YEAR_BULLISH_RATE');
   if (pinRate !== null && pinRate >= 0.7) {
-    total += 0.5; met += 0.5;
-    reasons.push(`✓ yearly pin bar 다음 해 양봉 ${(pinRate * 100).toFixed(0)}% (참조 통계, video3 §09:09 "100%")`);
+    total += 0.5; met += 0.5; weightedMet += 0.5; weightedMax += 0.5;
+    reasons.push(`✓ yearly pin bar 다음 해 양봉 ${(pinRate * 100).toFixed(0)}% (참조 통계, video3 §09:09 "100%", 가중치 0.5)`);
   }
 
   // ★ === 29차 P3-E #30: EARNINGS_SURPRISE_AGGREGATE_FLAG ===
   const earningsAgg = dv(derived, 'EARNINGS_SURPRISE_AGGREGATE_FLAG');
   if (earningsAgg === 1) {
-    total += 1; met += 1;
-    reasons.push('✓ 메가캡 평균 surprise ≥+5% — NASDAQ 우호 (video4 §06)');
+    total += 1; met += 1; weightedMet += 0.7; weightedMax += 0.7;
+    reasons.push('✓ 메가캡 평균 surprise ≥+5% — NASDAQ 우호 (video4 §06, 가중치 0.7)');
   } else if (earningsAgg === -1) {
     unmetReasons.push('⚠️ 메가캡 평균 surprise ≤-5% — NASDAQ 위협 (video4 §06)');
   }
@@ -796,6 +808,8 @@ function nasdaqSignal(
   //   total 동기화 안 돼 met/total > 100% 가능. PSYCH 외 가점은 "강도 가산"으로 보고 met cap = total.
   //   비율 신뢰성 확보 + STRONG_BUY 자동 도달 차단.
   if (met > total) met = total;
+  // 29차 fix-A part 2: weightedMet cap — weightedMax 초과 방지.
+  if (weightedMet > weightedMax) weightedMet = weightedMax;
 
   // 29차 fix-E: baseSignal 결정 — 모든 met/total 가산 + cap 후 호출.
   //   19차: NASDAQ STRONG_BUY 임계 1단 상향 — BUY 영역 1 met → 2 met 확보.
@@ -881,8 +895,8 @@ function nasdaqSignal(
     signal,
     conditionsMet: met,
     conditionsTotal: total,
-    weightedScore: met,
-    weightedMaxScore: total,
+    weightedScore: weightedMet,
+    weightedMaxScore: weightedMax,
     reasons,
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
