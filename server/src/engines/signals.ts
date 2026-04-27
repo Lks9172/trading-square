@@ -1633,26 +1633,32 @@ function kospiSignal(
   // 29차 fix-H: total 을 0 에서 시작, 핵심 if/else 분기마다 total += 1 먼저 가산.
   //   미충족 조건도 total 에 카운트되어야 분수 정합 — UI "7/7 misleading" 수정.
   let total = 0;
+  // 29차 fix-A part 3: 가중치 차등화 — weightedMet / weightedMax 추적.
+  //   영상 강조도 매트릭스: 2.0=영상핵심정합, 1.5=영상핵심분기, 1.0=영상표준, 0.7=영상보조, 0.5=참조/보너스.
+  //   met/total 정수 카운트는 유지 (baseSignal 임계치 계산에 사용).
+  //   weightedScore != conditionsMet 확인으로 차등화 활성 검증.
+  let weightedMet = 0;
+  let weightedMax = 0;
 
   const above200 = dv(derived, 'KOSPI_ABOVE_200DMA');
-  total += 1;
-  if (above200 === 0) { met++; reasons.push('코스피 200DMA 하회 (가중치 1.0)'); }
+  total += 1; weightedMax += 1.0;
+  if (above200 === 0) { met++; weightedMet += 1.0; reasons.push('코스피 200DMA 하회 (가중치 1.0)'); }
   else { unmetReasons.push('코스피 200DMA 상회 중 (가중치 1.0 미충족)'); }
 
   const fxLevel = dv(derived, 'KRW_FX_LEVEL');
-  total += 1;
-  if (fxLevel !== null && fxLevel >= 1) { met++; reasons.push(`환율 우호 (레벨 ${fxLevel}, 가중치 1.0)`); }
-  else { unmetReasons.push('환율 1480원 이하 조건 미충족 (가중치 1.0 미충족)'); }
+  total += 1; weightedMax += 1.5;
+  if (fxLevel !== null && fxLevel >= 1) { met++; weightedMet += 1.5; reasons.push(`환율 우호 (레벨 ${fxLevel}, 가중치 1.5)`); }
+  else { unmetReasons.push('환율 1480원 이하 조건 미충족 (가중치 1.5 미충족)'); }
 
   const disparity = dv(derived, 'KOSPI_DISPARITY');
   // 11차 이격도 계층화 (2026-04): stt_kospi 에 구체 수치 근거 없으나 역사적 "75% 상승 후
   //   조정 통상 15-30%" 범위 기반. 극저점(-25%) 시 +1 추가 가점 — 2025년 2~3월 수준 대응.
-  total += 1;
+  total += 1; weightedMax += 1.0;
   if (disparity !== null && disparity <= -25) {
-    met += 2;
-    reasons.push(`✓ 코스피 이격도 ${disparity.toFixed(1)}% ≤ -25% (stt_kospi "역대급 하락" 수준, 보너스 +1, 총 2점)`);
+    met += 2; weightedMet += 2.0;
+    reasons.push(`✓ 코스피 이격도 ${disparity.toFixed(1)}% ≤ -25% (stt_kospi "역대급 하락" 수준, 보너스 +1, 총 2점, 가중치 2.0)`);
   } else if (disparity !== null && disparity < -15) {
-    met++;
+    met++; weightedMet += 1.0;
     reasons.push(`코스피 이격도 ${disparity.toFixed(1)}% < -15% (실용 저점 임계, 가중치 1.0)`);
   } else {
     unmetReasons.push('코스피 이격도 -15% 이하 조건 미충족 (가중치 1.0 미충족)');
@@ -1662,21 +1668,21 @@ function kospiSignal(
   //   100달러 재돌파 경고" 정합을 위해 WTI 임계 80→65 로 강화 (영상 기준 60 + 여유 5).
   //   기존 80 은 영상의 "위험 구간 75-85" 상단이라 안정 판정 기준으로 부적절.
   const wti = v(raw, 'WTI');
-  total += 1;
-  if (wti !== null && wti < 65) { met++; reasons.push(`유가 $${wti.toFixed(1)} < $65 안정 (영상5 §Takeaway, 가중치 1.0)`); }
+  total += 1; weightedMax += 1.0;
+  if (wti !== null && wti < 65) { met++; weightedMet += 1.0; reasons.push(`유가 $${wti.toFixed(1)} < $65 안정 (영상5 §Takeaway, 가중치 1.0)`); }
   else { unmetReasons.push('유가 $65 미만 조건 미충족 (영상 "60달러대 안정", 가중치 1.0 미충족)'); }
 
   const chaseKospi = dv(derived, 'CHASE_KOSPI');
   if (chaseKospi !== null && chaseKospi > 15) { unmetReasons.push(`⚠️ 코스피 20일 +${chaseKospi.toFixed(1)}% → 추격매수 주의 (보조조건)`); }
 
   const vix = v(raw, 'VIXCLS');
-  total += 1;
-  if (vix !== null && vix < 25) { met++; reasons.push(`VIX ${vix.toFixed(1)} < 25 안정 (가중치 1.0)`); }
+  total += 1; weightedMax += 1.0;
+  if (vix !== null && vix < 25) { met++; weightedMet += 1.0; reasons.push(`VIX ${vix.toFixed(1)} < 25 안정 (가중치 1.0)`); }
   else { unmetReasons.push('VIX 25 미만 조건 미충족 (가중치 1.0 미충족)'); }
 
   const volumeConfirm = dv(derived, 'KOSPI_VOLUME_CONFIRM');
-  total += 1;
-  if (volumeConfirm === 1) { met++; reasons.push('거래량 확인 (최근5일 평균 >= 20일 평균의 110%, 가중치 1.0)'); }
+  total += 1; weightedMax += 1.0;
+  if (volumeConfirm === 1) { met++; weightedMet += 1.0; reasons.push('거래량 확인 (최근5일 평균 >= 20일 평균의 110%, 가중치 1.0)'); }
   else { unmetReasons.push('거래량 지속 조건 미충족 (가중치 1.0 미충족)'); }
 
   // Fix #4: USDKRW_WEEKLY_CHANNEL_POSITION 소비 — 5년 주봉 회귀채널 내 위치(0~1).
@@ -1710,9 +1716,9 @@ function kospiSignal(
   const foreignBuyStreak = dv(derived, 'KOSPI_FOREIGN_BUY_STREAK');
   const foreignSellStreak = dv(derived, 'KOSPI_FOREIGN_SELL_STREAK');
   const foreignExtreme = dv(derived, 'KOSPI_FOREIGN_EXTREME');
-  total += 1;
+  total += 1; weightedMax += 1.0;
   if (foreignNet20D !== null && foreignNet20D > 0) {
-    met++;
+    met++; weightedMet += 1.0;
     const trendTag = foreignTrend !== null && foreignTrend > 0 ? ' + 추세 가속' : '';
     const streakTag = foreignBuyStreak !== null && foreignBuyStreak >= 5 ? ` · ${foreignBuyStreak}일 연속 매수` : '';
     reasons.push(`외국인 20일 순매수 ${foreignNet20D >= 0 ? '+' : ''}${Math.round(foreignNet20D).toLocaleString('en-US')}억${trendTag}${streakTag} (가중치 1.0)`);
@@ -1758,8 +1764,8 @@ function kospiSignal(
       signal: 'SELL',
       conditionsMet: met,
       conditionsTotal: total,
-      weightedScore: met,
-      weightedMaxScore: total,
+      weightedScore: weightedMet,
+      weightedMaxScore: weightedMax,
       reasons: ['코스피 200DMA 하회 + 환율 1500원 돌파 → 외국인 매도 압력 극대화'],
       unmetReasons,
       date: new Date().toISOString().split('T')[0],
@@ -1784,37 +1790,37 @@ function kospiSignal(
   // stt_kospi §03:28 "직전 월봉 음봉 5%+ 후 현재 월봉이 직전 시가 회복 = 매수 신호".
   const monthlyCover = dv(derived, 'KOSPI_MONTHLY_BEAR_COVER_FLAG');
   if (monthlyCover === 1) {
-    reasons.push('✓ 월봉 회복 (직전 음봉 5%+ → 현재 월봉 시가 돌파, stt_kospi §03:28)');
-    total += 1; met += 1;
+    reasons.push('✓ 월봉 회복 (직전 음봉 5%+ → 현재 월봉 시가 돌파, stt_kospi §03:28, 가중치 1.0)');
+    total += 1; met += 1; weightedMax += 1.0; weightedMet += 1.0;
   }
 
   // ★ === 29차 P1-D #13: KOSPI_FOREIGN_STREAK_DAYS + OVERSELL_30T ===
   // stt_kospi §3-1 "외국인 5일+ 연속 매수 = 추세 복귀 / 60D 누적 -30조 = 공황 매도".
   const foreignStreakDays = dv(derived, 'KOSPI_FOREIGN_STREAK_DAYS');
   if (foreignStreakDays !== null && foreignStreakDays >= 5) {
-    reasons.push(`✓ 외국인 ${foreignStreakDays}일 연속 순매수 (stt_kospi §3-1 "추세 복귀")`);
-    total += 1; met += 1;
+    reasons.push(`✓ 외국인 ${foreignStreakDays}일 연속 순매수 (stt_kospi §3-1 "추세 복귀", 가중치 1.5)`);
+    total += 1; met += 1; weightedMax += 1.5; weightedMet += 1.5;
   }
   const oversell30T = dv(derived, 'KOSPI_FOREIGN_OVERSELL_30T_FLAG');
   if (oversell30T === 1) {
-    reasons.push('✓ 외국인 60D 누적 -30조 매도 — 반발 후보 (stt_kospi §3-1)');
-    total += 1; met += 1;
+    reasons.push('✓ 외국인 60D 누적 -30조 매도 — 반발 후보 (stt_kospi §3-1, 가중치 1.5)');
+    total += 1; met += 1; weightedMax += 1.5; weightedMet += 1.5;
   }
 
   // ★ === 29차 P1-D #14: KRW_FX_REVERSAL_TRIGGER ===
   // stt_kospi §11:39 "환율 1480↓ 5일 연속 + 외인 복귀 streak ≥+5 = 환율 반전 + 외인 복귀 정합".
   const fxReversal = dv(derived, 'KRW_FX_REVERSAL_TRIGGER');
   if (fxReversal === 1) {
-    reasons.push('✓ 환율 반전 + 외인 복귀 정합 (stt_kospi §11:39)');
-    total += 1; met += 1;
+    reasons.push('✓ 환율 반전 + 외인 복귀 정합 (stt_kospi §11:39, 가중치 1.5)');
+    total += 1; met += 1; weightedMax += 1.5; weightedMet += 1.5;
   }
 
   // ★ === 29차 P2-C #17: KOSPI_PBR ===
   // video6 §05:55 — < 0.9 → +1 / > 2.0 → -1.
   const kospiPbrLvl = dv(derived, 'KOSPI_PBR');
   if (kospiPbrLvl === 1) {
-    total += 1; met += 1;
-    reasons.push('✓ KOSPI PBR < 0.9 (밸류 우호, video6 §05:55)');
+    total += 1; met += 1; weightedMax += 1.0; weightedMet += 1.0;
+    reasons.push('✓ KOSPI PBR < 0.9 (밸류 우호, video6 §05:55, 가중치 1.0)');
   } else if (kospiPbrLvl === -1) {
     unmetReasons.push('⚠️ KOSPI PBR > 2.0 (밸류 과열, video6 §05:55)');
   }
@@ -1823,8 +1829,8 @@ function kospiSignal(
   // video6 §04:35 — ≥10 → +1 / <5 → -1.
   const kospiRoeLvl = dv(derived, 'KOSPI_AGGREGATE_ROE');
   if (kospiRoeLvl === 1) {
-    total += 1; met += 1;
-    reasons.push('✓ KOSPI 합산 ROE ≥ 10% (video6 §04:35)');
+    total += 1; met += 1; weightedMax += 0.7; weightedMet += 0.7;
+    reasons.push('✓ KOSPI 합산 ROE ≥ 10% (video6 §04:35, 가중치 0.7)');
   } else if (kospiRoeLvl === -1) {
     unmetReasons.push('⚠️ KOSPI 합산 ROE < 5% (video6 §04:35)');
   }
@@ -1834,9 +1840,14 @@ function kospiSignal(
   // 단발 trendConfirmCount 평가를 level≥1 (연속 3일+) 게이트로 승격. level=2 시 STRONG_BUY 우호.
   const kRecLevel = dv(derived, 'KOSPI_RECOVERY_3AXIS_LEVEL');
   const kRecDays = dv(derived, 'KOSPI_RECOVERY_TRIO_DAYS');
-  if (kRecLevel !== null && kRecLevel >= 1) {
-    reasons.push(`✓ KOSPI 회복 3축 ${kRecDays ?? 0}일 연속 (level=${kRecLevel}, stt_kospi §05:35)`);
-    total += 1; met += 1;
+  if (kRecLevel !== null && kRecLevel >= 2) {
+    const recWeight = 2.0;
+    reasons.push(`✓ KOSPI 회복 3축 ${kRecDays ?? 0}일 연속 (level=${kRecLevel}, stt_kospi §05:35, 가중치 2.0)`);
+    total += 1; met += 1; weightedMax += recWeight; weightedMet += recWeight;
+  } else if (kRecLevel !== null && kRecLevel >= 1) {
+    const recWeight = 0.7;
+    reasons.push(`✓ KOSPI 회복 3축 ${kRecDays ?? 0}일 연속 (level=${kRecLevel}, stt_kospi §05:35, 가중치 0.7)`);
+    total += 1; met += 1; weightedMax += recWeight; weightedMet += recWeight;
   }
 
   // 15차 Phase 1+2: KOSPI RSI + DRAWDOWN_ATH
@@ -1844,23 +1855,23 @@ function kospiSignal(
   const kRsi = dv(derived, 'KOSPI_RSI_14');
   if (kRsi !== null) {
     if (kRsi < 30) {
-      reasons.push(`✓ KOSPI RSI ${kRsi.toFixed(1)} < 30 과매도 (video2 §RSI 정합, 29차 P2-D #24 임계 정렬)`);
-      total += 1; met += 1;
+      reasons.push(`✓ KOSPI RSI ${kRsi.toFixed(1)} < 30 과매도 (video2 §RSI 정합, 29차 P2-D #24 임계 정렬, 가중치 1.0)`);
+      total += 1; met += 1; weightedMax += 1.0; weightedMet += 1.0;
     } else if (kRsi > 70) {
       unmetReasons.push(`⚠️ KOSPI RSI ${kRsi.toFixed(1)} 과매수 — 추격 주의`);
     }
   }
   const kDd = dv(derived, 'KOSPI_DRAWDOWN_ATH');
   if (kDd !== null && kDd <= -15 && kDd >= -30) {
-    reasons.push(`✓ KOSPI ATH 대비 ${kDd.toFixed(1)}% 조정 (stt_kospi "75% 상승 후 통상 15-30% 조정" 범위)`);
-    total += 1; met += 1;
+    reasons.push(`✓ KOSPI ATH 대비 ${kDd.toFixed(1)}% 조정 (stt_kospi "75% 상승 후 통상 15-30% 조정" 범위, 가중치 1.0)`);
+    total += 1; met += 1; weightedMax += 1.0; weightedMet += 1.0;
   }
 
   // 14차 Phase B-2: KOSPI W 반등 + 연봉 아래꼬리 지수 reason 노출
   const kWBottom = dv(derived, 'KOSPI_W_BOTTOM');
   if (kWBottom === 1) {
-    reasons.push('✓ KOSPI_W_BOTTOM 감지 — 이중 저점 확인 (video3 분할매수 3차)');
-    total += 1; met += 1;
+    reasons.push('✓ KOSPI_W_BOTTOM 확정 — 이중 저점 확인 (video3 분할매수 3차, 가중치 2.0)');
+    total += 1; met += 1; weightedMax += 2.0; weightedMet += 2.0;
   }
   const kAreaLevel = dv(derived, 'KOSPI_YEARLY_AREA_LEVEL');
   if (kAreaLevel === -1) {
@@ -1879,32 +1890,32 @@ function kospiSignal(
   // ★ === 29차 P2-E #31: KOSPI_HALFYEAR_UPPER_WICK_THRESHOLD (met 가산만 사전 처리, 강등은 override 단계) ===
   const kospiWickThr = dv(derived, 'KOSPI_HALFYEAR_UPPER_WICK_THRESHOLD');
   if (kospiWickThr === 1) {
-    reasons.push('✓ 반기봉 윗꼬리 < 15% (stt_kospi §03:18)');
-    total += 1; met += 1;
+    reasons.push('✓ 반기봉 윗꼬리 < 15% (stt_kospi §03:18, 가중치 0.7)');
+    total += 1; met += 1; weightedMax += 0.7; weightedMet += 0.7;
   }
 
   // ★ === 29차 P3-B #7: KR_BOK_LOCKED_FLAG → KOSPI -1 패널티 ===
   // stt_kospi §09:55 "한은 사방이 막힌 미로".
   const bokLocked = dv(derived, 'KR_BOK_LOCKED_FLAG');
   if (bokLocked === 1) {
-    total += 1; met = Math.max(0, met - 1);
-    unmetReasons.push('⚠️ KR_BOK_LOCKED_FLAG=1 — 한은 정책 무력 (USDKRW≥1500 OR 가계부채>100% OR CPI≥3, KOSPI -1, stt_kospi §09:55)');
+    total += 1; met = Math.max(0, met - 1); weightedMax += 0.5;
+    unmetReasons.push('⚠️ KR_BOK_LOCKED_FLAG=1 — 한은 정책 무력 (USDKRW≥1500 OR 가계부채>100% OR CPI≥3, KOSPI -1, stt_kospi §09:55, 가중치 0.5)');
   }
 
   // ★ === 29차 P3-B #8: WGBI_INFLOW_TAILWIND → +1 가점 ===
   // stt_kospi §09:33 "WGBI 편입 외국인 자금 유입".
   const wgbiTw = dv(derived, 'WGBI_INFLOW_TAILWIND');
   if (wgbiTw === 1) {
-    total += 1; met += 1;
-    reasons.push('✓ WGBI 편입 window + 환율 안정 (외국인 자금 유입 기반, stt_kospi §09:33)');
+    total += 1; met += 1; weightedMax += 1.0; weightedMet += 1.0;
+    reasons.push('✓ WGBI 편입 window + 환율 안정 (외국인 자금 유입 기반, stt_kospi §09:33, 가중치 1.0)');
   }
 
   // ★ === 29차 P3-B #9: KR_FISCAL_LAG_PROGRESS_DAYS → 효과 반영 시점 가산 ===
   // stt_kospi §10:30 "추경 27조 → 6개월 후 효과".
   const fiscalProg = dv(derived, 'KR_FISCAL_LAG_PROGRESS_DAYS');
   if (fiscalProg !== null && fiscalProg >= 1) {
-    total += 1; met += 1;
-    reasons.push('✓ 추경 효과 반영 시점 도달 (D+180 경과, stt_kospi §10:30)');
+    total += 1; met += 1; weightedMax += 0.5; weightedMet += 0.5;
+    reasons.push('✓ 추경 효과 반영 시점 도달 (D+180 경과, stt_kospi §10:30, 가중치 0.5)');
   } else if (fiscalProg !== null && fiscalProg >= 0.5) {
     reasons.push('🟡 추경 효과 절반 진입 (보조, stt_kospi §10:30)');
   }
@@ -1912,8 +1923,8 @@ function kospiSignal(
   // ★ === 29차 P3-E #28: KRX_PENSION_FUND_FLOW — 연기금 5D +1조 가점 ===
   const pensionFlow = dv(derived, 'KRX_PENSION_FUND_FLOW');
   if (pensionFlow === 1) {
-    total += 1; met += 1;
-    reasons.push('✓ KRX 연기금 5D ≥ +1조 — 안정적 매수 기반 (보조)');
+    total += 1; met += 1; weightedMax += 0.5; weightedMet += 0.5;
+    reasons.push('✓ KRX 연기금 5D ≥ +1조 — 안정적 매수 기반 (보조, 가중치 0.5)');
   } else if (pensionFlow === -1) {
     unmetReasons.push('⚠️ KRX 연기금 5D ≤ -1조 — 매도 압력 (보조)');
   }
@@ -1921,8 +1932,8 @@ function kospiSignal(
   // ★ === 29차 P3-E #29: KRX_SHORT_INTEREST_LEVEL — 숏스퀴즈 후보 ===
   const shortLvl = dv(derived, 'KRX_SHORT_INTEREST_LEVEL');
   if (shortLvl === 2) {
-    total += 1; met += 1;
-    reasons.push('✓ 공매도 ≥5% — 강 숏스퀴즈 후보 (video6 §06:31)');
+    total += 1; met += 1; weightedMax += 0.5; weightedMet += 0.5;
+    reasons.push('✓ 공매도 ≥5% — 강 숏스퀴즈 후보 (video6 §06:31, 가중치 0.5)');
   } else if (shortLvl === 1) {
     reasons.push('✓ 공매도 ≥3% — 숏스퀴즈 후보 (video6 §06:31, 보조)');
   }
@@ -1948,14 +1959,16 @@ function kospiSignal(
   // stt_kospi §"주간 평균 20조" — tier +1/0/-1.
   const volTier = dv(derived, 'KOSPI_VOLUME_TIER');
   if (volTier === 1) {
-    reasons.push('✓ KOSPI 거래량 tier+1 (≥20조 지속성 강, stt_kospi)');
-    total += 1; met += 1;
+    reasons.push('✓ KOSPI 거래량 tier+1 (≥20조 지속성 강, stt_kospi, 가중치 1.0)');
+    total += 1; met += 1; weightedMax += 1.0; weightedMet += 1.0;
   } else if (volTier === -1) {
     unmetReasons.push('⚠️ KOSPI 거래량 tier-1 (<15조 관심 약화, stt_kospi)');
   }
 
   // 29차 fix-B: KOSPI met cap (NASDAQ 와 동일 패턴) — 모든 가산 후 비율 정상화.
   if (met > total) met = total;
+  // 29차 fix-A part 3: weightedMet cap.
+  if (weightedMet > weightedMax) weightedMet = weightedMax;
 
   // 29차 fix-E: baseSignal 결정 — 모든 met/total 가산 + cap 후 호출.
   // Fix #1: total=7 기준 [2,3,4] 에 REDUCE/SELL 하한을 명시. 기존 HOLD 시작 met=2 는 유지하고
@@ -2091,8 +2104,8 @@ function kospiSignal(
     signal,
     conditionsMet: met,
     conditionsTotal: total,
-    weightedScore: met,
-    weightedMaxScore: total,
+    weightedScore: weightedMet,
+    weightedMaxScore: weightedMax,
     reasons,
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
