@@ -1064,6 +1064,41 @@ function nasdaqSignal(
 
 
 
+    // ★ === 30차 P2-B #8: BESSENT_WARSH_DOVISH_SHIFT_LEVEL — met 가산 ===
+  // video4 §04:00 "베센트/워시 비둘기 shift → 정책 완화 임박"
+  const bessentWarsh = dv(derived, 'BESSENT_WARSH_DOVISH_SHIFT_LEVEL');
+  if (bessentWarsh !== null && bessentWarsh >= 1) {
+    met += 1; total += 1; weightedMet += 0.7; weightedMax += 0.7;
+    reasons.push(`✓ BESSENT_WARSH level=${bessentWarsh} (비둘기 shift, video4 §04:00, 가중치 0.7)`);
+  } else if (bessentWarsh !== null && bessentWarsh <= -1) {
+    weightedMax += 0.7;
+    unmetReasons.push(`⚠️ BESSENT_WARSH level=${bessentWarsh} (매파 기조, video4 §04:00, 가중치 0.7 미충족)`);
+  }
+
+  // ★ === 30차 P2-B #9: FED_RATE_CUT_SURPRISE_LEVEL — met 가산 (보조) ===
+  // video4 §04:50 "시장 예상보다 빠른 인하 → 상방 surprise"
+  const fedSurprise = dv(derived, 'FED_RATE_CUT_SURPRISE_LEVEL');
+  if (fedSurprise !== null && fedSurprise >= 1) {
+    weightedMet += 0.5 * (fedSurprise as number); weightedMax += 1.0;
+    reasons.push(`✓ FED_RATE_CUT_SURPRISE level=${fedSurprise} (비둘기 surprise, video4 §04:50, 가중치 0.5×${fedSurprise})`);
+  } else if (fedSurprise !== null && fedSurprise <= -1) {
+    weightedMax += 1.0;
+    unmetReasons.push(`⚠️ FED_RATE_CUT_SURPRISE level=${fedSurprise} (매파 surprise, video4 §04:50)`);
+  }
+
+  // ★ === 30차 P2-B #10: US_TECH_HEGEMONY_LEVEL — met 가산 (기술 4축) ===
+  // video4 §05:51 "H100/EUV 패권 → 양수 시 NASDAQ 우호"
+  const techHegLevel = dv(derived, 'US_TECH_HEGEMONY_LEVEL');
+  if (techHegLevel !== null && techHegLevel >= 1) {
+    met += 1; total += 1; weightedMet += 0.7; weightedMax += 0.7;
+    reasons.push(`✓ US_TECH_HEGEMONY level=${techHegLevel} (기술 패권 우호, video4 §05:51, 가중치 0.7)`);
+  } else if (techHegLevel !== null && techHegLevel <= -1) {
+    weightedMax += 0.7;
+    unmetReasons.push(`⚠️ US_TECH_HEGEMONY level=${techHegLevel} (기술 패권 역풍, video4 §05:51)`);
+  }
+
+
+
     // ★ === 30차 P1-A #2: TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL 신호 차단 ===
   // video4 §06:45 — 3축+ 동시 활성 시 BUY 강등, 4축 시 STRONG_BUY 차단.
   const trump4Axes = dv(derived, 'TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL');

@@ -9359,6 +9359,143 @@ export async function computeDerived(
 
   // ═══════════════════════════════════════════════════════════════════
 
+
+  // 30차 P2-B: video3+4 매크로 5건
+  // ═══════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P2-B #6: NASDAQ_SHORT_TRENDLINE_BREAK ===
+  // video3 §13:31 "두 고점 + 단기 추세선 이탈"
+  // 최근 3개월 swing low 2점 OLS 추세선 (NASDAQ_DYNAMIC_TRENDLINE)
+  try {
+    const nHist6 = await fetchYahooHistory('^IXIC', 65);
+    if (nHist6.length >= 30) {
+      const closes6 = nHist6.map(p => p.close).reverse(); // 오름차순 (과거→현재)
+      const n = closes6.length;
+      // swing high 2점으로 추세선 계산 (하락 추세선)
+      const swingHighs: Array<{ idx: number; val: number }> = [];
+      for (let i = 2; i < n - 2; i++) {
+        if (closes6[i] > closes6[i - 1] && closes6[i] > closes6[i - 2] &&
+            closes6[i] > closes6[i + 1] && closes6[i] > closes6[i + 2]) {
+          swingHighs.push({ idx: i, val: closes6[i] });
+        }
+      }
+      let breakFlag = 0;
+      let level = 0;
+      if (swingHighs.length >= 2) {
+        const h1 = swingHighs[swingHighs.length - 2];
+        const h2 = swingHighs[swingHighs.length - 1];
+        // OLS slope between two swing highs
+        const slope = (h2.val - h1.val) / (h2.idx - h1.idx);
+        const trendlineAtEnd = h2.val + slope * (n - 1 - h2.idx);
+        const currentClose = closes6[n - 1];
+        if (currentClose < trendlineAtEnd) {
+          breakFlag = 1;
+          const doubleTop = d.NASDAQ_DOUBLE_TOP?.value ?? 0;
+          level = doubleTop >= 1 ? 2 : 1;
+        }
+        d.NASDAQ_SHORT_TRENDLINE_BREAK = {
+          name: 'nasdaq_short_trendline_break',
+          value: level,
+          date: today(),
+          formula: `swing high 2점 추세선 ${trendlineAtEnd.toFixed(0)} vs 현재 ${currentClose.toFixed(0)}. break=${breakFlag}, DOUBLE_TOP=${d.NASDAQ_DOUBLE_TOP?.value ?? 0}. level=${level} (DOUBLE_TOP 동반→2). ★ video3 §13:31 "두 고점 + 단기 추세선 이탈".`,
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-B #7: NASDAQ_BREAKOUT_LONG_PLAYBOOK ===
+  // video3 §15:38 "고점 돌파 시 swing low = stop / short trendline break = take profit"
+  // 동적 anchor: stop_anchor = 직전 swing low (60D), take_profit_anchor = SHORT_TRENDLINE break
+  try {
+    const nHist7 = await fetchYahooHistory('^IXIC', 65);
+    if (nHist7.length >= 30) {
+      const closes7 = nHist7.map(p => p.close).reverse();
+      const n7 = closes7.length;
+      // swing low 찾기
+      const swingLows: Array<{ idx: number; val: number }> = [];
+      for (let i = 2; i < n7 - 2; i++) {
+        if (closes7[i] < closes7[i - 1] && closes7[i] < closes7[i - 2] &&
+            closes7[i] < closes7[i + 1] && closes7[i] < closes7[i + 2]) {
+          swingLows.push({ idx: i, val: closes7[i] });
+        }
+      }
+      const lastSwingLow = swingLows.length > 0 ? swingLows[swingLows.length - 1].val : null;
+      const currentClose7 = closes7[n7 - 1];
+      const stopAnchor = lastSwingLow;
+      const tpAnchor = d.NASDAQ_SHORT_TRENDLINE_BREAK?.value === 1 ? 'SHORT_TRENDLINE_BREAK 발생' : '미발생 (대기)';
+      d.NASDAQ_BREAKOUT_LONG_PLAYBOOK = {
+        name: 'nasdaq_breakout_long_playbook',
+        value: stopAnchor !== null ? 1 : 0,
+        date: today(),
+        formula: `stop_anchor = swing low ${stopAnchor?.toFixed(0) ?? 'n/a'} (현재 ${currentClose7.toFixed(0)}). take_profit_anchor: ${tpAnchor}. ★ video3 §15:38 "swing low = stop / trendline break = TP".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-B #8: BESSENT_WARSH_DOVISH_SHIFT_LEVEL ===
+  // video4 §04:00 "베센트 (재정+관세) / 워시 (AI 생산성 → 비둘기)"
+  // manualInputs.bessentToneLevel + manualInputs.warshToneLevel 합산
+  try {
+    const bessentTone = (manualInputs as any)?.bessentToneLevel ?? 0;
+    const warshTone = (manualInputs as any)?.warshToneLevel ?? 0;
+    const combined = (bessentTone as number) + (warshTone as number);
+    const level = combined >= 2 ? 2 : (combined >= 1 ? 1 : (combined <= -2 ? -2 : (combined <= -1 ? -1 : 0)));
+    d.BESSENT_WARSH_DOVISH_SHIFT_LEVEL = {
+      name: 'bessent_warsh_dovish_shift_level',
+      value: level,
+      date: today(),
+      formula: `bessentToneLevel=${bessentTone}, warshToneLevel=${warshTone}, 합산=${combined}. ≥2→level=2(정책 완화 임박), ≥1→1, ≤-1→매파. ★ video4 §04:00 "베센트/워시 비둘기 shift".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P2-B #9: FED_RATE_CUT_SURPRISE_LEVEL ===
+  // video4 §04:50 "워시가 의장 → 시장 예상보다 빠른 인하"
+  // FOMC_RATE_CUT_PROB_25BP - manualInputs.fedDotPlotImpliedCutsPct
+  try {
+    const fomcProb = d.FOMC_RATE_CUT_PROB_25BP?.value ?? null;
+    const dotPlot = (manualInputs as any)?.fedDotPlotImpliedCutsPct ?? null;
+    if (fomcProb !== null && dotPlot !== null) {
+      const surprise = (fomcProb as number) - (dotPlot as number);
+      const level = surprise >= 20 ? 2 : (surprise >= 10 ? 1 : (surprise <= -20 ? -2 : (surprise <= -10 ? -1 : 0)));
+      d.FED_RATE_CUT_SURPRISE_LEVEL = {
+        name: 'fed_rate_cut_surprise_level',
+        value: level,
+        date: today(),
+        formula: `FOMC 25bp 인하 확률 ${fomcProb.toFixed(1)}% − dot-plot 내포 ${(dotPlot as number).toFixed(1)}% = surprise ${surprise.toFixed(1)}pp. ≥+20pp→+2(비둘기), ≥+10pp→+1, ≤-10pp→-1(매파). ★ video4 §04:50.`,
+      };
+    } else {
+      d.FED_RATE_CUT_SURPRISE_LEVEL = {
+        name: 'fed_rate_cut_surprise_level',
+        value: 0,
+        date: today(),
+        formula: `fedDotPlotImpliedCutsPct 미입력 → 중립. FOMC_RATE_CUT_PROB_25BP=${fomcProb ?? 'n/a'}. ★ video4 §04:50 fallback.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-B #10: US_TECH_HEGEMONY_LEVEL ===
+  // video4 §05:51 "H100/EUV 통제 = 디지털 달러 패권"
+  // 3축: 칩 제재 건수 + USDCNH 추세 + AI 인프라 capex share → -2~+2
+  try {
+    const chipSanctions = (manualInputs as any)?.usChinaChipSanctionCount30D ?? 0;
+    const aiCapex = (manualInputs as any)?.usAiInfraCapexShare ?? 0;
+    const usdcnh = val(raw, 'USDCNH');
+    // USDCNH: 낮으면(위안 강세) 중국 유리, 높으면 위안 약세=미국 우위
+    const usdcnhScore = usdcnh !== null ? (usdcnh > 7.5 ? 1 : (usdcnh < 7.0 ? -1 : 0)) : 0;
+    const chipScore = (chipSanctions as number) >= 5 ? 1 : ((chipSanctions as number) >= 10 ? 2 : 0);
+    const capexScore = (aiCapex as number) >= 0.6 ? 1 : ((aiCapex as number) >= 0.8 ? 2 : 0);
+    const total = usdcnhScore + chipScore + capexScore;
+    const level = total >= 3 ? 2 : (total >= 1 ? 1 : (total <= -2 ? -2 : (total <= -1 ? -1 : 0)));
+    d.US_TECH_HEGEMONY_LEVEL = {
+      name: 'us_tech_hegemony_level',
+      value: level,
+      date: today(),
+      formula: `chipSanctions30D=${chipSanctions} (score ${chipScore}), USDCNH=${usdcnh?.toFixed(2) ?? 'n/a'} (score ${usdcnhScore}), aiCapexShare=${aiCapex} (score ${capexScore}), 합산=${total}→level=${level}. ★ video4 §05:51 "H100/EUV 디지털 달러 패권".`,
+    };
+  } catch { void 0; }
+
+  // ═══════════════════════════════════════════════════════════════════
+
   return d;
 }
 
