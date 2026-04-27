@@ -8460,6 +8460,142 @@ export async function computeDerived(
     formula: '8자산 STRONG_BUY 카운트 — 위험(NASDAQ/KOSPI/EMERGING/LEVERAGE/COPPER) + 안전(GOLD/CASH) + 중간(SILVER) 그룹 동시 STRONG_BUY 시 알림. 산출은 state/cache 에서 signals 결과 합산 후 주입.',
   };
 
+  // ★ ════════════════════════════════════════════════════════════════════
+  // 30차 P1-A: 영상 절대 framing 합성 3건
+  // ════════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P1-A #1: SEVEN_LENS_AGREEMENT_LEVEL ===
+  // video4 §03:33 "시장 타이밍 7가지 — 정책/지정학/유동성/매크로/모멘텀/기관리포트/차트"
+  // 7축 각 -1/0/+1 부호화 → 합계 level.
+  try {
+    const trumpPressure = d.TRUMP_AGENDA_PRESSURE?.value ?? null;
+    const geoRiskVal = typeof manualInputs?.geoRisk === 'number' ? manualInputs.geoRisk : null;
+    const liquidityDir = d.LIQUIDITY_DIRECTION?.value ?? null;
+    const goldilocksZone = d.GOLDILOCKS_ZONE?.value ?? null;
+    const bondVigilante = d.BOND_VIGILANTE_SCORE?.value ?? null;
+    const nasdaqDisp = d.NASDAQ_DISPARITY?.value ?? null;
+    const xlk60d = d.SECTOR_XLK?.value ?? null;
+    const analystConsensus = d.ANALYST_CONSENSUS_NASDAQ_MEGACAP?.value ?? null;
+    const researchDiv = d.RESEARCH_13F_DIVERGENCE?.value ?? null;
+    const nasdaqAbove200 = d.NASDAQ_ABOVE_200DMA?.value ?? null;
+    const dmaConv = d.DMA_CONVERGENCE_LEVEL?.value ?? null;
+
+    // 1) 정책축: TRUMP_AGENDA_PRESSURE > 0 → -1, < 0 → +1 (압력 낮을수록 우호)
+    const axisPolicy = trumpPressure !== null ? (trumpPressure > 0 ? -1 : trumpPressure < 0 ? 1 : 0) : 0;
+    // 2) 지정학: geoRisk ≤ 2 → +1, ≥ 4 → -1
+    const axisGeo = geoRiskVal !== null ? (geoRiskVal <= 2 ? 1 : geoRiskVal >= 4 ? -1 : 0) : 0;
+    // 3) 유동성: LIQUIDITY_DIRECTION > 0 → +1
+    const axisLiq = liquidityDir !== null ? (liquidityDir > 0 ? 1 : 0) : 0;
+    // 4) 매크로: GOLDILOCKS_ZONE=1 → +1, BOND_VIGILANTE_SCORE ≥ 4 → -1
+    const axisMacro = goldilocksZone === 1 ? 1 : (bondVigilante !== null && bondVigilante >= 4 ? -1 : 0);
+    // 5) 모멘텀: NASDAQ_DISPARITY > 0 AND XLK 60D > 0 → +1
+    const axisMomentum = (nasdaqDisp !== null && nasdaqDisp > 0 && xlk60d !== null && xlk60d > 0) ? 1 : 0;
+    // 6) 기관리포트: ANALYST_CONSENSUS(긍정) vs RESEARCH_13F_DIVERGENCE(괴리 음수=동조)
+    //    analystConsensus > 0 AND divergence ≤ 0 → +1; analystConsensus < 0 → -1
+    const axisAnalyst = analystConsensus !== null
+      ? (analystConsensus > 0 && (researchDiv === null || researchDiv <= 0) ? 1 : analystConsensus < 0 ? -1 : 0)
+      : 0;
+    // 7) 차트: NASDAQ_ABOVE_200DMA=1 AND DMA_CONVERGENCE_LEVEL ≥ 0 → +1
+    const axisChart = (nasdaqAbove200 === 1 && dmaConv !== null && dmaConv >= 0) ? 1 : 0;
+
+    const sum = axisPolicy + axisGeo + axisLiq + axisMacro + axisMomentum + axisAnalyst + axisChart;
+    let level: number;
+    let label: string;
+    if (sum >= 5) { level = 2; label = `🟢🟢 ${sum}렌즈 동조 STRONG_BUY 가산`; }
+    else if (sum >= 3) { level = 1; label = `🟢 ${sum}렌즈 동조 매수 우호`; }
+    else if (sum <= -5) { level = -2; label = `🔴🔴 ${sum}렌즈 역조 극단 약세`; }
+    else if (sum <= -3) { level = -1; label = `🔴 ${sum}렌즈 역조 약세`; }
+    else { level = 0; label = `⚪ ${sum}렌즈 혼재`; }
+    d.SEVEN_LENS_AGREEMENT_LEVEL = {
+      name: 'seven_lens_agreement_level',
+      value: sum,
+      date: today(),
+      formula: `7렌즈 합산: 정책${axisPolicy}+지정학${axisGeo}+유동성${axisLiq}+매크로${axisMacro}+모멘텀${axisMomentum}+기관${axisAnalyst}+차트${axisChart}=${sum}. ${label}. level=${level}. ★ video4 §03:33 "시장 타이밍 7가지".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P1-A #2: TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL ===
+  // video4 §06:45 "관세/기술/에너지/지정학 동시 = 정책 의도"
+  try {
+    const trumpPressure4 = d.TRUMP_AGENDA_PRESSURE?.value ?? null;
+    const geoRisk4 = typeof manualInputs?.geoRisk === 'number' ? manualInputs.geoRisk : 0;
+    const usdcnh = val(raw, 'USDKRW'); // proxy: USDKRW 추세 (USDCNH 없으면 chip sanction level 대용)
+    const chipLevel = typeof (manualInputs as any)?.usChinaChipSanctionLevel === 'number'
+      ? (manualInputs as any).usChinaChipSanctionLevel
+      : 1;
+
+    // 1) 관세: TRUMP_AGENDA_PRESSURE 의 tariff 축 → pressure > 0 시 활성
+    const axisTariff = trumpPressure4 !== null && trumpPressure4 > 0 ? 1 : 0;
+    // 2) 기술: usChinaChipSanctionLevel > 0 또는 USDCNH 우호 (proxy: USDKRW < 1400 → 달러 약세 = 우호)
+    const axisTech = chipLevel > 0 ? 1 : 0;
+    // 3) 에너지: WTI 30D 상승 (CPI 우려 가속)
+    let axisEnergy = 0;
+    try {
+      const wtiHist30 = await fetchYahooHistory('CL=F', 35);
+      if (wtiHist30.length >= 31) {
+        const wtiCur = wtiHist30[wtiHist30.length - 1].close;
+        const wtiPrev = wtiHist30[wtiHist30.length - 31].close;
+        if (wtiPrev > 0 && (wtiCur - wtiPrev) / wtiPrev * 100 > 0) axisEnergy = 1;
+      }
+    } catch { void 0; }
+    // 4) 지정학: geoRisk ≥ 3
+    const axisGeoP = geoRisk4 >= 3 ? 1 : 0;
+
+    const activeCount = axisTariff + axisTech + axisEnergy + axisGeoP;
+    let label4: string;
+    if (activeCount === 4) label4 = `🔴🔴 4축 동시 활성 — 강력 정책 의도 (STRONG_BUY 차단)`;
+    else if (activeCount === 3) label4 = `🔴 3축 활성 — BUY 강등`;
+    else if (activeCount === 2) label4 = `🟡 2축 활성 — 경계`;
+    else label4 = `⚪ ${activeCount}축 활성 — 관리 가능`;
+    d.TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL = {
+      name: 'trump_four_axes_simultaneous_level',
+      value: activeCount,
+      date: today(),
+      formula: `관세${axisTariff}+기술${axisTech}+에너지${axisEnergy}+지정학${axisGeoP}=${activeCount}축. ${label4}. ★ video4 §06:45 "관세/기술/에너지/지정학 동시 = 정책 의도".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P1-A #3: NASDAQ_3STAGE_TRIGGER_CHECKLIST ===
+  // video3 §16:46 "200DMA / channel mid / W_BOTTOM 3축 분할매수"
+  try {
+    const nPrice = val(raw, 'NASDAQ');
+    const sma200val = d.NASDAQ_SMA200?.value ?? null;
+    const channelMidVal = d.NASDAQ_CHANNEL_MID?.value ?? null;
+    const wBottomConf = d.NASDAQ_W_BOTTOM_CONFIRMED?.value ?? null;
+
+    let stage1Unlocked = false;
+    let stage2Unlocked = false;
+    let stage3Unlocked = false;
+    let s1Note = '대기';
+    let s2Note = '대기';
+    let s3Note = '대기';
+
+    if (nPrice !== null && sma200val !== null) {
+      const distPct = (nPrice - sma200val) / sma200val * 100;
+      stage1Unlocked = Math.abs(distPct) <= 3;
+      s1Note = stage1Unlocked
+        ? `✓ 200DMA $${sma200val.toFixed(0)} ±3% (현재 ${distPct.toFixed(1)}%)`
+        : `200DMA $${sma200val.toFixed(0)} 거리 ${distPct.toFixed(1)}% (±3% 밖)`;
+    }
+    if (nPrice !== null && channelMidVal !== null) {
+      const distPct2 = (nPrice - channelMidVal) / channelMidVal * 100;
+      stage2Unlocked = Math.abs(distPct2) <= 3;
+      s2Note = stage2Unlocked
+        ? `✓ channel mid $${channelMidVal.toFixed(0)} ±3% (${distPct2.toFixed(1)}%)`
+        : `channel mid $${channelMidVal.toFixed(0)} 거리 ${distPct2.toFixed(1)}%`;
+    }
+    stage3Unlocked = (wBottomConf !== null && wBottomConf >= 1);
+    s3Note = stage3Unlocked ? `✓ W_BOTTOM_CONFIRMED level=${wBottomConf}` : 'W_BOTTOM 미확정';
+
+    const stagesUnlocked = [stage1Unlocked, stage2Unlocked, stage3Unlocked].filter(Boolean).length;
+    d.NASDAQ_3STAGE_TRIGGER_CHECKLIST = {
+      name: 'nasdaq_3stage_trigger_checklist',
+      value: stagesUnlocked,
+      date: today(),
+      formula: `stage1(200DMA touch): ${s1Note}. stage2(channel mid touch): ${s2Note}. stage3(W_BOTTOM): ${s3Note}. 총 ${stagesUnlocked}/3 unlock. ★ video3 §16:46 "200DMA/channel mid/W_BOTTOM 3축 분할매수".`,
+    };
+  } catch { void 0; }
+
   return d;
 }
 

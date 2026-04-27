@@ -890,6 +890,36 @@ function nasdaqSignal(
   // === Override 4: 29차 fix-F — 자산군 × regime 정합 게이트 ===
   signal = applyRegimeCoherenceGate('NASDAQ', signal, regime.regime, overrides, unmetReasons);
 
+  // ★ === 30차 P1-A #1: SEVEN_LENS_AGREEMENT_LEVEL 영상 핵심 정합 가산 ===
+  // video4 §03:33 — 5렌즈 이상 동조(level≥2) 시 weightedMet +1.5 (영상 핵심 정합).
+  const sevenLens = dv(derived, 'SEVEN_LENS_AGREEMENT_LEVEL');
+  if (sevenLens !== null && sevenLens >= 5) {
+    weightedMet += 1.5; weightedMax += 1.5;
+    reasons.push(`✓ 7렌즈 ${sevenLens}개 동조 (≥5, video4 §03:33 영상 핵심 정합, 가중치 1.5)`);
+  } else if (sevenLens !== null && sevenLens <= -5) {
+    weightedMax += 1.5;
+    unmetReasons.push(`⚠️ 7렌즈 ${sevenLens}개 역조 (≤-5, video4 §03:33 — 강한 약세 합의)`);
+  }
+  // weightedMet cap 재적용
+  if (weightedMet > weightedMax) weightedMet = weightedMax;
+
+  // ★ === 30차 P1-A #2: TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL 신호 차단 ===
+  // video4 §06:45 — 3축+ 동시 활성 시 BUY 강등, 4축 시 STRONG_BUY 차단.
+  const trump4Axes = dv(derived, 'TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL');
+  if (trump4Axes !== null && trump4Axes >= 3) {
+    if (trump4Axes >= 4 && signal === 'STRONG_BUY') {
+      const prev4 = signal;
+      signal = 'BUY';
+      const r4 = `TRUMP_4AXES=${trump4Axes} (4축 동시, video4 §06:45) → STRONG_BUY → BUY`;
+      overrides.push(r4); unmetReasons.push(r4);
+    } else if (trump4Axes === 3 && (signal === 'STRONG_BUY' || signal === 'BUY')) {
+      const prev4 = signal;
+      signal = signal === 'STRONG_BUY' ? 'BUY' : 'HOLD';
+      const r4 = `TRUMP_4AXES=${trump4Axes} (3축 동시, video4 §06:45) → ${prev4} → ${signal}`;
+      overrides.push(r4); unmetReasons.push(r4);
+    }
+  }
+
   return withSignalExplanation({
     asset: 'NASDAQ',
     signal,
