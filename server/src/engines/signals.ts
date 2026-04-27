@@ -854,6 +854,116 @@ function nasdaqSignal(
     reasons.push('✓ TREND_INCEPTION_FLAG (골든크로스 D-30내+거래량+가격, video2 §02:47, 가중치 1.0)');
   }
 
+  // ★ === 30차 P3-A #3: NASDAQ_RANGE_FORMATION_DURATION_DAYS — 횡보 이탈 경고 ===
+  // video3 §11:39 "5+개월 횡보 후 이탈 = 큰 변화" — 장기 range는 이탈 직후 큰 변동 경보.
+  const rangeDuration = dv(derived, 'NASDAQ_RANGE_FORMATION_DURATION_DAYS');
+  if (rangeDuration !== null && rangeDuration >= 100) {
+    unmetReasons.push(`⚠️ NASDAQ 횡보 ${rangeDuration}일 (${Math.round(rangeDuration / 20)}개월+) — 이탈 시 큰 변동 경보 (video3 §11:39, 가중치 0.5 미충족)`);
+    total += 1; weightedMax += 0.5;
+  }
+
+  // ★ === 30차 P3-A #4: NASDAQ_TOP_REVERSAL_PATTERN_FREQUENCY_8W — 천장 경계 ===
+  // video3 §12:23 "위꼬리 반복 = 천장" — level≥2 시 overheat 보강.
+  const topRevFreq = dv(derived, 'NASDAQ_TOP_REVERSAL_PATTERN_FREQUENCY_8W');
+  if (topRevFreq !== null && topRevFreq >= 3) {
+    unmetReasons.push(`⚠️ 주봉 위꼬리 패턴 ${topRevFreq}회/8주 (천장 경계, video3 §12:23, 가중치 0.7 미충족)`);
+    total += 1; weightedMax += 0.7;
+  }
+
+  // ★ === 30차 P3-A #5: OIL_RECESSION_CONCERN_LEVEL — 스태그플레이션 우려 ===
+  // video3 §17:55 "유가↑ + 실업수당↑ = 경기 침체 우려"
+  const oilRcLevel = dv(derived, 'OIL_RECESSION_CONCERN_LEVEL');
+  if (oilRcLevel === 1) {
+    unmetReasons.push('⚠️ 유가+실업수당 스태그플레이션 우려 (video3 §17:55, regime 위험 보조)');
+  }
+
+  // ★ === 30차 P3-A #6: MOMENTUM_TURNING_POINT_LEVEL — 모멘텀 전환 ===
+  // video4 §08:42 "공이 멈추는 순간 = 모멘텀" — -1 (상승 둔화) 시 overheat 보강.
+  const momentumTurn = dv(derived, 'MOMENTUM_TURNING_POINT_LEVEL');
+  if (momentumTurn === -1) {
+    unmetReasons.push('⚠️ 모멘텀 둔화 전환 (ROC5<ROC20 + RSI 하락, video4 §08:42, 가중치 0.7 미충족)');
+    total += 1; weightedMax += 0.7;
+  } else if (momentumTurn === 1) {
+    total += 1; met += 1; weightedMet += 0.7; weightedMax += 0.7;
+    reasons.push('✓ 모멘텀 강화 전환 (ROC5>ROC20 + RSI 상승, video4 §08:42, 가중치 0.7)');
+  }
+
+  // ★ === 30차 P3-A #7: NASDAQ_TOPDOWN_FRAME_CONFLICT_FLAG — frame 충돌 경보 ===
+  // video4 §11:31 "월봉/주봉/일봉 frame 간 결론 다름"
+  const frameConflict = dv(derived, 'NASDAQ_TOPDOWN_FRAME_CONFLICT_FLAG');
+  if (frameConflict === 1) {
+    unmetReasons.push('⚠️ 타임프레임 충돌 (월/주/일봉 방향 불일치, video4 §11:31, 신중 대기)');
+  }
+
+  // ★ === 30차 P3-B #8: MARKET_PANIC_BOTTOM_FLAG — 패닉 저점 STRONG_BUY 가산 ===
+  // video4 §00:53 "공포 극 = 저점" — level=2 시 강력 매수 가산.
+  const panicBottom = dv(derived, 'MARKET_PANIC_BOTTOM_FLAG');
+  if (panicBottom !== null && panicBottom >= 2) {
+    total += 2; met += 2; weightedMet += 2.0; weightedMax += 2.0;
+    reasons.push('✓ MARKET_PANIC_BOTTOM 3축 (VIX>35+F&G<20+ICSA<300K, video4 §00:53, 가중치 2.0)');
+  } else if (panicBottom === 1) {
+    total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
+    reasons.push('✓ MARKET_PANIC_BOTTOM 2축 (video4 §00:53, 가중치 1.0)');
+  }
+
+  // ★ === 30차 P3-B #9: RISK_ASSET_TOP_DETECTION_TIMING — 고점 임박 경보 ===
+  // video4 §01:14 "RSI80+거래량둔화+이격20% = 고점 임박"
+  const topDetect = dv(derived, 'RISK_ASSET_TOP_DETECTION_TIMING');
+  if (topDetect !== null && topDetect <= -2) {
+    unmetReasons.push('🔴 고점 임박 3축 (RSI≥80+거래량둔화+이격≥20%, video4 §01:14, REDUCE 경보)');
+    total += 1; weightedMax += 1.5;
+  } else if (topDetect !== null && topDetect === -1) {
+    unmetReasons.push('⚠️ 고점 임박 2축 (video4 §01:14, 주의)');
+  }
+
+  // ★ === 30차 P3-B #10: ELECTION_DDAY_REGIME_PROXIMITY — 선거 부양 가산 ===
+  // video4 §03:55 "11월 중간선거 시험 기간" — LATE_PUSH 시 +0.7 가산.
+  const elecProx = dv(derived, 'ELECTION_DDAY_REGIME_PROXIMITY');
+  if (elecProx !== null && elecProx >= 2) {
+    total += 1; met += 1; weightedMet += 0.7; weightedMax += 0.7;
+    reasons.push('✓ 선거 LATE_PUSH (D-30이내, 정책 부양 최고조, video4 §03:55, 가중치 0.7)');
+  } else if (elecProx === 1) {
+    reasons.push('✓ 선거 EARLY_PUSH (D-90이내, 부양 기대, video4 §03:55, 보조)');
+  }
+
+  // ★ === 30차 P3-B #11: US_CHINA_TECH_DECOUPLING_LEVEL — 기술 패권 보조 ===
+  // video4 §06:14 "H100/EUV 통제 → 미국 기술 패권 강화" — +2 시 NASDAQ 보조.
+  const techDecoupling = dv(derived, 'US_CHINA_TECH_DECOUPLING_LEVEL');
+  if (techDecoupling !== null && techDecoupling >= 2) {
+    total += 1; met += 1; weightedMet += 0.5; weightedMax += 0.5;
+    reasons.push('✓ 미중 기술 디커플링 가속 (칩제재+SMIC차단, video4 §06:14, 가중치 0.5)');
+  }
+
+  // ★ === 30차 P3-B #12: FED_CUT_PRETEXT_BUILDUP_LEVEL — 인하 명분 빌드업 ===
+  // video4 §06:24 "에너지/지정학 → 연준 인하 명분" — level≥2 시 정책 보조.
+  const fedPretext = dv(derived, 'FED_CUT_PRETEXT_BUILDUP_LEVEL');
+  if (fedPretext !== null && fedPretext >= 2) {
+    total += 1; met += 1; weightedMet += 0.7; weightedMax += 0.7;
+    reasons.push('✓ 연준 인하 명분 빌드업 4축 (video4 §06:24, 가중치 0.7)');
+  } else if (fedPretext === 1) {
+    reasons.push('연준 인하 명분 빌드업 2축 (video4 §06:24, 보조)');
+  }
+
+  // ★ === 30차 P3-B #13: SMART_MONEY_DISTRIBUTION_PHASE_LEVEL — 분배 단계 강제 REDUCE ===
+  // video4 §08:59 "고점+기관매도+애널호평 = 분배" — level=-2 시 STRONG_BUY 차단 + REDUCE.
+  const smartDist = dv(derived, 'SMART_MONEY_DISTRIBUTION_PHASE_LEVEL');
+  if (smartDist !== null && smartDist <= -2) {
+    unmetReasons.push('🔴 분배 단계 3축 (ATH근접+기관매도+애널괴리, video4 §08:59, STRONG_BUY차단+REDUCE경보)');
+    total += 1; weightedMax += 1.5;
+  } else if (smartDist === -1) {
+    unmetReasons.push('⚠️ 분배 단계 2축 (video4 §08:59, 신중)');
+  }
+
+  // ★ === 30차 P3-D #22: TIPRANKS_SMART_SCORE_MANUAL — 수동 보조 ===
+  const tipranksScore = dv(derived, 'TIPRANKS_SMART_SCORE_MANUAL');
+  if (tipranksScore === 1) {
+    total += 1; met += 1; weightedMet += 0.5; weightedMax += 0.5;
+    reasons.push('✓ TipRanks SmartScore ≥8 (강매수 종합, 가중치 0.5)');
+  } else if (tipranksScore === -1) {
+    total += 1; weightedMax += 0.5;
+    unmetReasons.push('⚠️ TipRanks SmartScore ≤3 (약매수 종합, 가중치 0.5 미충족)');
+  }
+
   // 23차 Tier 1#3: NASDAQ signal met/total 정합 cap.
   //   기존 met++ 만 하는 가점들 (NASDAQ_DRAWDOWN, RSI<30, 이격도 -25%, W_BOTTOM, econDiv, wtiCuLag 등) 이
   //   total 동기화 안 돼 met/total > 100% 가능. PSYCH 외 가점은 "강도 가산"으로 보고 met cap = total.
@@ -1175,6 +1285,21 @@ function nasdaqSignal(
   // cap 재적용
   if (met > total) met = total;
   if (weightedMet > weightedMax) weightedMet = weightedMax;
+
+  // ★ === 30차 P3-B #13 override: SMART_MONEY_DISTRIBUTION_PHASE_LEVEL ===
+  // video4 §08:59 "분배 단계 = STRONG_BUY 차단 + REDUCE 경보"
+  if (smartDist !== null && smartDist <= -2) {
+    if (signal === 'STRONG_BUY') { signal = 'BUY'; overrides.push('SMART_MONEY_DISTRIBUTION=-2 → STRONG_BUY → BUY'); }
+  }
+
+  // ★ === 30차 P3-B #9 override: RISK_ASSET_TOP_DETECTION_TIMING ===
+  // video4 §01:14 "3축 고점 = REDUCE"
+  if (topDetect !== null && topDetect <= -2 && signal !== 'SELL' && signal !== 'REDUCE') {
+    const prevTopD = signal;
+    signal = 'REDUCE';
+    const rTopD = `RISK_ASSET_TOP_DETECTION=-2 (RSI≥80+거래량둔화+이격≥20%, video4 §01:14) → ${prevTopD} → REDUCE`;
+    overrides.push(rTopD); unmetReasons.push(rTopD);
+  }
 
     // ★ === 30차 P1-A #2: TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL 신호 차단 ===
   // video4 §06:45 — 3축+ 동시 활성 시 BUY 강등, 4축 시 STRONG_BUY 차단.
@@ -2558,6 +2683,32 @@ function kospiSignal(
     reasons.push('✓ INDIVIDUAL_CONTRA_CORRELATION=1 — 개인 contra 정합 (video6 §"개인 통계적 반대", 가중치 0.5)');
   }
 
+  // ★ === 30차 P3-C #17: KR_WAR_RELIEF_POLICY_FUND_FLAG — KOSPI 보조 ===
+  // stt_kospi §10:34 "27조 정책 금융" — 발효 6개월 내 +0.5 보조
+  const krWarFund = dv(derived, 'KR_WAR_RELIEF_POLICY_FUND_FLAG');
+  if (krWarFund === 1) {
+    weightedMet += 0.5; weightedMax += 0.5;
+    reasons.push('✓ KR_WAR_RELIEF_POLICY_FUND 발효 6개월 내 (stt_kospi §10:34 "27조 정책 금융", 가중치 0.5)');
+  }
+
+  // ★ === 30차 P3-C #18: KR_ENERGY_DIPLOMACY_FLAG — KOSPI 보조 ===
+  // stt_kospi §10:39 "프랑스-한국 원자력/풍력 협력" — flag=1 시 에너지 섹터 보조
+  const krEnergyDip = dv(derived, 'KR_ENERGY_DIPLOMACY_FLAG');
+  if (krEnergyDip === 1) {
+    weightedMet += 0.5; weightedMax += 0.5;
+    reasons.push('✓ KR_ENERGY_DIPLOMACY=1 (원자력/풍력 외교 협력, stt_kospi §10:39, 가중치 0.5)');
+  }
+
+  // ★ === 30차 P3-C #19: KR_SEMI_OP_FORECAST_LEVEL — KOSPI 반도체 보조 ===
+  // stt_kospi §02:56 "삼성239조/SK202조" — ≥400조 +1 / <200조 -1
+  const krSemiOp = dv(derived, 'KR_SEMI_OP_FORECAST_LEVEL');
+  if (krSemiOp === 1) {
+    total += 1; met += 1; weightedMet += 0.7; weightedMax += 0.7;
+    reasons.push('✓ KR 반도체 영업이익 전망 ≥400조 (stt_kospi §02:56 "삼성+SK하이닉스", 가중치 0.7)');
+  } else if (krSemiOp === -1) {
+    total += 1; weightedMax += 0.7;
+    unmetReasons.push('⚠️ KR 반도체 영업이익 전망 <200조 (반도체 사이클 하락, 가중치 0.7 미충족)');
+  }
 
     // met cap 재적용
   if (met > total) met = total;

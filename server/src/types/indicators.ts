@@ -174,6 +174,25 @@ export interface UserProfile {
     aiNarrativeStrength?: number | null;
     // ★ 30차 P2-E #30: 현금 비중 (%)
     cashPct?: number | null;
+    // ★ 30차 P3-B #11: SMIC 7nm 차단 여부 (0=차단, 1=가능). usChinaChipSanctionCount30D 는 P2-B #10 에서 이미 선언됨
+    smicCapability7nm?: number | null;
+    // ★ 30차 P3-C #14: 사용자 현금 유출 이벤트 예정일 (자녀 대학/은퇴/부동산 등)
+    userCashflowEventDate?: string | null;
+    // ★ 30차 P3-C #17: 한국 전후 복구 정책 금융 발효일
+    krWarReliefFundActivationDate?: string | null;
+    // ★ 30차 P3-C #18: 에너지 외교 이벤트 수 (월간 수동 입력)
+    krEnergyDiplomacyEventCount?: number | null;
+    // ★ 30차 P3-C #19: 삼성/SK하이닉스 영업이익 전망 (조원)
+    samsungOperProfitForecast?: number | null;
+    hynixOperProfitForecast?: number | null;
+    // ★ 30차 P3-C #20: 보유 종목 재무 지표 (수동)
+    userHoldingsDebtRatio?: number | null;
+    userHoldingsCurrentRatio?: number | null;
+    userHoldingsCashFlow?: number | null;
+    // ★ 30차 P3-D #22: TipRanks SmartScore (1~10)
+    tipranksSmartScore?: number | null;
+    // ★ 30차 P3-D #23: IMF WEO 글로벌 성장률 전망 (%)
+    imfWeoGlobalGrowthForecast?: number | null;
   };
 }
 

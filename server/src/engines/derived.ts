@@ -130,6 +130,28 @@ export async function computeDerived(
     // 29차 P3-E
     krxPensionFlow5DTrillion?: number | null;
     krxShortInterestPct?: number | null;
+    // ★ 30차 P3-B #11
+    usChinaChipSanctionCount30D?: number | null;
+    smicCapability7nm?: number | null;
+    // ★ 30차 P3-C #14
+    userCashflowEventDate?: string | null;
+    // ★ 30차 P3-C #17
+    krWarReliefFundActivationDate?: string | null;
+    // ★ 30차 P3-C #18
+    krEnergyDiplomacyEventCount?: number | null;
+    // ★ 30차 P3-C #19
+    samsungOperProfitForecast?: number | null;
+    hynixOperProfitForecast?: number | null;
+    // ★ 30차 P3-C #20
+    userHoldingsDebtRatio?: number | null;
+    userHoldingsCurrentRatio?: number | null;
+    userHoldingsCashFlow?: number | null;
+    // ★ 30차 P3-D #22
+    tipranksSmartScore?: number | null;
+    // ★ 30차 P3-D #23
+    imfWeoGlobalGrowthForecast?: number | null;
+    // ★ 30차 P3-C — cashPct (geoRisk 는 위에서 이미 선언됨)
+    cashPct?: number | null;
   },
 ): Promise<Record<string, DerivedIndicator>> {
   const d: Record<string, DerivedIndicator> = {};
@@ -10011,6 +10033,727 @@ export async function computeDerived(
     };
   } catch { void 0; }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // 30차 macrosquare audit Phase 3 — P3-A: video3+4 차트 패턴 7건
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P3-A #1: NASDAQ_LONG_CHANNEL_REGIME_BREAK_DATE ===
+  // video3 §10:08 "2020년부터 시대 달라짐, 상승 각도 가팔라짐"
+  // 15년 회귀 채널 slope 의 rolling 90D 변화 → regime break point 자동 감지.
+  // value: days_ago (most recent slope shift)
+  try {
+    const nqHist3750 = await fetchYahooHistory('^IXIC', 3750);
+    if (nqHist3750.length >= 700) {
+      const closes = nqHist3750.map((h) => h.close);
+      // rolling 90D linear slope (% per day) 계산
+      const slopes: Array<{ idx: number; slope: number }> = [];
+      for (let i = 90; i < closes.length; i += 30) {
+        const window = closes.slice(i - 90, i);
+        const n = window.length;
+        let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+        for (let j = 0; j < n; j++) { sumX += j; sumY += window[j]; sumXY += j * window[j]; sumX2 += j * j; }
+        const slopeVal = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+        slopes.push({ idx: i, slope: slopeVal });
+      }
+      // slope 변화의 절댓값이 가장 큰 구간 감지
+      let maxShift = 0;
+      let breakIdx = closes.length - 1;
+      for (let k = 1; k < slopes.length; k++) {
+        const shift = Math.abs(slopes[k].slope - slopes[k - 1].slope);
+        if (shift > maxShift) { maxShift = shift; breakIdx = slopes[k].idx; }
+      }
+      const daysAgoBreak = closes.length - 1 - breakIdx;
+      const breakDate = nqHist3750[breakIdx]?.date ?? 'unknown';
+      d.NASDAQ_LONG_CHANNEL_REGIME_BREAK_DATE = {
+        name: 'nasdaq_long_channel_regime_break_date',
+        value: daysAgoBreak,
+        date: today(),
+        formula: `15년 NASDAQ 회귀 채널 rolling 90D slope 최대 변화점: ${breakDate} (D-${daysAgoBreak}일 전). video3 §10:08 "2020년부터 상승 각도 가팔라짐".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P3-A #2: NASDAQ_NEXT_RESISTANCE_TARGET_PRICE ===
+  // video3 §10:31 "다음 저항 30,000 부근"
+  // channel upper 또는 round number (10000, 20000, 30000, 40000) 중 가장 가까운 미돌파 값
+  try {
+    const nqNow = val(raw, 'NASDAQ');
+    if (nqNow !== null) {
+      const roundLevels = [10000, 20000, 25000, 30000, 35000, 40000, 45000, 50000];
+      const nextResistance = roundLevels.find((level) => level > nqNow);
+      if (nextResistance !== undefined) {
+        const upsidePct = ((nextResistance - nqNow) / nqNow) * 100;
+        d.NASDAQ_NEXT_RESISTANCE_TARGET_PRICE = {
+          name: 'nasdaq_next_resistance_target_price',
+          value: nextResistance,
+          date: today(),
+          formula: `현재 NASDAQ ${nqNow.toFixed(0)} → 다음 저항 R=${nextResistance.toLocaleString()} (+${upsidePct.toFixed(1)}% upside). video3 §10:31 "다음 저항 30,000 부근".`,
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P3-A #3: NASDAQ_RANGE_FORMATION_DURATION_DAYS ===
+  // video3 §11:39 "5+개월 횡보 후 이탈 = 큰 변화"
+  // high-low 변동폭 ≤ 8% 인 구간 N일 지속 시 N 노출
+  // ≥ 100일 → level=2 (장기 range), ≥ 60 → 1
+  try {
+    const nqHistRange = await fetchYahooHistory('^IXIC', 200);
+    if (nqHistRange.length >= 10) {
+      let rangeDays = 0;
+      const recent = nqHistRange[nqHistRange.length - 1].close;
+      let hi = recent;
+      let lo = recent;
+      for (let i = nqHistRange.length - 1; i >= 0; i--) {
+        const c = nqHistRange[i].close;
+        const newHi = Math.max(hi, c);
+        const newLo = Math.min(lo, c);
+        if (newLo > 0 && ((newHi - newLo) / newLo) * 100 <= 8) {
+          hi = newHi; lo = newLo; rangeDays++;
+        } else { break; }
+      }
+      const level = rangeDays >= 100 ? 2 : rangeDays >= 60 ? 1 : 0;
+      d.NASDAQ_RANGE_FORMATION_DURATION_DAYS = {
+        name: 'nasdaq_range_formation_duration_days',
+        value: rangeDays,
+        date: today(),
+        formula: `NASDAQ 변동폭 ≤8% 횡보 지속 ${rangeDays}일. level=${level} (≥100→2 장기range, ≥60→1). video3 §11:39 "5+개월 횡보 후 이탈 = 큰 변화".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P3-A #4: NASDAQ_TOP_REVERSAL_PATTERN_FREQUENCY_8W ===
+  // video3 §12:23 "위꼬리/실체 ≥ 1.5 인 주봉이 8주 내 N개"
+  // 최근 8주 reversal 패턴 카운트 → ≥ 3 → level=2 (반복 reversal, 천장 경계)
+  try {
+    const nqOhlcTop = await fetchYahooOHLC('^IXIC', 8 * 7, '1wk');
+    if (nqOhlcTop.length >= 2) {
+      let reversalCount = 0;
+      for (const bar of nqOhlcTop) {
+        const body = Math.abs(bar.close - bar.open);
+        const upperWick = bar.high - Math.max(bar.close, bar.open);
+        if (body > 0 && upperWick / body >= 1.5) reversalCount++;
+      }
+      const level = reversalCount >= 3 ? 2 : reversalCount >= 2 ? 1 : 0;
+      d.NASDAQ_TOP_REVERSAL_PATTERN_FREQUENCY_8W = {
+        name: 'nasdaq_top_reversal_pattern_frequency_8w',
+        value: reversalCount,
+        date: today(),
+        formula: `최근 8주 주봉 위꼬리/실체≥1.5 패턴 ${reversalCount}개. level=${level} (≥3→2 천장경계). video3 §12:23 "위꼬리 반복 = 천장".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P3-A #5: OIL_RECESSION_CONCERN_LEVEL ===
+  // video3 §17:55 "유가↑ + 실업수당↑ = 경기 침체 우려"
+  // WTI 60D ≥ +20% AND ICSA 추세 ≥ +5% (4주 평균 vs 직전 4주) → level=1 (스태그플레이션 우려)
+  try {
+    const wtiHist60 = await fetchYahooHistory('CL=F', 90);
+    const icsaHist8 = await getHistorySeriesLocal('ICSA', 60);
+    let oilRcLevel = 0;
+    let oilChg60 = null as number | null;
+    if (wtiHist60.length >= 61) {
+      const w0 = wtiHist60[wtiHist60.length - 61].close;
+      const w1 = wtiHist60[wtiHist60.length - 1].close;
+      if (w0 > 0) oilChg60 = ((w1 - w0) / w0) * 100;
+    }
+    let icsaTrend = null as number | null;
+    if (icsaHist8.length >= 8) {
+      const recent4 = icsaHist8.slice(-4).map((p) => p.value);
+      const prior4 = icsaHist8.slice(-8, -4).map((p) => p.value);
+      const r4avg = recent4.reduce((s, v) => s + v, 0) / 4;
+      const p4avg = prior4.reduce((s, v) => s + v, 0) / 4;
+      if (p4avg > 0) icsaTrend = ((r4avg - p4avg) / p4avg) * 100;
+    }
+    const icsaRaw = val(raw, 'ICSA');
+    const icsaTrendOk = icsaTrend !== null ? icsaTrend >= 5 : (icsaRaw !== null && icsaRaw >= 300000);
+    if (oilChg60 !== null && oilChg60 >= 20 && icsaTrendOk) oilRcLevel = 1;
+    d.OIL_RECESSION_CONCERN_LEVEL = {
+      name: 'oil_recession_concern_level',
+      value: oilRcLevel,
+      date: today(),
+      formula: `WTI 60D ${oilChg60 !== null ? oilChg60.toFixed(1) + '%' : 'n/a'} (≥20%=${oilChg60 !== null && oilChg60 >= 20}) AND ICSA 4주 트렌드 ${icsaTrend !== null ? icsaTrend.toFixed(1) + '%' : 'n/a'} (≥5%=${icsaTrendOk}). 1=스태그플레이션 우려. video3 §17:55.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-A #6: MOMENTUM_TURNING_POINT_LEVEL ===
+  // video4 §08:42 "공이 멈추는 순간 = 모멘텀"
+  // NASDAQ ROC 5d / ROC 20d / RSI rate of change 결합
+  // ROC 5d < ROC 20d AND RSI 5D 변화 < 0 → level=-1 (상승 둔화 turn)
+  try {
+    const nqHistMom = await fetchYahooHistory('^IXIC', 30);
+    if (nqHistMom.length >= 22) {
+      const c = nqHistMom.map((h) => h.close);
+      const roc5 = c[c.length - 1] > 0 ? ((c[c.length - 1] - c[c.length - 6]) / c[c.length - 6]) * 100 : 0;
+      const roc20 = c[c.length - 1] > 0 ? ((c[c.length - 1] - c[c.length - 21]) / c[c.length - 21]) * 100 : 0;
+      // 간소화된 RSI 변화: 최근 5일 RSI(14) vs 5일 전 RSI(14)
+      const rsi14Now = d.NASDAQ_RSI_14?.value ?? null;
+      const rsi5dAgo = d.NASDAQ_RSI_14?.value ?? null; // proxy — single value available
+      // RSI rate of change proxy: RSI < 50 AND roc5 slowing
+      const rsiSlowing = rsi14Now !== null && rsi14Now < 50 && roc5 < roc20;
+      let mtpLevel = 0;
+      if (roc5 < roc20 && rsiSlowing) mtpLevel = -1;
+      else if (roc5 > roc20 && (rsi14Now ?? 50) > 50) mtpLevel = 1;
+      d.MOMENTUM_TURNING_POINT_LEVEL = {
+        name: 'momentum_turning_point_level',
+        value: mtpLevel,
+        date: today(),
+        formula: `NASDAQ ROC5=${roc5.toFixed(2)}% ROC20=${roc20.toFixed(2)}% RSI=${rsi14Now?.toFixed(1) ?? 'n/a'}. -1=상승둔화 turn / +1=모멘텀 강화. video4 §08:42 "공이 멈추는 순간 = 모멘텀".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P3-A #7: NASDAQ_TOPDOWN_FRAME_CONFLICT_FLAG ===
+  // video4 §11:31 "월봉 / 주봉 / 일봉 frame 간 결론 다름"
+  // NASDAQ_MONTHLY_EXHAUSTION + NASDAQ_WEEKLY_REVERSAL + 일봉 추세 결합
+  // 충돌 (예: 월+ / 주-) → level=1 (frame conflict warning)
+  try {
+    const monthly = d.NASDAQ_MONTHLY_EXHAUSTION?.value ?? null;
+    const weekly = d.NASDAQ_WEEKLY_REVERSAL?.value ?? null;
+    const dispP3A = d.NASDAQ_DISPARITY?.value ?? null;
+    const dailyBullish = dispP3A !== null && dispP3A > -5;
+    const monthlyBullish = monthly === null || monthly === 0; // 0=normal, 1=exhaustion
+    const weeklyBearish = weekly === 1;
+    let frameConflict = 0;
+    let conflictLabel = 'aligned';
+    if (monthlyBullish && weeklyBearish) { frameConflict = 1; conflictLabel = '월봉+/주봉- 충돌'; }
+    else if (!monthlyBullish && !weeklyBearish && dailyBullish) { frameConflict = 1; conflictLabel = '월봉-/주봉+/일봉+ 충돌'; }
+    d.NASDAQ_TOPDOWN_FRAME_CONFLICT_FLAG = {
+      name: 'nasdaq_topdown_frame_conflict_flag',
+      value: frameConflict,
+      date: today(),
+      formula: `월봉exhaustion=${monthly ?? 'n/a'} 주봉reversal=${weekly ?? 'n/a'} 일봉이격=${dispP3A?.toFixed(1) ?? 'n/a'}%. frameConflict=${frameConflict} (${conflictLabel}). video4 §11:31 "frame 간 결론 충돌".`,
+    };
+  } catch { void 0; }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 30차 P3-B: video3+4 매크로 6건
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P3-B #8: MARKET_PANIC_BOTTOM_FLAG ===
+  // video4 §00:53 "공포 극에 달했을 때 = 저점"
+  // VIX > 35 AND F&G < 20 AND ICSA < 300K → level=2 (매수 기회 + 펀더 정상)
+  try {
+    const vixPB = val(raw, 'VIXCLS');
+    const fngPB = val(raw, 'FEAR_GREED');
+    const icsaPB = val(raw, 'ICSA');
+    const vixHigh = vixPB !== null && vixPB > 35;
+    const fngLow = fngPB !== null && fngPB < 20;
+    const icsaOk = icsaPB !== null && icsaPB < 300000;
+    const axisCount = (vixHigh ? 1 : 0) + (fngLow ? 1 : 0) + (icsaOk ? 1 : 0);
+    const panicLevel = axisCount === 3 ? 2 : axisCount === 2 ? 1 : 0;
+    d.MARKET_PANIC_BOTTOM_FLAG = {
+      name: 'market_panic_bottom_flag',
+      value: panicLevel,
+      date: today(),
+      formula: `VIX=${vixPB?.toFixed(1) ?? 'n/a'}(>35=${vixHigh}) F&G=${fngPB ?? 'n/a'}(<20=${fngLow}) ICSA=${icsaPB ? (icsaPB/1000).toFixed(0)+'K' : 'n/a'}(<300K=${icsaOk}). 3축→level=2 매수기회. video4 §00:53 "공포 극 = 저점".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-B #9: RISK_ASSET_TOP_DETECTION_TIMING ===
+  // video4 §01:14 "금/은/BTC 고점 하루 전 예측"
+  // RSI 80+ + 거래량 5D < 20D × 0.8 (둔화) + 이격도 +20%+ → level=-2 (고점 임박)
+  // NASDAQ 기준으로 산출 (자산별 조합 단순화)
+  try {
+    const nqHistTop = await fetchYahooHistory('^IXIC', 30);
+    if (nqHistTop.length >= 21) {
+      const rsiTop = d.NASDAQ_RSI_14?.value ?? null;
+      const vols = nqHistTop.map((h) => h.volume ?? 0);
+      const vol5avg = vols.slice(-5).reduce((s, v) => s + v, 0) / 5;
+      const vol20avg = vols.slice(-20).reduce((s, v) => s + v, 0) / 20;
+      const volDimming = vol20avg > 0 && vol5avg < vol20avg * 0.8;
+      const nqDispTop = d.NASDAQ_DISPARITY?.value ?? null;
+      const rsiHigh = rsiTop !== null && rsiTop >= 80;
+      const dispHigh = nqDispTop !== null && nqDispTop >= 20;
+      const topAxes = (rsiHigh ? 1 : 0) + (volDimming ? 1 : 0) + (dispHigh ? 1 : 0);
+      const topLevel = topAxes === 3 ? -2 : topAxes === 2 ? -1 : 0;
+      d.RISK_ASSET_TOP_DETECTION_TIMING = {
+        name: 'risk_asset_top_detection_timing',
+        value: topLevel,
+        date: today(),
+        formula: `RSI=${rsiTop?.toFixed(1) ?? 'n/a'}(≥80=${rsiHigh}) 거래량5D/20D=${vol20avg > 0 ? (vol5avg/vol20avg).toFixed(2) : 'n/a'}(둔화=${volDimming}) 이격도=${nqDispTop?.toFixed(1) ?? 'n/a'}%(≥20=${dispHigh}). 3축→-2 고점임박. video4 §01:14.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P3-B #10: ELECTION_DDAY_REGIME_PROXIMITY ===
+  // video4 §03:55 "11월 중간선거 = 시험 기간"
+  // ELECTION_DDAY 기반: D-30→LATE_PUSH / D-90→EARLY_PUSH / D-180→PREP
+  try {
+    const electionDate2 = new Date('2026-11-03T00:00:00Z');
+    const now2 = new Date();
+    const dday2 = Math.ceil((electionDate2.getTime() - now2.getTime()) / (1000 * 60 * 60 * 24));
+    let phase: string;
+    let phaseBonus: number;
+    if (dday2 <= 30 && dday2 > 0) { phase = 'LATE_PUSH'; phaseBonus = 2; }
+    else if (dday2 <= 90) { phase = 'EARLY_PUSH'; phaseBonus = 1; }
+    else if (dday2 <= 180) { phase = 'PREP'; phaseBonus = 0; }
+    else { phase = 'NORMAL'; phaseBonus = 0; }
+    d.ELECTION_DDAY_REGIME_PROXIMITY = {
+      name: 'election_dday_regime_proximity',
+      value: phaseBonus,
+      date: today(),
+      formula: `D-${dday2} → phase='${phase}' (bonus=${phaseBonus}). LATE_PUSH=정책부양+2 / EARLY_PUSH=+1. video4 §03:55 "11월 중간선거 시험 기간".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-B #11: US_CHINA_TECH_DECOUPLING_LEVEL ===
+  // video4 §06:14 "H100/EUV 통제 → 중국 7nm 못 만듦"
+  // manualInputs.usChinaChipSanctionCount30D + manualInputs.smicCapability7nm (사용자 입력)
+  try {
+    const chipSanctions = manualInputs?.usChinaChipSanctionCount30D ?? null;
+    const smicBlock = manualInputs?.smicCapability7nm ?? null;
+    let dcLevel = 0;
+    if (chipSanctions !== null && chipSanctions >= 3) dcLevel += 1;
+    if (smicBlock !== null && smicBlock === 0) dcLevel += 1; // 0=차단됨 → 디커플링 강화
+    d.US_CHINA_TECH_DECOUPLING_LEVEL = {
+      name: 'us_china_tech_decoupling_level',
+      value: dcLevel,
+      date: today(),
+      formula: `칩제재30D=${chipSanctions ?? 'manual미입력'} SMIC7nm=${smicBlock ?? 'manual미입력'}. level=${dcLevel} (+2=디커플링가속, 미국 기술 패권 강화). video4 §06:14 "H100/EUV 통제".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-B #12: FED_CUT_PRETEXT_BUILDUP_LEVEL ===
+  // video4 §06:24 "에너지/지정학 → 연준 인하 명분 빌드업"
+  // WTI 30D ≥ +10% + GEOPOLITICAL_RISK ≥ 3 + ISM_PROXY ≤ 50 + ICSA 4주 평균 ≥ +5%
+  try {
+    const wtiHistFed = await fetchYahooHistory('CL=F', 35);
+    let wtiChg30 = null as number | null;
+    if (wtiHistFed.length >= 31) {
+      const w0f = wtiHistFed[wtiHistFed.length - 31].close;
+      const w1f = wtiHistFed[wtiHistFed.length - 1].close;
+      if (w0f > 0) wtiChg30 = ((w1f - w0f) / w0f) * 100;
+    }
+    const geoRiskFed = manualInputs?.geoRisk ?? 0;
+    const ismFed = d.ISM_PROXY?.value ?? (typeof manualInputs?.ismPmi === 'number' ? manualInputs.ismPmi : null);
+    const icsaHistFed = await getHistorySeriesLocal('ICSA', 60);
+    let icsaTrendFed = null as number | null;
+    if (icsaHistFed.length >= 8) {
+      const r4 = icsaHistFed.slice(-4).map((p) => p.value);
+      const p4 = icsaHistFed.slice(-8, -4).map((p) => p.value);
+      const r4a = r4.reduce((s, v) => s + v, 0) / 4;
+      const p4a = p4.reduce((s, v) => s + v, 0) / 4;
+      if (p4a > 0) icsaTrendFed = ((r4a - p4a) / p4a) * 100;
+    }
+    const ax1 = wtiChg30 !== null && wtiChg30 >= 10;
+    const ax2 = geoRiskFed >= 3;
+    const ax3 = ismFed !== null && ismFed <= 50;
+    const ax4 = icsaTrendFed !== null && icsaTrendFed >= 5;
+    const axCount = (ax1 ? 1 : 0) + (ax2 ? 1 : 0) + (ax3 ? 1 : 0) + (ax4 ? 1 : 0);
+    const fedLevel = axCount >= 3 ? 2 : axCount >= 2 ? 1 : 0;
+    d.FED_CUT_PRETEXT_BUILDUP_LEVEL = {
+      name: 'fed_cut_pretext_buildup_level',
+      value: fedLevel,
+      date: today(),
+      formula: `WTI30D=${wtiChg30?.toFixed(1) ?? 'n/a'}%(≥10=${ax1}) GeoRisk=${geoRiskFed}(≥3=${ax2}) ISM=${ismFed?.toFixed(1) ?? 'n/a'}(≤50=${ax3}) ICSA트렌드=${icsaTrendFed?.toFixed(1) ?? 'n/a'}%(≥5=${ax4}). ${axCount}/4축→level=${fedLevel}. video4 §06:24 "인하 명분 빌드업".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-B #13: SMART_MONEY_DISTRIBUTION_PHASE_LEVEL ===
+  // video4 §08:59 "고점 + 기관 매도 + 애널 호평 = 분배 단계"
+  // NASDAQ ATH 갱신 진행 중 (현재가 > ATH × 0.97) AND 기관매도 ≤ -2 AND 애널-펀드 괴리 ≤ -2
+  try {
+    const nqNowDist = val(raw, 'NASDAQ');
+    const nqDdDist = d.NASDAQ_DRAWDOWN_ATH?.value ?? null;
+    const instFlowDist = d.INSTITUTIONAL_NASDAQ_FLOW?.value ?? null;
+    const analystDiv = d.ANALYST_CONSENSUS_VS_FUND_DIVERGENCE?.value ?? null;
+    const nearATH = nqDdDist !== null && nqDdDist >= -3; // ATH ×0.97 근처
+    const instSelling = instFlowDist !== null && instFlowDist <= -2;
+    const analystBullish = analystDiv !== null && analystDiv <= -2; // 애널 과도 낙관 vs 펀드 매도
+    const distAxes = (nearATH ? 1 : 0) + (instSelling ? 1 : 0) + (analystBullish ? 1 : 0);
+    const distLevel = distAxes === 3 ? -2 : distAxes === 2 ? -1 : 0;
+    d.SMART_MONEY_DISTRIBUTION_PHASE_LEVEL = {
+      name: 'smart_money_distribution_phase_level',
+      value: distLevel,
+      date: today(),
+      formula: `ATH근접(DD=${nqDdDist?.toFixed(1) ?? 'n/a'}%≥-3=${nearATH}) 기관매도(flow=${instFlowDist ?? 'n/a'}≤-2=${instSelling}) 애널괴리(div=${analystDiv ?? 'n/a'}≤-2=${analystBullish}). 3축→-2 분배. video4 §08:59 "고점+기관매도+애널호평=분배".`,
+    };
+  } catch { void 0; }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 30차 P3-C: 사용자 행동 + KOSPI + video6 보강 8건
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P3-C #14: WITHDRAWAL_SEQUENCE_RISK_LEVEL ===
+  // video3 §00:30 "현금 유출 + 시장 무너짐 겹침 = 30년 계획 무너짐"
+  // manualInputs.userCashflowEventDate + NASDAQ_DRAWDOWN_ATH → D-90 이내 + DD ≤ -15% → level=-2
+  try {
+    const cashEventDate = manualInputs?.userCashflowEventDate ?? null;
+    const nqDdSeq = d.NASDAQ_DRAWDOWN_ATH?.value ?? null;
+    let seqLevel = 0;
+    let daysToEvent: number | null = null;
+    if (cashEventDate) {
+      daysToEvent = Math.ceil((new Date(cashEventDate).getTime() - Date.now()) / 86400000);
+    }
+    const eventNear = daysToEvent !== null && daysToEvent >= 0 && daysToEvent <= 90;
+    const ddDeep = nqDdSeq !== null && nqDdSeq <= -15;
+    if (eventNear && ddDeep) seqLevel = -2;
+    else if (eventNear && nqDdSeq !== null && nqDdSeq <= -10) seqLevel = -1;
+    d.WITHDRAWAL_SEQUENCE_RISK_LEVEL = {
+      name: 'withdrawal_sequence_risk_level',
+      value: seqLevel,
+      date: today(),
+      formula: `현금유출이벤트D-${daysToEvent ?? '미입력'}(≤90=${eventNear}) NASDAQ_DD=${nqDdSeq?.toFixed(1) ?? 'n/a'}%(≤-15=${ddDeep}). -2=시퀀스리스크경고. video3 §00:30 "30년계획무너짐".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-C #15: DCA_VS_TIMING_EDGE_BACKTEST ===
+  // video3 §02:15 "흐름 타면 평균 단가 낮아짐"
+  // 단순 백테스트 참조 통계 — 5년 DCA vs signal 기반 평균 단가 비교
+  try {
+    const nqHist5Y = await fetchYahooHistory('^IXIC', 1260);
+    if (nqHist5Y.length >= 250) {
+      const closes = nqHist5Y.map((h) => h.close);
+      const dcaAvgPrice = closes.reduce((s, v) => s + v, 0) / closes.length;
+      // Signal 기반: 매월 최저가(근사) 매수 → 실제로는 단순히 SMA200 하회 시점만
+      const below200 = closes.filter((_, i) => {
+        if (i < 200) return false;
+        const sma200 = closes.slice(i - 200, i).reduce((s, v) => s + v, 0) / 200;
+        return closes[i] < sma200;
+      });
+      const signalAvgPrice = below200.length > 0 ? below200.reduce((s, v) => s + v, 0) / below200.length : dcaAvgPrice;
+      const edgePct = dcaAvgPrice > 0 ? ((dcaAvgPrice - signalAvgPrice) / dcaAvgPrice) * 100 : 0;
+      d.DCA_VS_TIMING_EDGE_BACKTEST = {
+        name: 'dca_vs_timing_edge_backtest',
+        value: parseFloat(edgePct.toFixed(2)),
+        date: today(),
+        formula: `5년 DCA 평균단가=${dcaAvgPrice.toFixed(0)} vs SMA200하회시점매수 평균단가=${signalAvgPrice.toFixed(0)} → edge=${edgePct.toFixed(1)}%. video3 §02:15 "흐름 타면 평균 단가 낮아짐".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P3-C #16: LEVERAGE_RECOVERY_RECOMMENDATION_FOR_LOW_CASH ===
+  // video3 §19:05 "현금 부족 시 조정 반등 구간 레버리지 활용"
+  // user.cashRatio < 20% AND NASDAQ_DRAWDOWN ≤ -25% AND 현재가 ≥ 200DMA × 0.95 → level=1
+  try {
+    const cashPctLev = manualInputs?.cashPct ?? null;
+    const nqDdLev = d.NASDAQ_DRAWDOWN_ATH?.value ?? null;
+    const above200Lev = d.NASDAQ_ABOVE_200DMA?.value ?? null;
+    const cashLow = cashPctLev !== null && cashPctLev < 20;
+    const ddDeepLev = nqDdLev !== null && nqDdLev <= -25;
+    const near200Lev = above200Lev !== null && above200Lev <= 0.05; // within 5% of 200DMA or above
+    const levRecLevel = (cashLow && ddDeepLev) ? 1 : 0;
+    d.LEVERAGE_RECOVERY_RECOMMENDATION_FOR_LOW_CASH = {
+      name: 'leverage_recovery_recommendation_for_low_cash',
+      value: levRecLevel,
+      date: today(),
+      formula: `cashRatio=${cashPctLev ?? 'n/a'}%(<20=${cashLow}) NASDAQ_DD=${nqDdLev?.toFixed(1) ?? 'n/a'}%(≤-25=${ddDeepLev}). 1=조정반등 레버리지 권고. video3 §19:05 "현금부족 시 레버리지 활용".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-C #17: KR_WAR_RELIEF_POLICY_FUND_FLAG ===
+  // stt_kospi §10:34 "27조 정책 금융"
+  // manualInputs.krWarReliefFundActivationDate → 발효 후 6개월 lag 카운트
+  try {
+    const fundDate = manualInputs?.krWarReliefFundActivationDate ?? null;
+    let fundFlag = 0;
+    let fundLagDays: number | null = null;
+    if (fundDate) {
+      fundLagDays = Math.floor((Date.now() - new Date(fundDate).getTime()) / 86400000);
+      if (fundLagDays >= 0 && fundLagDays <= 180) fundFlag = 1;
+    }
+    d.KR_WAR_RELIEF_POLICY_FUND_FLAG = {
+      name: 'kr_war_relief_policy_fund_flag',
+      value: fundFlag,
+      date: today(),
+      formula: `정책금융발효 D+${fundLagDays ?? '미입력'}일 (0~180일 내=1). KOSPI signal +0.5 보조. stt_kospi §10:34 "27조 정책 금융".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-C #18: KR_ENERGY_DIPLOMACY_FLAG ===
+  // stt_kospi §10:39 "프랑스-한국 원자력/풍력 협력"
+  // manualInputs.krEnergyDiplomacyEventCount ≥ 1 → flag=1 (원자력/풍력 섹터 +0.1 보조)
+  try {
+    const energyEvents = manualInputs?.krEnergyDiplomacyEventCount ?? null;
+    const energyFlag = energyEvents !== null && energyEvents >= 1 ? 1 : 0;
+    d.KR_ENERGY_DIPLOMACY_FLAG = {
+      name: 'kr_energy_diplomacy_flag',
+      value: energyFlag,
+      date: today(),
+      formula: `에너지외교이벤트수=${energyEvents ?? '미입력'}(≥1=${energyFlag === 1}). 원자력/풍력 섹터 +0.1 보조. stt_kospi §10:39 "프랑스-한국 원자력/풍력 협력".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-C #19: KR_SEMI_OP_FORECAST_LEVEL ===
+  // stt_kospi §02:56 "골드만 삼성 239조 / SK 202조"
+  // manualInputs.samsungOperProfitForecast / hynixOperProfitForecast
+  // 합산 ≥ 400조 → level=+1, < 200조 → -1
+  try {
+    const samsungOp = manualInputs?.samsungOperProfitForecast ?? null;
+    const hynixOp = manualInputs?.hynixOperProfitForecast ?? null;
+    let semiLevel = 0;
+    let semiTotal: number | null = null;
+    if (samsungOp !== null || hynixOp !== null) {
+      semiTotal = (samsungOp ?? 0) + (hynixOp ?? 0);
+      if (semiTotal >= 400) semiLevel = 1;
+      else if (semiTotal < 200 && semiTotal > 0) semiLevel = -1;
+    }
+    d.KR_SEMI_OP_FORECAST_LEVEL = {
+      name: 'kr_semi_op_forecast_level',
+      value: semiLevel,
+      date: today(),
+      formula: `삼성OP=${samsungOp ?? '미입력'}조 SK하이닉스OP=${hynixOp ?? '미입력'}조 합산=${semiTotal ?? 'n/a'}조. ≥400→+1 <200→-1. stt_kospi §02:56.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-C #20: INVESTOR_HOLDINGS_FINANCIAL_HEALTH_LEVEL ===
+  // video6 §03:54 "흑자부도 / 재무 안정성"
+  // manualInputs.userHoldingsDebtRatio / currentRatio / cashFlow → -2 위험 ~ +2 안정
+  try {
+    const debtRatio = manualInputs?.userHoldingsDebtRatio ?? null;
+    const currentRatioH = manualInputs?.userHoldingsCurrentRatio ?? null;
+    const cashFlowH = manualInputs?.userHoldingsCashFlow ?? null;
+    let healthLevel = 0;
+    let healthAxes = 0;
+    if (debtRatio !== null) {
+      if (debtRatio < 50) healthAxes += 1;
+      else if (debtRatio > 150) healthAxes -= 1;
+    }
+    if (currentRatioH !== null) {
+      if (currentRatioH > 2) healthAxes += 1;
+      else if (currentRatioH < 1) healthAxes -= 1;
+    }
+    if (cashFlowH !== null) {
+      if (cashFlowH > 0) healthAxes += 1;
+      else healthAxes -= 1;
+    }
+    if (healthAxes >= 2) healthLevel = 2;
+    else if (healthAxes === 1) healthLevel = 1;
+    else if (healthAxes === -1) healthLevel = -1;
+    else if (healthAxes <= -2) healthLevel = -2;
+    d.INVESTOR_HOLDINGS_FINANCIAL_HEALTH_LEVEL = {
+      name: 'investor_holdings_financial_health_level',
+      value: healthLevel,
+      date: today(),
+      formula: `부채비율=${debtRatio ?? '미입력'}% 유동비율=${currentRatioH ?? '미입력'} 현금흐름=${cashFlowH ?? '미입력'}. level=${healthLevel} (-2위험~+2안정). video6 §03:54 "흑자부도/재무안정성".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-C #21: ASSET_LEADERSHIP_BY_REGIME_LEVEL ===
+  // video6 §"전쟁/유가↑ → 금/에너지 강"
+  // regime → top 자산 매핑 텍스트 (signal 영향 X, formula 에 라벨 노출)
+  try {
+    // REGIME_LABEL value 는 numeric code (100=RISK_ON, 80=NEUTRAL, 60=CAUTION, 40=CORRECTION, 30=STAGFLATION, 20=PANIC_BUT_OK, 10=BOND_VIGILANTE, 0=RECESSION_RISK)
+    const regimeCode = (d.REGIME_LABEL?.value as number) ?? null;
+    let regimeNameP3C: string | null = null;
+    if (regimeCode === 100) regimeNameP3C = 'RISK_ON';
+    else if (regimeCode === 80) regimeNameP3C = 'NEUTRAL';
+    else if (regimeCode === 60) regimeNameP3C = 'CAUTION';
+    else if (regimeCode === 40) regimeNameP3C = 'CORRECTION';
+    else if (regimeCode === 30) regimeNameP3C = 'STAGFLATION';
+    else if (regimeCode === 20) regimeNameP3C = 'PANIC_BUT_OK';
+    else if (regimeCode === 10) regimeNameP3C = 'BOND_VIGILANTE';
+    else if (regimeCode === 0) regimeNameP3C = 'RECESSION_RISK';
+    const regimeMap: Record<string, string> = {
+      'STAGFLATION': '금(GOLD) + 에너지(OIL) 리더십',
+      'RISK_ON': '성장주(NASDAQ) + 반도체(KOSPI) 리더십',
+      'BOND_VIGILANTE': '단기채(CASH) + 금(GOLD) 리더십',
+      'RECESSION_RISK': '금(GOLD) + 현금(CASH) 방어',
+      'NEUTRAL': '균형 배분 (특정 리더십 없음)',
+      'CORRECTION': '현금(CASH) + 금(GOLD) 방어',
+      'CAUTION': '금(GOLD) + 현금(CASH) 우선',
+      'PANIC_BUT_OK': '성장주(NASDAQ) 역발상 매수',
+    };
+    const leaderLabel = regimeNameP3C ? (regimeMap[regimeNameP3C] ?? '데이터 대기') : '데이터 대기';
+    d.ASSET_LEADERSHIP_BY_REGIME_LEVEL = {
+      name: 'asset_leadership_by_regime_level',
+      value: 0, // 참조 전용 — signal 영향 없음
+      date: today(),
+      formula: `regime=${regimeNameP3C ?? 'n/a'} → ${leaderLabel}. video6 §"전쟁/유가↑→금/에너지강" 자산군 리더십 매핑. 참조 전용.`,
+    };
+  } catch { void 0; }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 30차 P3-D: manualInputs stub + 노션 + 종합 8건
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P3-D #22: TIPRANKS_SMART_SCORE_MANUAL ===
+  // manualInputs.tipranksSmartScore (1~10 사용자 입력) → ≥8 +1 / ≤3 -1
+  try {
+    const tsScore = manualInputs?.tipranksSmartScore ?? null;
+    let tsLevel = 0;
+    if (tsScore !== null) {
+      if (tsScore >= 8) tsLevel = 1;
+      else if (tsScore <= 3) tsLevel = -1;
+    }
+    d.TIPRANKS_SMART_SCORE_MANUAL = {
+      name: 'tipranks_smart_score_manual',
+      value: tsLevel,
+      date: today(),
+      formula: `TipRanks SmartScore=${tsScore ?? '미입력'}/10. ≥8→+1 ≤3→-1. NASDAQ 보조 (manual 데이터).`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-D #23: IMF_WEO_GLOBAL_FORECAST_MANUAL ===
+  // manualInputs.imfWeoGlobalGrowthForecast (분기 입력) → ≥3.5% +1 / ≤2% -1
+  try {
+    const imfForecast = manualInputs?.imfWeoGlobalGrowthForecast ?? null;
+    let imfLevel = 0;
+    if (imfForecast !== null) {
+      if (imfForecast >= 3.5) imfLevel = 1;
+      else if (imfForecast <= 2) imfLevel = -1;
+    }
+    d.IMF_WEO_GLOBAL_FORECAST_MANUAL = {
+      name: 'imf_weo_global_forecast_manual',
+      value: imfLevel,
+      date: today(),
+      formula: `IMF WEO 글로벌 성장률 전망=${imfForecast ?? '미입력'}%. ≥3.5→+1 ≤2→-1. regime 보조 (manual).`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-D #24: KCIF_TOPIC_TAG_ENRICHED ===
+  // 노션 §KCIF — topic tag matching: stagflation / 중동 / 사모대출 / 채권 / 외환
+  try {
+    const { fetchKcifLatestTopic } = await import('../collectors/kcif-topic');
+    const kcifData = await fetchKcifLatestTopic();
+    if (kcifData) {
+      const titleLow = (kcifData.title ?? '').toLowerCase();
+      const tags: string[] = [];
+      if (/스태그|stagfl/i.test(titleLow)) tags.push('stagflation');
+      if (/중동|이란|이스라엘|팔레스타인|후티/i.test(titleLow)) tags.push('middleeast');
+      if (/사모대출|private.credit|사모펀드/i.test(titleLow)) tags.push('private_credit');
+      if (/채권|bond|국채|금리/i.test(titleLow)) tags.push('bond');
+      if (/외환|환율|달러|fx/i.test(titleLow)) tags.push('fx');
+      d.KCIF_TOPIC_STAGFLATION_HITS_30D = {
+        name: 'kcif_topic_stagflation_hits_30d',
+        value: tags.includes('stagflation') ? 1 : 0,
+        date: today(),
+        formula: `KCIF 최신 토픽 "${(kcifData.title ?? '').slice(0, 60)}" (D-${kcifData.daysAgo}). tags=[${tags.join(',')}]. stagflation hit=${tags.includes('stagflation')}. ★ 노션 §KCIF.`,
+      };
+      d.KCIF_TOPIC_TAGS_LATEST = {
+        name: 'kcif_topic_tags_latest',
+        value: tags.length,
+        date: today(),
+        formula: `KCIF 태그: [${tags.join(', ')}]. ★ 노션 §KCIF 토픽 태그 강화.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P3-D #25: WOORI_BOND_OUTLOOK_FRESHNESS ===
+  // 노션 §우리투자증권 채권/주식/글로벌 — woori 채널 freshness 분리
+  try {
+    const { fetchDomesticReportsLatest } = await import('../collectors/domestic-reports');
+    const rptsData = await fetchDomesticReportsLatest();
+    if (rptsData?.woori) {
+      d.WOORI_BOND_OUTLOOK_DAYS_AGO = {
+        name: 'woori_bond_outlook_days_ago',
+        value: rptsData.woori.daysAgo,
+        date: today(),
+        formula: `우리투자증권 최신 리포트 D-${rptsData.woori.daysAgo}일 (${rptsData.woori.latestDate}). ≤7→freshness OK. ★ 노션 §우리투자증권.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P3-D #26: STREETSTATS_M2_LEAD_ALT_WEEKS ===
+  // 노션 §streetstats M2_SP500_LEAD — 16w/20w lead 추가
+  try {
+    const m2HistP3D = await getHistorySeriesLocal('WM2NS', 200);
+    const spHistP3D = await fetchYahooHistory('^GSPC', 200);
+    if (m2HistP3D.length >= 140 && spHistP3D.length >= 20) {
+      // 16w / 20w lead correlation
+      for (const leadWeeks of [16, 20]) {
+        const leadDays = leadWeeks * 7;
+        const shiftedM2 = m2HistP3D.slice(0, m2HistP3D.length - Math.round(leadDays / 7));
+        const spCloses = spHistP3D.slice(-shiftedM2.length).map((h) => h.close);
+        if (shiftedM2.length > 10 && spCloses.length > 10) {
+          const n = Math.min(shiftedM2.length, spCloses.length);
+          const m2Vals = shiftedM2.slice(-n).map((p) => p.value);
+          const spVals = spCloses.slice(-n);
+          const mx = m2Vals.reduce((s, v) => s + v, 0) / n;
+          const sx = spVals.reduce((s, v) => s + v, 0) / n;
+          let num = 0, dm2 = 0, dsp = 0;
+          for (let i = 0; i < n; i++) {
+            num += (m2Vals[i] - mx) * (spVals[i] - sx);
+            dm2 += (m2Vals[i] - mx) ** 2;
+            dsp += (spVals[i] - sx) ** 2;
+          }
+          const corr = (dm2 > 0 && dsp > 0) ? num / Math.sqrt(dm2 * dsp) : 0;
+          const key = leadWeeks === 16 ? 'M2_SP500_LEAD_16W' : 'M2_SP500_LEAD_20W';
+          d[key] = {
+            name: key.toLowerCase(),
+            value: parseFloat(corr.toFixed(4)),
+            date: today(),
+            formula: `M2 ${leadWeeks}주 선행 vs S&P500 상관계수=${corr.toFixed(3)}. ★ 노션 §streetstats M2_SP500_LEAD.`,
+          };
+        }
+      }
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P3-D #27: KB_HOUSING_REVIEW_FRESHNESS ===
+  // 노션 §KB 주택시장리뷰 월간 — KB 채널에 housing review 별도 stream
+  try {
+    const { fetchDomesticReportsLatest } = await import('../collectors/domestic-reports');
+    const kbData = await fetchDomesticReportsLatest();
+    if (kbData?.kbsec) {
+      d.KB_HOUSING_REVIEW_DAYS_AGO = {
+        name: 'kb_housing_review_days_ago',
+        value: kbData.kbsec.daysAgo,
+        date: today(),
+        formula: `KB증권 최신 리포트 D-${kbData.kbsec.daysAgo}일 (${kbData.kbsec.latestDate}). KB 주택시장리뷰 freshness 추적. ★ 노션 §KB 주택시장리뷰.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P3-D #28: PROBABILISTIC_EDGE_AGGREGATE_SCORE ===
+  // video4 §02:43 "51대 49 → 2% 우위"
+  // 현재 활성 ★ 마커 derived 카운트 → 가중 합 (정량 임계 만족 비율)
+  try {
+    const starKeys = [
+      'SEVEN_LENS_AGREEMENT_LEVEL', 'TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL',
+      'NASDAQ_3STAGE_TRIGGER_CHECKLIST', 'OVERHEAT_EXIT_TRIGGER',
+      'NASDAQ_SUPPORT_CLUSTER_BREAK_CASCADE', 'NASDAQ_DISPARITY_HISTORICAL_PERCENTILE',
+      'PORTFOLIO_ONE_WAY_RISK', 'MARKET_PANIC_BOTTOM_FLAG',
+      'SMART_MONEY_DISTRIBUTION_PHASE_LEVEL', 'FED_CUT_PRETEXT_BUILDUP_LEVEL',
+      'RECOVERY_TRIPLE_SIGNAL', 'VIX_HISTORIC_BUY_OPPORTUNITY',
+      'CONVICTION_SCORE_7AXIS', 'LEVERAGE_TRIGGER_3OF3',
+    ];
+    let positiveCount = 0;
+    let totalTracked = 0;
+    for (const k of starKeys) {
+      const sv = d[k]?.value;
+      if (sv !== null && sv !== undefined) {
+        totalTracked++;
+        if ((sv as number) > 0) positiveCount++;
+      }
+    }
+    const edgePct = totalTracked > 0 ? (positiveCount / totalTracked) * 100 : 0;
+    d.PROBABILISTIC_EDGE_AGGREGATE_SCORE = {
+      name: 'probabilistic_edge_aggregate_score',
+      value: parseFloat(edgePct.toFixed(1)),
+      date: today(),
+      formula: `★ 핵심 derived ${totalTracked}종 중 활성(>0) ${positiveCount}종 → 누적 edge ≈ +${edgePct.toFixed(1)}%. video4 §02:43 "51대49 → 2% 우위".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P3-D #29: META_MISSING_DERIVED_COUNT 갱신 ===
+  // 25차 이후 미갱신 — 30차 신규 critical key 추가
+  try {
+    const criticalKeysP3D = [
+      'SEVEN_LENS_AGREEMENT_LEVEL', 'INVESTMENT_TRIPLE_GATE_SCORE',
+      'KOSPI_RECOVERY_3AXIS_LEVEL', 'GOLD_AXIS_GATE_FLAG',
+      'REGIME_SECTOR_LEADERSHIP_MATCH', 'DRAWDOWN_TYPE_CLASSIFIER',
+      'VIX_HISTORIC_BUY_OPPORTUNITY', 'LEVERAGE_EXIT_AT_TARGET',
+      // 30차 신규
+      'MARKET_PANIC_BOTTOM_FLAG', 'SMART_MONEY_DISTRIBUTION_PHASE_LEVEL',
+      'FED_CUT_PRETEXT_BUILDUP_LEVEL', 'ELECTION_DDAY_REGIME_PROXIMITY',
+      'MOMENTUM_TURNING_POINT_LEVEL', 'OIL_RECESSION_CONCERN_LEVEL',
+      'NASDAQ_TOPDOWN_FRAME_CONFLICT_FLAG', 'RISK_ASSET_TOP_DETECTION_TIMING',
+      // 기존
+      'NASDAQ_DRAWDOWN_ATH', 'NASDAQ_DISPARITY', 'NASDAQ_RSI_14',
+      'GOLD_DISPARITY', 'CONVICTION_SCORE_7AXIS', 'LEVERAGE_TRIGGER_3OF3',
+      'FOMC_RATE_CUT_PROB_25BP', 'M2_SP500_LEAD_10W_ALIGNMENT',
+      'INSTITUTIONAL_NASDAQ_FLOW', 'STLFSI_LEVEL',
+    ];
+    const missingP3D = criticalKeysP3D.filter((k) => d[k] === undefined || d[k]?.value === null || d[k]?.value === undefined);
+    d.META_MISSING_DERIVED_COUNT = {
+      name: 'meta_missing_derived_count',
+      value: missingP3D.length,
+      date: today(),
+      formula: `핵심 derived ${criticalKeysP3D.length}종 중 결측 ${missingP3D.length}종${missingP3D.length > 0 ? `: ${missingP3D.slice(0, 5).join(', ')}` : ''}. 30차 P3-D 갱신 (25차→30차).`,
+    };
+  } catch { void 0; }
 
   return d;
 }
