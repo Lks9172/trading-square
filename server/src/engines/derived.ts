@@ -8555,6 +8555,222 @@ export async function computeDerived(
     };
   } catch { void 0; }
 
+  // ★ ════════════════════════════════════════════════════════════════════
+  // 30차 P1-B: 매도/하방 트리거 3건 + 분포 컨텍스트화 3건
+  // ════════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P1-B #4: OVERHEAT_EXIT_TRIGGER ===
+  // video1 §08:57 + video2 §20:01 "매도 타이밍 어느 정도 예측 가능"
+  // 자산별 (NASDAQ + GOLD): RSI ≥ 70 ∧ 이격도 ≥ +15% ∧ (DRAWDOWN_FROM_ATH ≥ 0 or ATH 근접)
+  try {
+    for (const [assetKey, rsiKey, dispKey, drawdownKey] of [
+      ['NASDAQ', 'NASDAQ_RSI_14', 'NASDAQ_DISPARITY', 'NASDAQ_DRAWDOWN_ATH'],
+      ['GOLD',   'GOLD_RSI_14',   'GOLD_DISPARITY',   null],
+    ] as const) {
+      const rsi = d[rsiKey]?.value ?? null;
+      const disp = d[dispKey]?.value ?? null;
+      const drawdown = drawdownKey ? (d[drawdownKey]?.value ?? null) : 0;
+      const axRsi = rsi !== null && rsi >= 70 ? 1 : 0;
+      const axDisp = disp !== null && disp >= 15 ? 1 : 0;
+      // DRAWDOWN_FROM_ATH ≥ 0 = ATH 근접 (≤ -5% 면 ATH 에서 멀어진 것이므로 체크 완화)
+      const axAtm = drawdown === null || drawdown >= -5 ? 1 : 0;
+      const axCount = axRsi + axDisp + axAtm;
+      let level = 0;
+      let label: string;
+      if (axCount >= 3) { level = 2; label = `🔴🔴 3축 과열 매도 트리거 (RSI${rsi?.toFixed(0)}/이격${disp?.toFixed(1)}%/ATH근접)`; }
+      else if (axCount >= 2) { level = 1; label = `🔴 2축 과열 경계 (${axCount}축)`; }
+      else { label = `⚪ 과열 트리거 없음`; }
+      const derivedKey = `${assetKey}_OVERHEAT_EXIT_TRIGGER`;
+      d[derivedKey] = {
+        name: derivedKey.toLowerCase(),
+        value: level,
+        date: today(),
+        formula: `RSI${axRsi}(${rsi?.toFixed(1) ?? '-'}≥70)+이격${axDisp}(${disp?.toFixed(1) ?? '-'}%≥15)+ATH근접${axAtm}=${axCount}축. level=${level}. ${label}. ★ video1 §08:57 + video2 §20:01 "매도 타이밍".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P1-B #5: NASDAQ_SUPPORT_CLUSTER_BREAK_CASCADE ===
+  // video3 §14:46 "지지선 군집 동시 이탈 cascade"
+  try {
+    const nPrice5 = val(raw, 'NASDAQ');
+    const supports: Array<{ name: string; price: number | null }> = [
+      { name: 'SMA200', price: d.NASDAQ_SMA200?.value ?? null },
+      { name: 'ChannelMid', price: d.NASDAQ_CHANNEL_MID?.value ?? null },
+      { name: 'ChannelLower', price: d.NASDAQ_CHANNEL_LOWER?.value ?? null },
+      { name: 'Weekly20MA', price: d.NASDAQ_WEEKLY_20MA?.value ?? null },
+    ];
+    const validSupports = supports.filter(s => s.price !== null) as Array<{ name: string; price: number }>;
+    if (validSupports.length >= 2 && nPrice5 !== null) {
+      // 군집: 서로의 거리가 3% 이내 — 모든 쌍 체크
+      let clusterCount = 0;
+      for (let i = 0; i < validSupports.length; i++) {
+        for (let j = i + 1; j < validSupports.length; j++) {
+          const mid = (validSupports[i].price + validSupports[j].price) / 2;
+          if (mid > 0 && Math.abs(validSupports[i].price - validSupports[j].price) / mid * 100 <= 3) clusterCount++;
+        }
+      }
+      const clusterFormed = clusterCount >= 1;
+      // cascade: 군집 형성 + 현재가 < 모든 유효 지지선
+      const belowAll = validSupports.every(s => nPrice5 < s.price);
+      const cascade = clusterFormed && belowAll ? 2 : (clusterFormed && nPrice5 < validSupports[0].price ? 1 : 0);
+      const supportLabels = validSupports.map(s => `${s.name}=$${s.price.toFixed(0)}`).join(', ');
+      d.NASDAQ_SUPPORT_CLUSTER_BREAK_CASCADE = {
+        name: 'nasdaq_support_cluster_break_cascade',
+        value: cascade,
+        date: today(),
+        formula: `지지선 군집 쌍(3%이내)=${clusterCount}, 현재가$${nPrice5?.toFixed(0)} < 전체=${belowAll}, cascade=${cascade}. 지지선: ${supportLabels}. ★ video3 §14:46 "지지선 군집 동시 이탈 cascade".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P1-B #6: NASDAQ_CRASH_BOUNCE_3AXIS ===
+  // video3 §16:09 "급락 도중 진입 — (a) 둔화 (b) 손절 마디 (c) 더블 바텀 동시 게이트"
+  try {
+    const ddATH = d.NASDAQ_DRAWDOWN_ATH?.value ?? null;
+    if (ddATH !== null && ddATH <= -10) {
+      // axis A: ROC 5d > ROC 20d (압력 둔화)
+      const nHist30 = await fetchYahooHistory('^IXIC', 35);
+      let axisA = 0;
+      if (nHist30.length >= 21) {
+        const closes6 = nHist30.map(h => h.close);
+        const cur6 = closes6[closes6.length - 1];
+        const prev5 = closes6[closes6.length - 6];
+        const prev20 = closes6[closes6.length - 21];
+        const roc5 = prev5 > 0 ? (cur6 - prev5) / prev5 * 100 : 0;
+        const roc20 = prev20 > 0 ? (cur6 - prev20) / prev20 * 100 : 0;
+        axisA = roc5 > roc20 ? 1 : 0;
+      }
+      // axis B: swing high 돌파 — 20일 중 최고 close 대비 현재가 > 그 이전 고점 (단순화: nHist 최고 근접 ±1%)
+      let axisB = 0;
+      if (nHist30.length >= 20) {
+        const closes20 = nHist30.slice(-20).map(h => h.close);
+        const swingHigh = Math.max(...closes20.slice(0, 19));
+        const curPrice6 = closes20[closes20.length - 1];
+        axisB = curPrice6 > swingHigh ? 1 : 0;
+      }
+      // axis C: NASDAQ_W_BOTTOM_CONFIRMED ≥ 1
+      const axisC = (d.NASDAQ_W_BOTTOM_CONFIRMED?.value ?? 0) >= 1 ? 1 : 0;
+      const total3 = axisA + axisB + axisC;
+      let level6: number;
+      if (total3 === 3) level6 = 2;
+      else if (total3 === 2) level6 = 1;
+      else level6 = 0;
+      d.NASDAQ_CRASH_BOUNCE_3AXIS = {
+        name: 'nasdaq_crash_bounce_3axis',
+        value: level6,
+        date: today(),
+        formula: `drawdown=${ddATH.toFixed(1)}%(≤-10%). 둔화ROC${axisA}+swing돌파${axisB}+W바텀${axisC}=${total3}축. level=${level6}. ★ video3 §16:09 "급락 도중 (a)둔화/(b)손절/(c)더블바텀 동시 게이트".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P1-B #7: NASDAQ_DISPARITY_HISTORICAL_PERCENTILE ===
+  // video3 §04:25 "역사적으로 이격 크게 벌어진 구간 = 저점"
+  // NASDAQ 이격도 5년 분포 percentile 산출.
+  try {
+    const nDisp7 = d.NASDAQ_DISPARITY?.value ?? null;
+    if (nDisp7 !== null) {
+      // history-store 에서 NASDAQ_DISPARITY 5년(1260일) 불러오기
+      const dispHist = await readHistory('derived', 'NASDAQ_DISPARITY').catch(() => [] as Array<{date:string;value:number}>);
+      // fallback: yahoo 직접 계산
+      let dispSeries: number[] = dispHist.slice(-1260).map(p => p.value).filter(Number.isFinite);
+      if (dispSeries.length < 100) {
+        // yahoo 로 5년치 계산
+        const ndxFull = await fetchYahooHistory('^IXIC', 1300);
+        if (ndxFull.length >= 200) {
+          const closes = ndxFull.map(h => h.close);
+          for (let i = 200; i < closes.length; i++) {
+            const sma = closes.slice(i - 200, i).reduce((a, b) => a + b, 0) / 200;
+            if (sma > 0) dispSeries.push((closes[i] - sma) / sma * 100);
+          }
+        }
+      }
+      let pct7 = 50; // fallback 중립
+      if (dispSeries.length >= 20) {
+        const sorted = [...dispSeries].sort((a, b) => a - b);
+        const rank = sorted.filter(v => v <= nDisp7).length;
+        pct7 = Math.round(rank / sorted.length * 100);
+      }
+      let level7: number;
+      let label7: string;
+      if (pct7 <= 5) { level7 = 2; label7 = `🟢🟢 역대 극저점 (${pct7}pct)`; }
+      else if (pct7 <= 20) { level7 = 1; label7 = `🟢 역대 저점권 (${pct7}pct)`; }
+      else if (pct7 >= 95) { level7 = -2; label7 = `🔴🔴 역대 극과열 (${pct7}pct)`; }
+      else if (pct7 >= 80) { level7 = -1; label7 = `🔴 역대 과열 (${pct7}pct)`; }
+      else { level7 = 0; label7 = `⚪ 중립 (${pct7}pct)`; }
+      d.NASDAQ_DISPARITY_HISTORICAL_PERCENTILE = {
+        name: 'nasdaq_disparity_historical_percentile',
+        value: pct7,
+        date: today(),
+        formula: `현재 이격도 ${nDisp7.toFixed(1)}% → 5년 분포 ${pct7}pct. level=${level7}. ${label7}. ★ video3 §04:25 "역사적 이격 구간 = 저점".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P1-B #8: MA_FAN_EXPANSION_DIRECTION ===
+  // video3 §05:33 "수렴 vs 확산 + 추세 방향"
+  try {
+    const dmaConv8 = d.DMA_CONVERGENCE_LEVEL?.value ?? null;
+    const nDisp8 = d.NASDAQ_DISPARITY?.value ?? null;
+    let level8 = 0;
+    let label8 = '중립 (수렴 또는 데이터 없음)';
+    if (dmaConv8 !== null && dmaConv8 <= -2 && nDisp8 !== null) {
+      if (nDisp8 > 0) { level8 = 1; label8 = `🟢 확산 강(level${dmaConv8}) + 상승(이격${nDisp8.toFixed(1)}%) → 추세 강화`; }
+      else if (nDisp8 < 0) { level8 = -1; label8 = `🔴 확산 강(level${dmaConv8}) + 하락(이격${nDisp8.toFixed(1)}%) → 매도 강화`; }
+    }
+    d.MA_FAN_EXPANSION_DIRECTION = {
+      name: 'ma_fan_expansion_direction',
+      value: level8,
+      date: today(),
+      formula: `DMA_CONVERGENCE_LEVEL=${dmaConv8 ?? 'n/a'}, NASDAQ_DISPARITY=${nDisp8?.toFixed(1) ?? 'n/a'}%. level=${level8}. ${label8}. ★ video3 §05:33 "수렴 vs 확산 + 추세 방향".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P1-B #9: TREND_INCEPTION_FLAG ===
+  // video2 §02:47 "추세 초기 인식"
+  // 골든크로스 발생 후 D-30 이내 + 거래량 5D > 20D × 1.2 + 종가 > SMA50
+  try {
+    const sma50val = d.NASDAQ_SMA50?.value ?? null;
+    const nPriceNow = val(raw, 'NASDAQ');
+    // 골든크로스 발생일 확인: NASDAQ_SMA50 > SMA200 이며 최근 30일 내 크로스
+    const gcHist = await fetchYahooHistory('^IXIC', 250);
+    let level9 = 0;
+    if (gcHist.length >= 200 && sma50val !== null && nPriceNow !== null) {
+      const closes9 = gcHist.map(h => h.close);
+      // 골든크로스 (50DMA 상향 돌파 200DMA) 최근 30일 내 발생 여부
+      let gcDaysAgo = -1;
+      for (let i = closes9.length - 1; i >= Math.max(0, closes9.length - 31); i--) {
+        const s50 = closes9.slice(Math.max(0, i - 50), i).reduce((a, b) => a + b, 0) / Math.min(50, i);
+        const s200 = closes9.slice(Math.max(0, i - 200), i).reduce((a, b) => a + b, 0) / Math.min(200, i);
+        const s50prev = closes9.slice(Math.max(0, i - 51), i - 1).reduce((a, b) => a + b, 0) / Math.min(50, i - 1);
+        const s200prev = closes9.slice(Math.max(0, i - 201), i - 1).reduce((a, b) => a + b, 0) / Math.min(200, i - 1);
+        if (s50prev <= s200prev && s50 > s200) {
+          gcDaysAgo = closes9.length - 1 - i;
+          break;
+        }
+      }
+      if (gcDaysAgo >= 0 && gcDaysAgo <= 30) {
+        // 거래량 5D > 20D × 1.2 (volumes from history)
+        const vols = gcHist.map(h => h.volume ?? 0);
+        const vol5 = vols.slice(-5).reduce((a, b) => a + b, 0) / 5;
+        const vol20 = vols.slice(-20).reduce((a, b) => a + b, 0) / 20;
+        const volOk = vol20 > 0 && vol5 >= vol20 * 1.2;
+        // 종가 > SMA50
+        const priceOk = nPriceNow > sma50val;
+        if (volOk && priceOk) {
+          level9 = 1;
+        }
+      }
+      d.TREND_INCEPTION_FLAG = {
+        name: 'trend_inception_flag',
+        value: level9,
+        date: today(),
+        formula: `골든크로스 ${gcDaysAgo >= 0 ? `D-${gcDaysAgo}` : '없음(30일내)'}. level=${level9} (vol5/vol20×1.2=${sma50val ? (val(raw,'NASDAQ') ?? 0 > sma50val ? '✓' : '✗') : '?'}, 종가>SMA50=${nPriceNow > (sma50val ?? 999999) ? '✓' : '✗'}). ★ video2 §02:47 "추세 초기 인식".`,
+      };
+    }
+  } catch { void 0; }
+
   // ★ === 30차 P1-A #3: NASDAQ_3STAGE_TRIGGER_CHECKLIST ===
   // video3 §16:46 "200DMA / channel mid / W_BOTTOM 3축 분할매수"
   try {

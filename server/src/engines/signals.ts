@@ -803,6 +803,57 @@ function nasdaqSignal(
     }
   }
 
+  // ★ === 30차 P1-B #6: NASDAQ_CRASH_BOUNCE_3AXIS ===
+  // video3 §16:09 — 급락 도중(drawdown ≤ -10%) 3축 동시: level=2 시 met+2, level=1 시 met+1.
+  const crashBounce = dv(derived, 'NASDAQ_CRASH_BOUNCE_3AXIS');
+  if (crashBounce !== null && crashBounce >= 2) {
+    total += 2; met += 2; weightedMet += 2.0; weightedMax += 2.0;
+    reasons.push('✓ CRASH_BOUNCE_3AXIS level=2 (둔화+swing+W 3축, video3 §16:09, 가중치 2.0)');
+  } else if (crashBounce === 1) {
+    total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
+    reasons.push('✓ CRASH_BOUNCE_3AXIS level=1 (2축, video3 §16:09, 가중치 1.0)');
+  }
+
+  // ★ === 30차 P1-B #7: NASDAQ_DISPARITY_HISTORICAL_PERCENTILE ===
+  // video3 §04:25 — 5년 분포 percentile ±1/±2 met 가산.
+  const dispPct = dv(derived, 'NASDAQ_DISPARITY_HISTORICAL_PERCENTILE');
+  if (dispPct !== null) {
+    if (dispPct <= 5) {
+      total += 2; met += 2; weightedMet += 2.0; weightedMax += 2.0;
+      reasons.push(`✓ DISPARITY 역대 극저점 (${dispPct}pct, video3 §04:25, 가중치 2.0)`);
+    } else if (dispPct <= 20) {
+      total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
+      reasons.push(`✓ DISPARITY 역대 저점권 (${dispPct}pct, video3 §04:25, 가중치 1.0)`);
+    } else if (dispPct >= 95) {
+      weightedMax += 2.0;
+      unmetReasons.push(`⚠️ DISPARITY 역대 극과열 (${dispPct}pct ≥ 95, video3 §04:25, 가중치 2.0 미충족)`);
+    } else if (dispPct >= 80) {
+      weightedMax += 1.0;
+      unmetReasons.push(`⚠️ DISPARITY 역대 과열 (${dispPct}pct ≥ 80, video3 §04:25, 가중치 1.0 미충족)`);
+    }
+  }
+
+  // ★ === 30차 P1-B #8: MA_FAN_EXPANSION_DIRECTION ===
+  // video3 §05:33 — DMA 확산 강(level≤-2): 상승 확산=+1, 하락 확산=-1.
+  const maFan = dv(derived, 'MA_FAN_EXPANSION_DIRECTION');
+  if (maFan !== null && maFan !== 0) {
+    if (maFan > 0) {
+      total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
+      reasons.push('✓ MA_FAN 확산+상승 (추세 강화, video3 §05:33, 가중치 1.0)');
+    } else {
+      total += 1; weightedMax += 1.0;
+      unmetReasons.push('⚠️ MA_FAN 확산+하락 (매도 강화, video3 §05:33, 가중치 1.0 미충족)');
+    }
+  }
+
+  // ★ === 30차 P1-B #9: TREND_INCEPTION_FLAG ===
+  // video2 §02:47 — 골든크로스 D-30+거래량+가격 3축 → level=1 시 met+1.
+  const trendInception = dv(derived, 'TREND_INCEPTION_FLAG');
+  if (trendInception === 1) {
+    total += 1; met += 1; weightedMet += 1.0; weightedMax += 1.0;
+    reasons.push('✓ TREND_INCEPTION_FLAG (골든크로스 D-30내+거래량+가격, video2 §02:47, 가중치 1.0)');
+  }
+
   // 23차 Tier 1#3: NASDAQ signal met/total 정합 cap.
   //   기존 met++ 만 하는 가점들 (NASDAQ_DRAWDOWN, RSI<30, 이격도 -25%, W_BOTTOM, econDiv, wtiCuLag 등) 이
   //   total 동기화 안 돼 met/total > 100% 가능. PSYCH 외 가점은 "강도 가산"으로 보고 met cap = total.
@@ -824,6 +875,30 @@ function nasdaqSignal(
     strongBuy: Math.max(1, total - 1),
   });
   let signal = baseSignal;
+
+  // === Override 0.5: 30차 P1-B — OVERHEAT_EXIT_TRIGGER ===
+  // video1 §08:57 + video2 §20:01 — level=2 시 STRONG_BUY → REDUCE, level=1 시 unmetReasons.
+  const nasdaqOverheatExit = dv(derived, 'NASDAQ_OVERHEAT_EXIT_TRIGGER');
+  if (nasdaqOverheatExit !== null && nasdaqOverheatExit >= 2 && signal !== 'SELL') {
+    const prevOE = signal;
+    signal = 'REDUCE';
+    const rOE = `NASDAQ_OVERHEAT_EXIT level=2 (RSI≥70+이격≥15%+ATH근접, video1 §08:57) → ${prevOE} → REDUCE`;
+    overrides.push(rOE); unmetReasons.push(rOE);
+  } else if (nasdaqOverheatExit === 1) {
+    unmetReasons.push('⚠️ NASDAQ 과열 2축 경계 (video1 §08:57 매도 타이밍 주의)');
+  }
+
+  // === Override 0.6: 30차 P1-B — NASDAQ_SUPPORT_CLUSTER_BREAK_CASCADE ===
+  // video3 §14:46 — cascade=2 시 REDUCE 가산.
+  const clusterCascade = dv(derived, 'NASDAQ_SUPPORT_CLUSTER_BREAK_CASCADE');
+  if (clusterCascade !== null && clusterCascade >= 2 && signal !== 'SELL' && signal !== 'REDUCE') {
+    const prevCC = signal;
+    signal = 'REDUCE';
+    const rCC = `지지선 군집 cascade=2 (4지지선 군집+이탈, video3 §14:46) → ${prevCC} → REDUCE`;
+    overrides.push(rCC); unmetReasons.push(rCC);
+  } else if (clusterCascade === 1) {
+    unmetReasons.push('⚠️ 지지선 군집 근접 (cascade=1, video3 §14:46 다중 손절 위험)');
+  }
 
   // === Override 1: 과열 REDUCE (overheatFlags 2개+) ===
   if (overheatFlags.length >= 2 && signal !== 'SELL') {
@@ -1212,6 +1287,18 @@ function goldSignal(
   // 29차 fix-B: GOLD weightedScore cap — score/maxScore 동시 증가 패턴이지만
   // 향후 신규 가산 도입 시 over-cap 방지 위해 명시 cap 일관 적용.
   if (score > maxScore) score = maxScore;
+
+  // ★ === 30차 P1-B #4: GOLD_OVERHEAT_EXIT_TRIGGER — level=2 시 REDUCE 강등 ===
+  // video1 §08:57 + video2 §20:01.
+  const goldOverheatExit = dv(derived, 'GOLD_OVERHEAT_EXIT_TRIGGER');
+  if (goldOverheatExit !== null && goldOverheatExit >= 2 && signal !== 'REDUCE') {
+    const prevGOE = signal;
+    signal = 'REDUCE';
+    const rGOE = `GOLD_OVERHEAT_EXIT level=2 (RSI≥70+이격≥15%+ATH근접, video1 §08:57) → ${prevGOE} → REDUCE`;
+    overrides.push(rGOE); unmetReasons.push(rGOE);
+  } else if (goldOverheatExit === 1) {
+    unmetReasons.push('⚠️ GOLD 과열 2축 경계 (video1 §08:57)');
+  }
 
   // === 29차 fix-F — 자산군 × regime 정합 게이트 ===
   signal = applyRegimeCoherenceGate('GOLD', signal, regime.regime, overrides, unmetReasons);
