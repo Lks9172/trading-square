@@ -158,6 +158,22 @@ export interface UserProfile {
     krxPensionFlow5DTrillion?: number | null;
     // ★ 29차 P3-E #29: KRX 공매도 잔고 비율 (%)
     krxShortInterestPct?: number | null;
+    // ★ 30차 P2-B #8: 베센트/워시 정책 톤 레벨 (-2 매파 ~ +2 비둘기)
+    bessentToneLevel?: number | null;
+    warshToneLevel?: number | null;
+    // ★ 30차 P2-B #9: Fed dot-plot 내포 인하 확률 (%)
+    fedDotPlotImpliedCutsPct?: number | null;
+    // ★ 30차 P2-B #10: 미중 칩 제재 건수 (30D) + AI 인프라 capex 비중
+    usChinaChipSanctionCount30D?: number | null;
+    usAiInfraCapexShare?: number | null;
+    // ★ 30차 P2-D #23: 한국 GDP 성장률 전망 (%)
+    krGdpGrowthForecast?: number | null;
+    // ★ 30차 P2-E #27: Powell 발언일 D-Day (0=오늘)
+    powellSpeechDDay?: number | null;
+    // ★ 30차 P2-E #28: AI 내러티브 강도 (0=없음, 1=보통, 2=강)
+    aiNarrativeStrength?: number | null;
+    // ★ 30차 P2-E #30: 현금 비중 (%)
+    cashPct?: number | null;
   };
 }
 

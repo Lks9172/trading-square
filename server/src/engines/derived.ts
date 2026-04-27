@@ -9203,6 +9203,162 @@ export async function computeDerived(
     };
   } catch { void 0; }
 
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 30차 P2-A: video3 NASDAQ 패턴 5건
+  // ═══════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P2-A #1: NASDAQ_CROSS_AGE_AND_MAGNITUDE ===
+  // video3 §06:01 "골든/데드 크로스는 이미 20-30% 오른/빠진 후 늦은 신호"
+  // NASDAQ_CROSS 발생 후 경과일 + 누적 수익률 (정보 노출용, signals.ts 영향 없음)
+  try {
+    const crossState = d.NASDAQ_CROSS?.value ?? null;
+    if (crossState !== null) {
+      const nHist = await fetchYahooHistory('^IXIC', 120);
+      if (nHist.length >= 10) {
+        const closes = nHist.map(p => p.close);
+        // 크로스 발생 이후 경과일을 SMA 50/200 비교로 추정
+        let ageDays = 0;
+        let cumReturnPct = 0;
+        const crossDir = crossState >= 0.5 ? 'GC' : (crossState <= -0.5 ? 'DC' : 'NONE');
+        if (crossDir !== 'NONE') {
+          // 최근 cross 발생 시점 찾기 (50MA 와 200MA 교차점)
+          for (let i = 1; i < Math.min(closes.length - 200, 90); i++) {
+            const sma50Now = closes.slice(i, i + 50).reduce((a, b) => a + b, 0) / 50;
+            const sma200Now = closes.slice(i, i + 200).reduce((a, b) => a + b, 0) / 200;
+            const sma50Prev = closes.slice(i + 1, i + 51).reduce((a, b) => a + b, 0) / 50;
+            const sma200Prev = closes.slice(i + 1, i + 201).reduce((a, b) => a + b, 0) / 200;
+            const wasBelow = sma50Prev < sma200Prev;
+            const isAbove = sma50Now >= sma200Now;
+            if ((crossDir === 'GC' && wasBelow && isAbove) ||
+                (crossDir === 'DC' && !wasBelow && !isAbove)) {
+              ageDays = i;
+              cumReturnPct = ((closes[0] - closes[i]) / closes[i]) * 100;
+              break;
+            }
+          }
+        }
+        d.NASDAQ_CROSS_AGE_AND_MAGNITUDE = {
+          name: 'nasdaq_cross_age_and_magnitude',
+          value: ageDays,
+          date: today(),
+          formula: `크로스 방향=${crossDir}. 발생 후 ${ageDays}일 경과, 누적 수익률 ${cumReturnPct.toFixed(1)}%. ★ video3 §06:01 "골든/데드 크로스는 이미 20-30% 오른/빠진 후 늦은 신호". ageDays=${ageDays}, cumReturnPct=${cumReturnPct.toFixed(1)}`.slice(0, 300),
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-A #2: NASDAQ_RARE_BEAR_YEAR_FREQUENCY ===
+  // video3 §09:03 "1990+ 연간 음봉 단 두 개 (2008/2022) = 5.7% 희소"
+  // 현재 YTD < 0 + drawdown 진행 시 베이스레이트 표시
+  try {
+    const nqdraw = d.NASDAQ_DRAWDOWN_ATH?.value ?? null;
+    const nHist2 = await fetchYahooHistory('^IXIC', 252);
+    if (nHist2.length >= 5) {
+      const latestClose = nHist2[0].close;
+      const firstOfYearClose = (() => {
+        const now = new Date();
+        const yearStart = new Date(now.getFullYear(), 0, 1);
+        // 올해 첫 거래일 근사: hist 역순 (최근→과거), 올해 포함된 가장 오래된 것
+        for (let i = nHist2.length - 1; i >= 0; i--) {
+          const d2 = new Date(nHist2[i].date ?? '');
+          if (d2.getFullYear() === yearStart.getFullYear()) return nHist2[i].close;
+        }
+        return nHist2[nHist2.length - 1].close;
+      })();
+      const ytdPct = ((latestClose - firstOfYearClose) / firstOfYearClose) * 100;
+      const isYtdNeg = ytdPct < 0;
+      const isDrawdownActive = nqdraw !== null && nqdraw <= -10;
+      // 1990+ 연도별 음봉 비율 고정값: 2008, 2022, 2001, 2002, 2000, 2008 포함 35년 중 ~7건 → ~20%
+      // 영상 명시: "단 두 개" = 2008/2022 (장대음봉), 빈도 5.7% = 35년 중 2건
+      const bearYearBaseRate = 5.7;
+      d.NASDAQ_RARE_BEAR_YEAR_FREQUENCY = {
+        name: 'nasdaq_rare_bear_year_frequency',
+        value: (isYtdNeg && isDrawdownActive) ? 1 : 0,
+        date: today(),
+        formula: `YTD ${ytdPct.toFixed(1)}% (음봉=${isYtdNeg}), ATH DD ${nqdraw?.toFixed(1) ?? 'n/a'}%. 1990+ 연간 장대음봉 (2008/2022) 빈도 ${bearYearBaseRate}% → 희소. value=1 시 베이스레이트 매수 우호. ★ video3 §09:03 "5.7% 희소".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-A #3: NASDAQ_TREND_ACCELERATION_REGIME ===
+  // video3 §10:14 "2020 이후 장대 양봉 늘고 상승 각도 가팔라짐"
+  // 양봉 비율 > 60% AND 평균 변동성 > 2010-2020 평균 × 1.2 → flag=1
+  try {
+    const nOhlc = await (async () => {
+      const { fetchYahooOHLC } = await import('../collectors/yahoo');
+      return fetchYahooOHLC('^IXIC', 120);
+    })();
+    if (nOhlc.length >= 60) {
+      const recent60 = nOhlc.slice(-60);
+      const bullCount = recent60.filter(c => c.close > c.open).length;
+      const bullRatio = bullCount / 60;
+      const avgDailyRange = recent60.reduce((s, c) => s + Math.abs(c.close - c.open) / c.open * 100, 0) / 60;
+      // 2010-2020 역사적 평균 일봉 변동성 proxy: ~0.8%
+      const historicalAvgVol = 0.8;
+      const isAccelerated = bullRatio > 0.60 && avgDailyRange > historicalAvgVol * 1.2;
+      d.NASDAQ_TREND_ACCELERATION_REGIME = {
+        name: 'nasdaq_trend_acceleration_regime',
+        value: isAccelerated ? 1 : 0,
+        date: today(),
+        formula: `최근 60D 양봉 비율 ${(bullRatio * 100).toFixed(1)}% (>60% 기준), 평균 일봉 변동성 ${avgDailyRange.toFixed(2)}% (역사적 ${historicalAvgVol}% × 1.2 = ${(historicalAvgVol * 1.2).toFixed(2)}%). flag=${isAccelerated ? 1 : 0}. ★ video3 §10:14 "2020 이후 가속 체제".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-A #4: NASDAQ_FAKEOUT_TRAP_LONG_VOLUME ===
+  // video3 §12:43 "위로 돌파 척, 다시 하단 → 물린 롱 손절 한꺼번에"
+  // NASDAQ_RANGE_BREAK_FAKEOUT = 1 AND 돌파일 거래량 ≥ 5D 평균 × 1.5
+  try {
+    const fakeout = d.NASDAQ_RANGE_BREAK_FAKEOUT?.value ?? 0;
+    if (fakeout === 1) {
+      const { fetchYahooOHLC } = await import('../collectors/yahoo');
+      const ohlcFT = await fetchYahooOHLC('^IXIC', 30);
+      if (ohlcFT.length >= 10) {
+        const vols = ohlcFT.map(p => p.volume ?? 0);
+        const avg5d = vols.slice(1, 6).reduce((a, b) => a + b, 0) / 5;
+        const lastVol = vols[0];
+        const volRatio = avg5d > 0 ? lastVol / avg5d : 0;
+        const level = volRatio >= 1.5 ? 2 : 1;
+        d.NASDAQ_FAKEOUT_TRAP_LONG_VOLUME = {
+          name: 'nasdaq_fakeout_trap_long_volume',
+          value: level,
+          date: today(),
+          formula: `FAKEOUT=1, 거래량 비율 ${volRatio.toFixed(2)} (≥1.5→level=2 cascade). level=${level}. ★ video3 §12:43 "물린 롱 손절 cascade".`,
+        };
+      } else {
+        d.NASDAQ_FAKEOUT_TRAP_LONG_VOLUME = {
+          name: 'nasdaq_fakeout_trap_long_volume',
+          value: 1,
+          date: today(),
+          formula: `FAKEOUT=1, 거래량 데이터 부족 → level=1 기본. ★ video3 §12:43.`,
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-A #5: NASDAQ_CHANNEL_MID_PROXIMITY_RISK ===
+  // video3 §13:09 "채널 중단 부근 = 역사적 폭락 시점"
+  // NASDAQ_CHANNEL_POSITION 45-55% 내 머무는 일수 ≥ 10 → level=1, ≥ 30 → 2
+  try {
+    const chPos = d.NASDAQ_CHANNEL_POSITION?.value ?? null;
+    if (chPos !== null) {
+      // 근사: 현재 position 을 이용해 "mid 근처" 체류 일수는 히스토리 없이 단순 proxy
+      const inMidZone = chPos >= 45 && chPos <= 55;
+      // 체류 일수는 P1 기존 체인 없으므로 단일 포인트로 평가 (추정값 1 = 현재 mid)
+      const stayDays = inMidZone ? 1 : 0; // fallback: 히스토리 부재 시 1일로 처리
+      const level = stayDays >= 30 ? 2 : (inMidZone ? 1 : 0);
+      d.NASDAQ_CHANNEL_MID_PROXIMITY_RISK = {
+        name: 'nasdaq_channel_mid_proximity_risk',
+        value: level,
+        date: today(),
+        formula: `채널 위치 ${chPos.toFixed(1)}% (mid 구간 45-55%: ${inMidZone}). level=${level} (≥10일→1, ≥30일→2; 히스토리 없으면 체류 1일 근사). ★ video3 §13:09 "채널 중단 = 역사적 폭락 시점".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ═══════════════════════════════════════════════════════════════════
+
   return d;
 }
 

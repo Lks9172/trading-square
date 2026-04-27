@@ -1024,7 +1024,47 @@ function nasdaqSignal(
   // weightedMet cap 재적용
   if (weightedMet > weightedMax) weightedMet = weightedMax;
 
-  // ★ === 30차 P1-A #2: TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL 신호 차단 ===
+  // ★ === 30차 P2-A #2: NASDAQ_RARE_BEAR_YEAR_FREQUENCY — 베이스레이트 매수 우호 가산 ===
+  // video3 §09:03 "1990+ 음봉 연도 5.7% 희소 → 현재 음봉 진행 시 역발상 매수 우호"
+  const rareBearYear = dv(derived, 'NASDAQ_RARE_BEAR_YEAR_FREQUENCY');
+  if (rareBearYear === 1) {
+    weightedMet += 0.5; weightedMax += 0.5;
+    reasons.push('✓ NASDAQ_RARE_BEAR_YEAR: YTD 음봉+drawdown = 역대 5.7% 희소 → 매수 우호 (video3 §09:03, 가중치 0.5)');
+  }
+
+  // ★ === 30차 P2-A #4: NASDAQ_FAKEOUT_TRAP_LONG_VOLUME — level=2 시 REDUCE 가산 ===
+  // video3 §12:43 "위로 돌파 척 + 고거래량 → 물린 롱 손절 cascade"
+  const fakeoutTrap = dv(derived, 'NASDAQ_FAKEOUT_TRAP_LONG_VOLUME');
+  if (fakeoutTrap !== null && fakeoutTrap >= 2 && signal !== 'SELL' && signal !== 'REDUCE') {
+    const prevFT = signal;
+    signal = 'REDUCE';
+    const rFT = `FAKEOUT_TRAP level=2 (페이크아웃+고거래량, video3 §12:43) → ${prevFT} → REDUCE`;
+    overrides.push(rFT); unmetReasons.push(rFT);
+  } else if (fakeoutTrap === 1) {
+    unmetReasons.push('⚠️ FAKEOUT_TRAP level=1 (페이크아웃 감지, video3 §12:43)');
+  }
+
+  // ★ === 30차 P2-A #5: NASDAQ_CHANNEL_MID_PROXIMITY_RISK — unmetReasons ===
+  // video3 §13:09 "채널 중단 = 역사적 폭락 시점"
+  const chMidRisk = dv(derived, 'NASDAQ_CHANNEL_MID_PROXIMITY_RISK');
+  if (chMidRisk !== null && chMidRisk >= 2) {
+    unmetReasons.push('⚠️ 채널 중단 장기 체류 level=2 — 역사적 폭락 시점 (video3 §13:09)');
+  } else if (chMidRisk === 1) {
+    unmetReasons.push('⚠️ 채널 중단 근접 level=1 — 위험 누적 관찰 (video3 §13:09)');
+  }
+
+  // ★ === 30차 P2-A #6: NASDAQ_SHORT_TRENDLINE_BREAK — overheatFlag ===
+  // video3 §13:31 "단기 추세선 이탈"
+  const shortTLBreak = dv(derived, 'NASDAQ_SHORT_TRENDLINE_BREAK');
+  if (shortTLBreak !== null && shortTLBreak >= 2) {
+    overheatFlags.push(`단기 추세선 이탈 + 이중천정 (video3 §13:31, level=2)`);
+  } else if (shortTLBreak === 1) {
+    unmetReasons.push('⚠️ 단기 추세선 이탈 (video3 §13:31, level=1)');
+  }
+
+
+
+    // ★ === 30차 P1-A #2: TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL 신호 차단 ===
   // video4 §06:45 — 3축+ 동시 활성 시 BUY 강등, 4축 시 STRONG_BUY 차단.
   const trump4Axes = dv(derived, 'TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL');
   if (trump4Axes !== null && trump4Axes >= 3) {
