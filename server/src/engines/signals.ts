@@ -373,7 +373,7 @@ function nasdaqSignal(
   // video3 §15:02-15:55 — 3축 게이트 (RSI↑ + swing high break + W 패턴) → +2 (STRONG_BUY 가산).
   const wConfirmed = dv(derived, 'NASDAQ_W_BOTTOM_CONFIRMED');
   if (wConfirmed === 2) {
-    met += 2;
+    total += 2; met += 2;
     reasons.push('✓ W_BOTTOM_CONFIRMED 3축 (RSI↑ + swing break + W 패턴, video3 §15:02)');
   }
 
@@ -381,7 +381,7 @@ function nasdaqSignal(
   // video6 §05:00 — megacap 어닝 평균 surprise.
   const earningsRatio = dv(derived, 'EARNINGS_BEAT_RATIO_4Q');
   if (earningsRatio === 1) {
-    met += 1;
+    total += 1; met += 1;
     reasons.push('✓ 어닝 우호 — 평균 surprise ≥ +5% (video6 §05:00)');
   } else if (earningsRatio === -1) {
     unmetReasons.push('⚠️ 어닝 부정 — 평균 surprise ≤ -5% (video6 §05:00)');
@@ -398,7 +398,7 @@ function nasdaqSignal(
   // video6 §10:36 "VIX 80 = 10년 만의 매수 기회".
   const vixHistoric = dv(derived, 'VIX_HISTORIC_BUY_OPPORTUNITY');
   if (vixHistoric !== null && vixHistoric >= 2) {
-    met += 2;
+    total += 2; met += 2;
     reasons.push(`✓ VIX_HISTORIC_BUY level=${vixHistoric} — video6 §10:36 "10년 매수 기회"`);
   }
 
@@ -406,7 +406,7 @@ function nasdaqSignal(
   // video1 §03:06 "2020.3 저점 직후 한 달 개인 순매도 역대 최대" — 역발상 매수 신호.
   const retailPanic = dv(derived, 'RETAIL_PANIC_SELL');
   if (retailPanic === 1) {
-    met += 1;
+    total += 1; met += 1;
     reasons.push('✓ RETAIL_PANIC_SELL — 개인 패닉 매도 환경 (역발상 매수, video1 §03:06)');
   }
 
@@ -421,10 +421,10 @@ function nasdaqSignal(
   // 노션 §OpenInsider — cluster 종목 수 ≥ 5 → +1 (역발상 buy 환경).
   const oiCluster = dv(derived, 'INSIDER_CLUSTER_PURCHASES_COUNT_50K');
   if (oiCluster === 2) {
-    met += 2;
+    total += 2; met += 2;
     reasons.push('✓ OpenInsider $50K↑ cluster ≥10 종목 — 역발상 buy 환경 강 (노션 §OpenInsider)');
   } else if (oiCluster === 1) {
-    met += 1;
+    total += 1; met += 1;
     reasons.push('✓ OpenInsider $50K↑ cluster ≥5 종목 — 역발상 buy 환경 (노션 §OpenInsider)');
   }
 
@@ -436,7 +436,7 @@ function nasdaqSignal(
   const wBottom = dv(derived, 'NASDAQ_W_BOTTOM');
   if (wBottom === 1) {
     reasons.push('✓ NASDAQ_W_BOTTOM 감지 — 이중 저점 확인 후 반등 구조 (video3 분할매수 3차 타이밍)');
-    met += 1;
+    total += 1; met += 1;
   }
 
   // 15차 Phase 2 B3 + 23차 Tier 1#1: NASDAQ_DRAWDOWN_ATH 매수 본진 -34% 까지 확장
@@ -445,7 +445,7 @@ function nasdaqSignal(
   const nqDd = dv(derived, 'NASDAQ_DRAWDOWN_ATH');
   if (nqDd !== null && nqDd <= -20 && nqDd >= -34) {
     reasons.push(`✓ NASDAQ ATH 대비 ${nqDd.toFixed(1)}% 조정 (video1 §1부 "2020.3 -34% / 2022 -33% 본진 기회 구간")`);
-    met += 1;
+    total += 1; met += 1;
   } else if (nqDd !== null && nqDd < -34 && nqDd >= -55) {
     unmetReasons.push(`⚠️ NASDAQ ATH 대비 ${nqDd.toFixed(1)}% — 영상 본진(-30~-34%) 이탈, 시스템 위기(-55%) 경계`);
   } else if (nqDd !== null && nqDd < -55) {
@@ -457,7 +457,7 @@ function nasdaqSignal(
   if (rsi !== null) {
     if (rsi < 30) {
       reasons.push(`✓ NASDAQ RSI ${rsi.toFixed(1)} < 30 과매도 — video2 §RSI 평균회귀 매수 구간`);
-      met += 1;
+      total += 1; met += 1;
     } else if (rsi > 70) {
       unmetReasons.push(`⚠️ NASDAQ RSI ${rsi.toFixed(1)} > 70 과매수 — 추격 매수 주의`);
     }
@@ -484,11 +484,11 @@ function nasdaqSignal(
     const wtiCuLag = dv(derived, 'WTI_COPPER_LAG_LEVEL');
     if (econDiv === 1) {
       reasons.push('✓ ECONOMY_STOCK_DIVERGENCE 회복 저점 (ISM≥50 + 이격도<-10%) — 매수 기회');
-      met += 1;
+      total += 1; met += 1;
     }
     if (wtiCuLag === 1) {
       reasons.push('✓ WTI_COPPER_LAG 회복 조기 (유가 과거 약세 → 구리 현재 강세, video2 §3부) +1');
-      met += 1;
+      total += 1; met += 1;
     }
   }
 
@@ -505,7 +505,7 @@ function nasdaqSignal(
       (stratGeo ? 1 : 0) + (stratMomentum ? 1 : 0);
     if (stratCount === 5) {
       reasons.push('🟢🟢 video1 §전략B 5가지 동시 충족 (차트+유동성+정책+지정학+모멘텀) — 확신 깊이 최대, 보너스 +1');
-      met += 1;
+      total += 1; met += 1;
     } else if (stratCount >= 4) {
       reasons.push(`video1 §전략B 4/5 충족 — 관찰 수준 (보조조건)`);
     }
@@ -535,7 +535,7 @@ function nasdaqSignal(
   const recoveryLvl = dv(derived, 'RECOVERY_TRIPLE_SIGNAL');
   if (recoveryLvl !== null && recoveryLvl >= 2) {
     reasons.push('✓ 회복 3축 충족 (video2 §13:42)');
-    met += 1;
+    total += 1; met += 1;
   } else if (recoveryLvl !== null && recoveryLvl >= 1) {
     reasons.push('✓ 회복 2축 (video2 §13:42 보조)');
   }
@@ -545,7 +545,7 @@ function nasdaqSignal(
   const healthyPullback = dv(derived, 'NASDAQ_HEALTHY_PULLBACK');
   if (healthyPullback === 1) {
     reasons.push('✓ 정배열 healthy pullback (video3 §05:12)');
-    met += 1;
+    total += 1; met += 1;
   } else if (healthyPullback === -1) {
     unmetReasons.push('⚠️ 역배열 + 50DMA pullback — 대기 (video3 §05:25)');
   }
@@ -623,10 +623,10 @@ function nasdaqSignal(
   const timeframeSplit = dv(derived, 'TIMEFRAME_DECISION_SPLIT');
   if (timeframeSplit === 1) {
     reasons.push('✓ TIMEFRAME_DECISION_SPLIT=+1 (horizon 정합, video2 §22:45)');
-    met += 1;
+    total += 1; met += 1;
   } else if (timeframeSplit === -1) {
     unmetReasons.push('⚠️ TIMEFRAME_DECISION_SPLIT=-1 (horizon 미정합, video2 §22:45)');
-    met = Math.max(0, met - 1);
+    total += 1; met = Math.max(0, met - 1);
   }
 
   // ★ === 29차 P1-D #11: NASDAQ_FORWARD_PER overheat / met 가산 ===
@@ -637,7 +637,7 @@ function nasdaqSignal(
   }
   if (fwdPER !== null && fwdPER <= 12) {
     reasons.push(`✓ PER ${fwdPER.toFixed(1)} ≤ 12 매수 우호 (video6 §05:54)`);
-    met += 1;
+    total += 1; met += 1;
   }
 
   // ★ === 29차 P1-C #7+#8+#10: NASDAQ 차트 패턴 overheat 가산 ===
@@ -710,7 +710,7 @@ function nasdaqSignal(
   // ★ === 29차 P3-C #14: COPPER_LEAD_DIVERGENCE_60D — 60D 명시 보강 ===
   const copperLead60 = dv(derived, 'COPPER_LEAD_DIVERGENCE_60D');
   if (copperLead60 === 1) {
-    met += 1;
+    total += 1; met += 1;
     reasons.push('✓ 구리 60D ≥+5% + S&P 횡보 — 회복 선행 (video2 §13:08)');
   } else if (copperLead60 === -1) {
     unmetReasons.push('⚠️ 구리 60D ≤-3% + S&P 양수 — 경고 선행 (video2 §13:08)');
@@ -719,7 +719,7 @@ function nasdaqSignal(
   // ★ === 29차 P3-C #16: ENTRY_TIMING_QUINTILE ===
   const entryQ = dv(derived, 'ENTRY_TIMING_QUINTILE');
   if (entryQ === 1) {
-    met += 1;
+    total += 1; met += 1;
     reasons.push('✓ ENTRY_TIMING_QUINTILE=하위 20% (매수 우호, video1 §01:24 "타이밍이 목적지 결정")');
   } else if (entryQ === -1) {
     unmetReasons.push('⚠️ ENTRY_TIMING_QUINTILE=상위 20% (추격 주의, video1 §01:24)');
@@ -729,7 +729,7 @@ function nasdaqSignal(
   const ch15y = dv(derived, 'NASDAQ_15Y_CHANNEL_POSITION');
   if (ch15y !== null) {
     if (ch15y <= -2) {
-      met += 1;
+      total += 1; met += 1;
       reasons.push('✓ NASDAQ 15Y 채널 -1σ 이하 (구조적 매수 강, video3 §09:48)');
     } else if (ch15y === -1) {
       reasons.push('✓ NASDAQ 15Y 채널 -1σ~0 (보조, video3 §09:48)');
@@ -741,14 +741,14 @@ function nasdaqSignal(
   // ★ === 29차 P3-C #19: NASDAQ_PIN_BAR_NEXT_YEAR_BULLISH_RATE — 참조 통계 가산 ===
   const pinRate = dv(derived, 'NASDAQ_PIN_BAR_NEXT_YEAR_BULLISH_RATE');
   if (pinRate !== null && pinRate >= 0.7) {
-    met += 0.5;
+    total += 0.5; met += 0.5;
     reasons.push(`✓ yearly pin bar 다음 해 양봉 ${(pinRate * 100).toFixed(0)}% (참조 통계, video3 §09:09 "100%")`);
   }
 
   // ★ === 29차 P3-E #30: EARNINGS_SURPRISE_AGGREGATE_FLAG ===
   const earningsAgg = dv(derived, 'EARNINGS_SURPRISE_AGGREGATE_FLAG');
   if (earningsAgg === 1) {
-    met += 1;
+    total += 1; met += 1;
     reasons.push('✓ 메가캡 평균 surprise ≥+5% — NASDAQ 우호 (video4 §06)');
   } else if (earningsAgg === -1) {
     unmetReasons.push('⚠️ 메가캡 평균 surprise ≤-5% — NASDAQ 위협 (video4 §06)');
@@ -1771,7 +1771,7 @@ function kospiSignal(
   const monthlyCover = dv(derived, 'KOSPI_MONTHLY_BEAR_COVER_FLAG');
   if (monthlyCover === 1) {
     reasons.push('✓ 월봉 회복 (직전 음봉 5%+ → 현재 월봉 시가 돌파, stt_kospi §03:28)');
-    met += 1;
+    total += 1; met += 1;
   }
 
   // ★ === 29차 P1-D #13: KOSPI_FOREIGN_STREAK_DAYS + OVERSELL_30T ===
@@ -1779,12 +1779,12 @@ function kospiSignal(
   const foreignStreakDays = dv(derived, 'KOSPI_FOREIGN_STREAK_DAYS');
   if (foreignStreakDays !== null && foreignStreakDays >= 5) {
     reasons.push(`✓ 외국인 ${foreignStreakDays}일 연속 순매수 (stt_kospi §3-1 "추세 복귀")`);
-    met += 1;
+    total += 1; met += 1;
   }
   const oversell30T = dv(derived, 'KOSPI_FOREIGN_OVERSELL_30T_FLAG');
   if (oversell30T === 1) {
     reasons.push('✓ 외국인 60D 누적 -30조 매도 — 반발 후보 (stt_kospi §3-1)');
-    met += 1;
+    total += 1; met += 1;
   }
 
   // ★ === 29차 P1-D #14: KRW_FX_REVERSAL_TRIGGER ===
@@ -1792,14 +1792,14 @@ function kospiSignal(
   const fxReversal = dv(derived, 'KRW_FX_REVERSAL_TRIGGER');
   if (fxReversal === 1) {
     reasons.push('✓ 환율 반전 + 외인 복귀 정합 (stt_kospi §11:39)');
-    met += 1;
+    total += 1; met += 1;
   }
 
   // ★ === 29차 P2-C #17: KOSPI_PBR ===
   // video6 §05:55 — < 0.9 → +1 / > 2.0 → -1.
   const kospiPbrLvl = dv(derived, 'KOSPI_PBR');
   if (kospiPbrLvl === 1) {
-    met += 1;
+    total += 1; met += 1;
     reasons.push('✓ KOSPI PBR < 0.9 (밸류 우호, video6 §05:55)');
   } else if (kospiPbrLvl === -1) {
     unmetReasons.push('⚠️ KOSPI PBR > 2.0 (밸류 과열, video6 §05:55)');
@@ -1809,7 +1809,7 @@ function kospiSignal(
   // video6 §04:35 — ≥10 → +1 / <5 → -1.
   const kospiRoeLvl = dv(derived, 'KOSPI_AGGREGATE_ROE');
   if (kospiRoeLvl === 1) {
-    met += 1;
+    total += 1; met += 1;
     reasons.push('✓ KOSPI 합산 ROE ≥ 10% (video6 §04:35)');
   } else if (kospiRoeLvl === -1) {
     unmetReasons.push('⚠️ KOSPI 합산 ROE < 5% (video6 §04:35)');
@@ -1822,7 +1822,7 @@ function kospiSignal(
   const kRecDays = dv(derived, 'KOSPI_RECOVERY_TRIO_DAYS');
   if (kRecLevel !== null && kRecLevel >= 1) {
     reasons.push(`✓ KOSPI 회복 3축 ${kRecDays ?? 0}일 연속 (level=${kRecLevel}, stt_kospi §05:35)`);
-    met += 1;
+    total += 1; met += 1;
   }
 
   // 15차 Phase 1+2: KOSPI RSI + DRAWDOWN_ATH
@@ -1831,7 +1831,7 @@ function kospiSignal(
   if (kRsi !== null) {
     if (kRsi < 30) {
       reasons.push(`✓ KOSPI RSI ${kRsi.toFixed(1)} < 30 과매도 (video2 §RSI 정합, 29차 P2-D #24 임계 정렬)`);
-      met += 1;
+      total += 1; met += 1;
     } else if (kRsi > 70) {
       unmetReasons.push(`⚠️ KOSPI RSI ${kRsi.toFixed(1)} 과매수 — 추격 주의`);
     }
@@ -1839,14 +1839,14 @@ function kospiSignal(
   const kDd = dv(derived, 'KOSPI_DRAWDOWN_ATH');
   if (kDd !== null && kDd <= -15 && kDd >= -30) {
     reasons.push(`✓ KOSPI ATH 대비 ${kDd.toFixed(1)}% 조정 (stt_kospi "75% 상승 후 통상 15-30% 조정" 범위)`);
-    met += 1;
+    total += 1; met += 1;
   }
 
   // 14차 Phase B-2: KOSPI W 반등 + 연봉 아래꼬리 지수 reason 노출
   const kWBottom = dv(derived, 'KOSPI_W_BOTTOM');
   if (kWBottom === 1) {
     reasons.push('✓ KOSPI_W_BOTTOM 감지 — 이중 저점 확인 (video3 분할매수 3차)');
-    met += 1;
+    total += 1; met += 1;
   }
   const kAreaLevel = dv(derived, 'KOSPI_YEARLY_AREA_LEVEL');
   if (kAreaLevel === -1) {
@@ -1866,14 +1866,14 @@ function kospiSignal(
   const kospiWickThr = dv(derived, 'KOSPI_HALFYEAR_UPPER_WICK_THRESHOLD');
   if (kospiWickThr === 1) {
     reasons.push('✓ 반기봉 윗꼬리 < 15% (stt_kospi §03:18)');
-    met += 1;
+    total += 1; met += 1;
   }
 
   // ★ === 29차 P3-B #7: KR_BOK_LOCKED_FLAG → KOSPI -1 패널티 ===
   // stt_kospi §09:55 "한은 사방이 막힌 미로".
   const bokLocked = dv(derived, 'KR_BOK_LOCKED_FLAG');
   if (bokLocked === 1) {
-    met = Math.max(0, met - 1);
+    total += 1; met = Math.max(0, met - 1);
     unmetReasons.push('⚠️ KR_BOK_LOCKED_FLAG=1 — 한은 정책 무력 (USDKRW≥1500 OR 가계부채>100% OR CPI≥3, KOSPI -1, stt_kospi §09:55)');
   }
 
@@ -1881,7 +1881,7 @@ function kospiSignal(
   // stt_kospi §09:33 "WGBI 편입 외국인 자금 유입".
   const wgbiTw = dv(derived, 'WGBI_INFLOW_TAILWIND');
   if (wgbiTw === 1) {
-    met += 1;
+    total += 1; met += 1;
     reasons.push('✓ WGBI 편입 window + 환율 안정 (외국인 자금 유입 기반, stt_kospi §09:33)');
   }
 
@@ -1889,7 +1889,7 @@ function kospiSignal(
   // stt_kospi §10:30 "추경 27조 → 6개월 후 효과".
   const fiscalProg = dv(derived, 'KR_FISCAL_LAG_PROGRESS_DAYS');
   if (fiscalProg !== null && fiscalProg >= 1) {
-    met += 1;
+    total += 1; met += 1;
     reasons.push('✓ 추경 효과 반영 시점 도달 (D+180 경과, stt_kospi §10:30)');
   } else if (fiscalProg !== null && fiscalProg >= 0.5) {
     reasons.push('🟡 추경 효과 절반 진입 (보조, stt_kospi §10:30)');
@@ -1898,7 +1898,7 @@ function kospiSignal(
   // ★ === 29차 P3-E #28: KRX_PENSION_FUND_FLOW — 연기금 5D +1조 가점 ===
   const pensionFlow = dv(derived, 'KRX_PENSION_FUND_FLOW');
   if (pensionFlow === 1) {
-    met += 1;
+    total += 1; met += 1;
     reasons.push('✓ KRX 연기금 5D ≥ +1조 — 안정적 매수 기반 (보조)');
   } else if (pensionFlow === -1) {
     unmetReasons.push('⚠️ KRX 연기금 5D ≤ -1조 — 매도 압력 (보조)');
@@ -1907,7 +1907,7 @@ function kospiSignal(
   // ★ === 29차 P3-E #29: KRX_SHORT_INTEREST_LEVEL — 숏스퀴즈 후보 ===
   const shortLvl = dv(derived, 'KRX_SHORT_INTEREST_LEVEL');
   if (shortLvl === 2) {
-    met += 1;
+    total += 1; met += 1;
     reasons.push('✓ 공매도 ≥5% — 강 숏스퀴즈 후보 (video6 §06:31)');
   } else if (shortLvl === 1) {
     reasons.push('✓ 공매도 ≥3% — 숏스퀴즈 후보 (video6 §06:31, 보조)');
@@ -1935,7 +1935,7 @@ function kospiSignal(
   const volTier = dv(derived, 'KOSPI_VOLUME_TIER');
   if (volTier === 1) {
     reasons.push('✓ KOSPI 거래량 tier+1 (≥20조 지속성 강, stt_kospi)');
-    met += 1;
+    total += 1; met += 1;
   } else if (volTier === -1) {
     unmetReasons.push('⚠️ KOSPI 거래량 tier-1 (<15조 관심 약화, stt_kospi)');
   }
