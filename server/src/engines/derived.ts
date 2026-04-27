@@ -5931,33 +5931,25 @@ export async function computeDerived(
     } else {
       fundLabel = '펀더 데이터 결측 → 0';
     }
-    // (b) 매크로 축 — REGIME 은 derived 가 아닌 cache.ts 후 단계에서 계산되므로 raw history-store 에서 latest signal:REGIME_LABEL (numeric code) 읽기.
+    // (b) 매크로 축 — 29차 fix-G: regime history-store 의존 (stale 1-cycle late) 제거,
+    //     raw VIX/HY/수익률곡선 직접 사용. video4 §"고금리 빨간불 / 저금리 초록불" 정합.
+    //     +1: 모두 우호 (VIX<22 AND HY<4.5 AND 수익률곡선 정상)
+    //     -1: 위험 임계 (VIX>35 OR HY>6 OR 수익률곡선 역전 ≤ -0.3)
+    //     0: 중간 (노란불)
+    const vixMacro = val(raw, 'VIXCLS') ?? 20;
+    const hyOasMacro = val(raw, 'BAMLH0A0HYM2') ?? 4;
+    const t10y2y = val(raw, 'T10Y2Y') ?? 0.3;
     let macroAxis: number = 0;
     let macroLabel: string;
-    let regimeStr: string | null = null;
-    try {
-      const regimeLabelHist = await readHistory('signal', 'REGIME_LABEL').catch(() => [] as Array<{date:string; value:number}>);
-      if (regimeLabelHist.length > 0) {
-        const lastCode = regimeLabelHist[regimeLabelHist.length - 1].value;
-        // history-store regimeValue 매핑 역변환
-        if (lastCode === 100) regimeStr = 'RISK_ON';
-        else if (lastCode === 80) regimeStr = 'NEUTRAL';
-        else if (lastCode === 60) regimeStr = 'CAUTION';
-        else if (lastCode === 40) regimeStr = 'CORRECTION';
-        else if (lastCode === 30) regimeStr = 'STAGFLATION';
-        else if (lastCode === 20) regimeStr = 'PANIC_BUT_OK';
-        else if (lastCode === 10) regimeStr = 'BOND_VIGILANTE';
-        else if (lastCode === 0) regimeStr = 'RECESSION_RISK';
-      }
-    } catch { void 0; }
-    if (regimeStr === 'RISK_ON' || regimeStr === 'NEUTRAL' || regimeStr === 'PANIC_BUT_OK') {
-      macroAxis = 1; macroLabel = `regime=${regimeStr} → +1`;
-    } else if (regimeStr === 'CAUTION') {
-      macroAxis = 0; macroLabel = `regime=${regimeStr} → 0`;
-    } else if (regimeStr === 'CORRECTION' || regimeStr === 'RECESSION_RISK' || regimeStr === 'BOND_VIGILANTE' || regimeStr === 'STAGFLATION' || regimeStr === 'STAGFLATION_BOND_VIGILANTE') {
-      macroAxis = -1; macroLabel = `regime=${regimeStr} → -1`;
+    if (vixMacro < 22 && hyOasMacro < 4.5 && t10y2y > 0) {
+      macroAxis = 1;
+      macroLabel = `🟢 VIX ${vixMacro.toFixed(1)} + HY ${hyOasMacro.toFixed(1)}% + 수익률곡선 ${t10y2y.toFixed(2)} 정상 → +1`;
+    } else if (vixMacro > 35 || hyOasMacro > 6 || t10y2y < -0.3) {
+      macroAxis = -1;
+      macroLabel = `🔴 VIX ${vixMacro.toFixed(1)} OR HY ${hyOasMacro.toFixed(1)}% OR 수익률곡선 ${t10y2y.toFixed(2)} 위험 → -1`;
     } else {
-      macroLabel = `regime=null (history 미존재) → 0`;
+      macroAxis = 0;
+      macroLabel = `🟡 VIX ${vixMacro.toFixed(1)} / HY ${hyOasMacro.toFixed(1)}% / 수익률곡선 ${t10y2y.toFixed(2)} 중간 → 0`;
     }
     // (c) 차트 축
     let chartAxis: number = 0;
