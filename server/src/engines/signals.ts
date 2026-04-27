@@ -246,29 +246,34 @@ function nasdaqSignal(
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
   let met = 0;
-  // Fix #3(2차 감사): PSYCH 보너스를 "추가 조건" 으로 승격해 발동 시 met/total 동시 +1.
-  //   이전: met 만 ++ → met/total 비율이 100% 초과로 UI 왜곡(최대 8/7 = 114%) + 절대 임계치
-  //         `{5,4,3,2}` 가 total 변화에 무관해 보너스 발동이 임계치를 붕괴시킴.
-  //   수정: total 시작은 7 유지, psych 발동 시에만 total++ 동기화 → 비율 정상, 임계 상대화.
-  let total = 7;
+  // 29차 fix-H: total 은 0 에서 시작하고, 핵심 if/else 분기마다 total += 1 먼저 가산.
+  //   이전 total=7 고정 + bonus met++ 패턴은 bonus 누적이 total cap 을 채워 미충족 조건이
+  //   존재해도 "7/7 = 100%" 표시 — UI 분수 misleading.
+  //   수정: 각 핵심 조건 평가 전 total++ → 미충족도 total 합산 → 분수 정합.
+  //   PSYCH 보너스 기존 total++ 동기화 패턴은 그대로 유지.
+  let total = 0;
 
   // --- 저점 카테고리 (5) ---
   const above200 = dv(derived, 'NASDAQ_ABOVE_200DMA');
+  total += 1;
   if (above200 === 0) { met++; reasons.push('200DMA 하회 (가중치 1.0)'); }
   else { unmetReasons.push('200DMA 하회 아님 (가중치 1.0 미충족)'); }
 
   const icsa = v(raw, 'ICSA');
+  total += 1;
   if (icsa !== null && icsa < 300000) { met++; reasons.push(`실업수당 ${Math.round(icsa / 1000)}K < 300K (가중치 1.0)`); }
   else { unmetReasons.push('실업수당 300K 미만 조건 미충족 (가중치 1.0 미충족)'); }
 
   const vix = v(raw, 'VIXCLS');
+  total += 1;
   if (vix !== null && vix > 30) { met++; reasons.push(`VIX ${vix.toFixed(1)} > 30 (가중치 1.0)`); }
   else { unmetReasons.push('VIX 30 초과 조건 미충족 (가중치 1.0 미충족)'); }
 
   // 11차 이격도 계층화 (2026-04): 영상1 전략C "이격도 -25% 이하 = 평균회귀 최강" 정합.
   //   기존 -10% 저점 조건은 "관찰 시작" 레벨이라 영상 근거 약함. 극저점(-25%) 시 +1 추가
-  //   가점으로 영상 정합 보강 (total 은 불변, 저점 확신도 차등화).
+  //   가점으로 영상 정합 보강 (저점 확신도 차등화).
   const disparity = dv(derived, 'NASDAQ_DISPARITY');
+  total += 1;
   if (disparity !== null && disparity <= -25) {
     met += 2;
     reasons.push(`✓ 이격도 ${disparity.toFixed(1)}% ≤ -25% (영상1 §전략C 극저점, 보너스 +1, 총 2점)`);
@@ -282,6 +287,7 @@ function nasdaqSignal(
   }
 
   const fng = v(raw, 'FEAR_GREED');
+  total += 1;
   if (fng !== null && fng < 25) { met++; reasons.push(`F&G ${fng} < 25 (가중치 1.0)`); }
   else { unmetReasons.push('Fear & Greed 25 미만 조건 미충족 (가중치 1.0 미충족)'); }
 
@@ -297,6 +303,7 @@ function nasdaqSignal(
 
   // --- 유동성 카테고리 (1) ---
   // 단일 RRP tick 보다 완만한 유동성 종합점수 우선. 하루 내 잦은 flicker 를 줄이기 위해
+  total += 1;
   // RRP/TGA/MMF/WRESBAL 평균 변화 + 글로벌 M2 를 합성한 LIQUIDITY_DIRECTION 을 본다.
   const liquidityDir = dv(derived, 'LIQUIDITY_DIRECTION');
   const rrpDir = dv(derived, 'RRP_DIRECTION');
@@ -319,6 +326,7 @@ function nasdaqSignal(
 
   // --- 정책 카테고리 (1) ---
   // 완화 방향 (policyDirection > 0: 금리인하·QE 기조) 이면 위험자산 우호.
+  total += 1;
   const policy = profile.manualInputs?.policyDirection ?? 0;
   if (policy > 0) {
     met++;
@@ -897,6 +905,9 @@ function goldSignal(
   const unmetReasons: string[] = [];
   let score = 0;
   let metCount = 0;
+  // 29차 fix-H: conditionsTotal 을 0 에서 시작, 핵심 if/else 분기마다 condTotal += 1 먼저 가산.
+  //   이전 conditionsTotal: 4 고정 은 미충족 조건이 있어도 동일 — UI 분수 정합.
+  let condTotal = 0;
   // 23차 Tier 1#2: maxScore 정합 — 메인 가중치 합 = 3(real_yield) + 2(dxy) + 1.5(cb) + 0.5(geo) = 7.
   // seasonal/RSI/FIB 발동 시 +0.5 씩 max 8.5 까지 확장. 발동 안 하면 maxScore 7 유지 (이전 8 영구 cap 해소).
   let maxScore = 7;
@@ -905,6 +916,7 @@ function goldSignal(
   const ryTrend = dv(derived, 'REAL_YIELD_TREND');
   const ryFalling = ryTrend !== null ? ryTrend < -0.05 : (realYield !== null && realYield < 1.0);
   const ryLabel = ryTrend !== null ? `추세 ${ryTrend.toFixed(3)}` : (realYield !== null ? `절대값 ${realYield.toFixed(2)}% (추세 데이터 없어 1.0% 기준 fallback)` : '데이터 없음');
+  condTotal += 1;
   if (ryFalling) { score += 3; metCount += 1; reasons.push(`실질금리 하락 확인 (${ryLabel}, 가중치 3.0)`); }
   else { unmetReasons.push(`실질금리 하락 미충족 (${ryLabel}, 가중치 3.0 미충족)`); }
 
@@ -912,6 +924,7 @@ function goldSignal(
   const dxyTrend = dv(derived, 'DXY_TREND');
   const dxyTrendLong = dv(derived, 'DXY_TREND_LONG');
   const dxyWeak = dxyTrend !== null ? dxyTrend < -0.5 : (dxy !== null && dxy < 103);
+  condTotal += 1;
   if (dxyWeak) { score += 2; metCount += 1; reasons.push(`DXY ${dxy?.toFixed(1) ?? '?'} (단기: ${dxyTrend?.toFixed(2) ?? '?'}, 장기: ${dxyTrendLong?.toFixed(2) ?? '?'}, 약세, 가중치 2.0)`); }
   else { unmetReasons.push(`DXY 약세 추세 미충족 (단기: ${dxyTrend?.toFixed(2) ?? '?'}, 장기: ${dxyTrendLong?.toFixed(2) ?? '?'}, 가중치 2.0 미충족)`); }
   if (dxyTrendLong !== null && dxyTrendLong < -2) { reasons.push('DXY 구조적 약세 확인 → 금 장기 우호 (보조조건)'); }
@@ -920,6 +933,7 @@ function goldSignal(
   //   manual=true OR proxy=1 → 가점. proxy 자체 근거 reason 에 표기.
   const cbProxy = dv(derived, 'CB_GOLD_STRUCTURAL_DEMAND');
   const cbActive = profile.manualInputs.cbBuying || cbProxy === 1;
+  condTotal += 1;
   if (cbActive) {
     score += 1.5; metCount += 1;
     const source = profile.manualInputs.cbBuying ? 'manual' : 'proxy(12M 금↑+DXY↓+실질금리↓)';
@@ -952,6 +966,7 @@ function goldSignal(
     unmetReasons.push('⚠️ GOLD 피보나치 0.618 하방 이탈 — 약세 전환 가능');
   }
 
+  condTotal += 1;
   if (profile.manualInputs.geoRisk >= 3) { score += 0.5; metCount += 1; reasons.push('지정학 리스크 확대 (가중치 0.5)'); }
   else { unmetReasons.push('지정학 리스크 확대 조건 미충족 (가중치 0.5 미충족)'); }
 
@@ -1101,7 +1116,7 @@ function goldSignal(
       asset: 'GOLD',
       signal: 'HOLD',
       conditionsMet: metCount,
-      conditionsTotal: 4,
+      conditionsTotal: condTotal,
       weightedScore: Number(score.toFixed(1)),
       weightedMaxScore: maxScore,
       reasons: ['실질금리 상승 + DXY 강세 → 지정학만으로 매수 위험'],
@@ -1161,7 +1176,7 @@ function goldSignal(
     asset: 'GOLD',
     signal,
     conditionsMet: metCount,
-    conditionsTotal: 4,
+    conditionsTotal: condTotal,
     weightedScore: Number(score.toFixed(1)),
     weightedMaxScore: maxScore,
     reasons,
@@ -1178,7 +1193,8 @@ function silverSignal(
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
   let met = 0;
-  const total = 2;
+  // 29차 fix-H: total 을 0 에서 시작, 핵심 if/else 분기마다 total += 1 먼저 가산.
+  let total = 0;
 
   // 영상2 "금은비 60~80 이상이면 은 저평가 가능성 + 경기회복 동반 확인 필요".
   // 기존 임계 80은 상한선 기준이라 2021년 피크(~100) 같은 극단 구간에서만 점화.
@@ -1191,6 +1207,7 @@ function silverSignal(
   const regimeOk = regime.regime === 'RISK_ON' || regime.regime === 'NEUTRAL';
   const ismOk = ismProxyForGate !== null && ismProxyForGate >= 50;
   const contextOk = ismOk || regimeOk;
+  total += 1;
   if (gsr !== null && gsr >= 70 && contextOk) {
     met++;
     const ctxLabel = ismOk
@@ -1208,6 +1225,7 @@ function silverSignal(
   }
 
   const icsa = v(raw, 'ICSA');
+  total += 1;
   if (icsa !== null && icsa < 250000) { met++; reasons.push('경기회복 신호 (실업수당 감소, 가중치 1.0)'); }
   else { unmetReasons.push('경기회복(실업수당 감소) 조건 미충족 (가중치 1.0 미충족)'); }
 
@@ -1305,9 +1323,11 @@ function copperSignal(
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
   let met = 0;
-  const total = 3;
+  // 29차 fix-H: total 을 0 에서 시작, 핵심 if/else 분기마다 total += 1 먼저 가산.
+  let total = 0;
 
   const icsa = v(raw, 'ICSA');
+  total += 1;
   if (icsa !== null && icsa < 250000) { met++; reasons.push('실업수당 감소 추세 (가중치 1.0)'); }
   else { unmetReasons.push('실업수당 감소 조건 미충족 (가중치 1.0 미충족)'); }
 
@@ -1316,6 +1336,7 @@ function copperSignal(
   //   영상2 원전은 "구리/금 비율 상승세" 만 언급 — 절대 0.00125 경계는 코드 상수로만 존재.
   //   후보 개선: (a) 90일 z-score > 0 으로 상대 정규화, (b) 60일 추세 기울기 > 0 으로 방향 기반.
   //   현 상수는 2015~2024 CGR 레벨 중앙값 근방이라 방향성은 얼추 맞지만 엄밀한 근거 없음.
+  total += 1;
   if (cgr !== null && cgr > 0.00125) { met++; reasons.push(`구리금비 ${cgr.toFixed(6)} 상승 우위 (가중치 1.0)`); }
   else if (cgr !== null) { unmetReasons.push(`구리금비 ${cgr.toFixed(6)} 아직 약함 (가중치 1.0 미충족)`); }
   else { unmetReasons.push('구리금비 데이터 없음 (가중치 1.0 미충족)'); }
@@ -1323,6 +1344,7 @@ function copperSignal(
   const ismManual = profile.manualInputs.ismPmi;
   const ismAuto = dv(derived, 'ISM_PROXY');
   const ismValue = ismManual ?? ismAuto;
+  total += 1;
   if (ismValue !== null && ismValue >= 50) { met++; reasons.push(`ISM ${ismValue.toFixed(1)} ≥ 50 확장 ${ismManual ? '(수동)' : '(자동)'} (가중치 1.0)`); }
   else if (ismValue !== null && ismValue >= 48) { reasons.push(`ISM ${ismValue.toFixed(1)} 바닥 근접 (보조조건)`); }
   else if (ismValue !== null) { unmetReasons.push(`ISM ${ismValue.toFixed(1)} 수축 구간 (가중치 1.0 미충족)`); }
@@ -1460,17 +1482,21 @@ function leverageCheck(
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
   let met = 0;
-  const total = 3;
+  // 29차 fix-H: total 을 0 에서 시작, 핵심 if/else 분기마다 total += 1 먼저 가산.
+  let total = 0;
 
   const disparity = dv(derived, 'NASDAQ_DISPARITY');
+  total += 1;
   if (disparity !== null && disparity <= -25) { met++; reasons.push(`이격도 ${disparity.toFixed(1)}% ≤ -25% (가중치 1.0)`); }
   else { unmetReasons.push('이격도 -25% 이하 조건 미충족 (가중치 1.0 미충족)'); }
 
   const vix = v(raw, 'VIXCLS');
+  total += 1;
   if (vix !== null && vix >= 35) { met++; reasons.push(`VIX ${vix.toFixed(1)} ≥ 35 (가중치 1.0)`); }
   else { unmetReasons.push('VIX 35 이상 조건 미충족 (가중치 1.0 미충족)'); }
 
   const icsa = v(raw, 'ICSA');
+  total += 1;
   if (icsa !== null && icsa < 300000) { met++; reasons.push(`실업수당 ${Math.round(icsa / 1000)}K < 300K (가중치 1.0)`); }
   else { unmetReasons.push('실업수당 300K 미만 조건 미충족 (가중치 1.0 미충족)'); }
 
@@ -1590,19 +1616,24 @@ function kospiSignal(
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
   let met = 0;
-  const total = 7;
+  // 29차 fix-H: total 을 0 에서 시작, 핵심 if/else 분기마다 total += 1 먼저 가산.
+  //   미충족 조건도 total 에 카운트되어야 분수 정합 — UI "7/7 misleading" 수정.
+  let total = 0;
 
   const above200 = dv(derived, 'KOSPI_ABOVE_200DMA');
+  total += 1;
   if (above200 === 0) { met++; reasons.push('코스피 200DMA 하회 (가중치 1.0)'); }
   else { unmetReasons.push('코스피 200DMA 상회 중 (가중치 1.0 미충족)'); }
 
   const fxLevel = dv(derived, 'KRW_FX_LEVEL');
+  total += 1;
   if (fxLevel !== null && fxLevel >= 1) { met++; reasons.push(`환율 우호 (레벨 ${fxLevel}, 가중치 1.0)`); }
   else { unmetReasons.push('환율 1480원 이하 조건 미충족 (가중치 1.0 미충족)'); }
 
   const disparity = dv(derived, 'KOSPI_DISPARITY');
   // 11차 이격도 계층화 (2026-04): stt_kospi 에 구체 수치 근거 없으나 역사적 "75% 상승 후
   //   조정 통상 15-30%" 범위 기반. 극저점(-25%) 시 +1 추가 가점 — 2025년 2~3월 수준 대응.
+  total += 1;
   if (disparity !== null && disparity <= -25) {
     met += 2;
     reasons.push(`✓ 코스피 이격도 ${disparity.toFixed(1)}% ≤ -25% (stt_kospi "역대급 하락" 수준, 보너스 +1, 총 2점)`);
@@ -1617,6 +1648,7 @@ function kospiSignal(
   //   100달러 재돌파 경고" 정합을 위해 WTI 임계 80→65 로 강화 (영상 기준 60 + 여유 5).
   //   기존 80 은 영상의 "위험 구간 75-85" 상단이라 안정 판정 기준으로 부적절.
   const wti = v(raw, 'WTI');
+  total += 1;
   if (wti !== null && wti < 65) { met++; reasons.push(`유가 $${wti.toFixed(1)} < $65 안정 (영상5 §Takeaway, 가중치 1.0)`); }
   else { unmetReasons.push('유가 $65 미만 조건 미충족 (영상 "60달러대 안정", 가중치 1.0 미충족)'); }
 
@@ -1624,10 +1656,12 @@ function kospiSignal(
   if (chaseKospi !== null && chaseKospi > 15) { unmetReasons.push(`⚠️ 코스피 20일 +${chaseKospi.toFixed(1)}% → 추격매수 주의 (보조조건)`); }
 
   const vix = v(raw, 'VIXCLS');
+  total += 1;
   if (vix !== null && vix < 25) { met++; reasons.push(`VIX ${vix.toFixed(1)} < 25 안정 (가중치 1.0)`); }
   else { unmetReasons.push('VIX 25 미만 조건 미충족 (가중치 1.0 미충족)'); }
 
   const volumeConfirm = dv(derived, 'KOSPI_VOLUME_CONFIRM');
+  total += 1;
   if (volumeConfirm === 1) { met++; reasons.push('거래량 확인 (최근5일 평균 >= 20일 평균의 110%, 가중치 1.0)'); }
   else { unmetReasons.push('거래량 지속 조건 미충족 (가중치 1.0 미충족)'); }
 
@@ -1662,6 +1696,7 @@ function kospiSignal(
   const foreignBuyStreak = dv(derived, 'KOSPI_FOREIGN_BUY_STREAK');
   const foreignSellStreak = dv(derived, 'KOSPI_FOREIGN_SELL_STREAK');
   const foreignExtreme = dv(derived, 'KOSPI_FOREIGN_EXTREME');
+  total += 1;
   if (foreignNet20D !== null && foreignNet20D > 0) {
     met++;
     const trendTag = foreignTrend !== null && foreignTrend > 0 ? ' + 추세 가속' : '';
@@ -2071,11 +2106,13 @@ function emergingSignal(
   const reasons: string[] = [];
   const unmetReasons: string[] = [];
   let met = 0;
-  const total = 3;
+  // 29차 fix-H: total 을 0 에서 시작, 핵심 if/else 분기마다 total += 1 먼저 가산.
+  let total = 0;
 
   const dxy = v(raw, 'DXY');
   const dxyTrend = dv(derived, 'DXY_TREND');
   const dxyWeak = (dxyTrend !== null && dxyTrend < -0.5) || (dxy !== null && dxy < 103);
+  total += 1;
   if (dxyWeak) {
     met += 1;
     reasons.push(`DXY ${dxy?.toFixed(1) ?? '?'} (단기: ${dxyTrend?.toFixed(2) ?? '?'}) 약세 — 달러약세 수혜 (가중치 1.0)`);
@@ -2084,6 +2121,7 @@ function emergingSignal(
   }
 
   const m2 = dv(derived, 'GLOBAL_M2_PROXY');
+  total += 1;
   if (m2 !== null && m2 > 0) {
     met += 1;
     reasons.push(`글로벌 M2 YoY +${m2.toFixed(1)}% → 유동성 확장 (가중치 1.0)`);
@@ -2094,6 +2132,7 @@ function emergingSignal(
   }
 
   const policy = profile.manualInputs?.policyDirection ?? 0;
+  total += 1;
   if (policy > 0) {
     met += 1;
     reasons.push(`정책 완화 방향 (policyDirection=${policy}) → 신흥국 리스크 우호 (가중치 1.0)`);
