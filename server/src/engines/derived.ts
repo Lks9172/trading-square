@@ -9845,6 +9845,173 @@ export async function computeDerived(
 
   // ═══════════════════════════════════════════════════════════════════
 
+
+  // 30차 P2-E: video6 + 노션 8건
+  // ═══════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P2-E #25: INDIVIDUAL_CONTRA_CORRELATION_60D ===
+  // video6 §"개인 통계적 반대"
+  // 60D 일별 corr(개인 NetBuy, KOSPI 1D %)
+  try {
+    const kospiHist60 = await fetchYahooHistory('^KS11', 65);
+    // 개인 순매수 proxy: krxRetailNet5D derived 또는 0 fallback
+    const retailProxy = d.KOSPI_FOREIGN_NET_1D_HISTORIC_FLAG?.value ?? null;
+    // 히스토리 부재 → 단순 단일 포인트 corr 계산 불가, 따라서 level 기반으로 처리
+    if (kospiHist60.length >= 30) {
+      // proxy: 외국인 순매수 방향 vs KOSPI 방향 (개인=외국인 반대)
+      const kospiRet1d = kospiHist60.length >= 2
+        ? (kospiHist60[0].close - kospiHist60[1].close) / kospiHist60[1].close * 100 : null;
+      // 히스토리 기반 상관 없이 retail flag 존재 여부로 간이 평가
+      const level = (retailProxy !== null && (retailProxy as number) >= 1 && kospiRet1d !== null && kospiRet1d < 0) ? 1 :
+                   (retailProxy !== null && (retailProxy as number) <= -1 && kospiRet1d !== null && kospiRet1d > 0) ? 1 : 0;
+      d.INDIVIDUAL_CONTRA_CORRELATION_60D = {
+        name: 'individual_contra_correlation_60d',
+        value: level,
+        date: today(),
+        formula: `KOSPI 1D ${kospiRet1d?.toFixed(2) ?? 'n/a'}%, 개인 proxy=${retailProxy ?? 'n/a'}. 60D 상관 히스토리 없어 단일 포인트 간이 평가. level=${level} (1=contra 정합). ★ video6 §"개인 통계적 반대".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-E #26: NASDAQ_SHORT_INTEREST_LEVEL ===
+  // video6 §06:31 "공매도 ≥ 3% → 숏스퀴즈"
+  // proxy: SQQQ AUM 20D 변화율
+  try {
+    const sqqqHist = await fetchYahooHistory('SQQQ', 25);
+    if (sqqqHist.length >= 20) {
+      const sqqqNow = sqqqHist[0].close;
+      const sqqq20ago = sqqqHist[19].close;
+      const sqqqChg = (sqqqNow - sqqq20ago) / sqqq20ago * 100;
+      const level = sqqqChg >= 20 ? 1 : 0;
+      d.NASDAQ_SHORT_INTEREST_LEVEL = {
+        name: 'nasdaq_short_interest_level',
+        value: level,
+        date: today(),
+        formula: `SQQQ 20D ${sqqqChg.toFixed(1)}% (≥+20% → 숏 누적, level=1 스퀴즈 후보). proxy 기반. ★ video6 §06:31 "공매도 ≥3% 숏스퀴즈".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-E #27: EVENT_DAY_VOLATILITY_GUARD 확장 (Powell 발언일 추가) ===
+  // video6 §"중앙은행 한마디"
+  // 기존 CPI_DDAY/FOMC_DDAY + 신규 manualInputs.powellSpeechDDay
+  try {
+    const existingGuard = d.EVENT_DAY_VOLATILITY_GUARD?.value ?? 0;
+    const powellDDay = (manualInputs as any)?.powellSpeechDDay ?? null;
+    const isPowellDay = powellDDay !== null && (powellDDay as number) === 0;
+    const newLevel = (existingGuard === 1 || isPowellDay) ? 1 : 0;
+    if (isPowellDay || existingGuard === 1) {
+      d.EVENT_DAY_VOLATILITY_GUARD = {
+        name: 'event_day_volatility_guard',
+        value: newLevel,
+        date: today(),
+        formula: `CPI/FOMC D-Day=${existingGuard === 1}, Powell 발언일=${isPowellDay}. D=0 시 신규 매수 보류. ★ video6 §"중앙은행 한마디" 확장.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-E #28: REGIME_SECTOR_EXPECTED_4_MATRIX ===
+  // video6 §"섹터 로테이션 4축"
+  // regime → expected 섹터 4-매트릭스 (정보 노출용, signal 영향 X)
+  try {
+    const regimeName = (d.REGIME_STATE as any)?.value ?? 'NEUTRAL';
+    const aiNarrativeStrength = (manualInputs as any)?.aiNarrativeStrength ?? 0;
+    const sectorMap: Record<string, string[]> = {
+      RATE_UP: ['XLE', 'XLF'],
+      EXPANSION: ['XLI', 'XLY'],
+      UNCERTAINTY: ['XLU', 'XLP', 'GLD'],
+      AI_NARRATIVE: ['XLK', 'SOXX'],
+    };
+    // regime → 매핑
+    let expectedSectors: string[] = ['XLK', 'XLF']; // default
+    if (['RISK_OFF', 'RECESSION_RISK', 'PANIC_BUT_OK', 'CORRECTION'].includes(regimeName as string)) {
+      expectedSectors = sectorMap.UNCERTAINTY;
+    } else if (['RISK_ON', 'NEUTRAL'].includes(regimeName as string)) {
+      expectedSectors = sectorMap.EXPANSION;
+    } else if (regimeName === 'BOND_VIGILANTE') {
+      expectedSectors = sectorMap.RATE_UP;
+    }
+    if ((aiNarrativeStrength as number) >= 1) {
+      expectedSectors = [...expectedSectors, ...sectorMap.AI_NARRATIVE].filter((v, i, a) => a.indexOf(v) === i);
+    }
+    d.REGIME_SECTOR_EXPECTED_4_MATRIX = {
+      name: 'regime_sector_expected_4_matrix',
+      value: 0, // 정보 노출용 — signal 영향 없음
+      date: today(),
+      formula: `regime=${regimeName}, aiNarrative=${aiNarrativeStrength}. 예상 섹터: [${expectedSectors.join(', ')}]. ★ video6 §"섹터 로테이션 4축".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P2-E #29: USER_HORIZON_RISK_LEVEL ===
+  // video6 §"단기/스윙/장기"
+  // horizon=short → level=-1, horizon=long → +1, horizon=medium → 0
+  try {
+    const horizon = manualInputs?.investmentHorizon ?? 'medium';
+    const level = horizon === 'short' ? -1 : (horizon === 'long' ? 1 : 0);
+    d.USER_HORIZON_RISK_LEVEL = {
+      name: 'user_horizon_risk_level',
+      value: level,
+      date: today(),
+      formula: `horizon=${horizon}. short→-1(초보 위험 경고), long→+1(분할매수 권장), medium→0. ★ video6 §"단기/스윙/장기".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P2-E #30: CASH_BUY_DIP_READINESS_FLAG ===
+  // video6 §"현금 = 자유" (양방향 확장 — CASH_AS_OPTIONALITY 보완)
+  // cash_pct ≥ 30% AND VIX ≥ 30 → level=+1, cash_pct < 10% AND VIX ≥ 30 → -1
+  try {
+    const cashPct = (manualInputs as any)?.cashPct ?? (manualInputs as any)?.trancheUsedPct ?? null;
+    const vixNow = val(raw, 'VIXCLS') ?? val(raw, 'VIX') ?? null;
+    const highVix = vixNow !== null && (vixNow as number) >= 30;
+    let level = 0;
+    if (cashPct !== null) {
+      if ((cashPct as number) >= 30 && highVix) level = 1;
+      else if ((cashPct as number) < 10 && highVix) level = -1;
+    }
+    d.CASH_BUY_DIP_READINESS_FLAG = {
+      name: 'cash_buy_dip_readiness_flag',
+      value: level,
+      date: today(),
+      formula: `cashPct=${cashPct ?? 'n/a'}%, VIX=${vixNow?.toFixed(1) ?? 'n/a'} (≥30=${highVix}). +1=화력충분, -1=화력소진. ★ video6 §"현금 = 자유". CASH_AS_OPTIONALITY 보완.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P2-E #31: KIF_LATEST_ISSUE_DAYS_AGO ===
+  // 노션 §KIF (Korea Institute of Finance)
+  // kif-topic.ts HTML 파싱 — 최신 issue 발행일 자동 추적
+  try {
+    const { fetchKifLatestIssueDaysAgo } = await import('../collectors/kif');
+    const kifDays = await fetchKifLatestIssueDaysAgo();
+    d.KIF_LATEST_ISSUE_DAYS_AGO = {
+      name: 'kif_latest_issue_days_ago',
+      value: kifDays ?? -1,
+      date: today(),
+      formula: `KIF 최신 이슈 발행 D-${kifDays ?? 'n/a'}일. ≤7→freshness OK. fallback=-1. ★ 노션 §KIF.`,
+    };
+  } catch {
+    d.KIF_LATEST_ISSUE_DAYS_AGO = { name: 'kif_latest_issue_days_ago', value: -1, date: today(), formula: 'KIF collector fallback=-1.' };
+  }
+
+  // ★ === 30차 P2-E #32: CME_FEDWATCH_PROBABILITY_TIERS ===
+  // 노션 §CME FedWatch — 기존 FOMC_RATE_CUT_PROB_25BP 에 tier 라벨 추가
+  try {
+    const fomcProb32 = d.FOMC_RATE_CUT_PROB_25BP?.value ?? null;
+    let tier = 'UNKNOWN';
+    if (fomcProb32 !== null) {
+      if ((fomcProb32 as number) >= 75) tier = 'LOCKED_IN';
+      else if ((fomcProb32 as number) >= 50) tier = 'CONSENSUS';
+      else if ((fomcProb32 as number) < 30) tier = 'DISREGARDED';
+      else tier = 'MONITORING';
+    }
+    d.CME_FEDWATCH_PROBABILITY_TIERS = {
+      name: 'cme_fedwatch_probability_tiers',
+      value: fomcProb32 !== null ? (fomcProb32 as number) : -1,
+      date: today(),
+      formula: `FOMC 25bp 인하 확률 ${fomcProb32?.toFixed(1) ?? 'n/a'}% → tier='${tier}' (≥75 LOCKED_IN / ≥50 CONSENSUS / <30 DISREGARDED). ★ 노션 §CME FedWatch.`,
+    };
+  } catch { void 0; }
+
+
   return d;
 }
 

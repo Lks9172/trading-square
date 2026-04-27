@@ -1138,7 +1138,33 @@ function nasdaqSignal(
 
 
   
-  // ★ === 30차 P2-D #24: SEMI_HELIUM_RELIEF_RALLY_FLAG — 보조 가산 ===
+  // ★ === 30차 P2-E #26: NASDAQ_SHORT_INTEREST_LEVEL — 보조 가산 ===
+  // video6 §06:31 "공매도 누적 → 숏스퀴즈 후보"
+  const nasdaqShortInterest = dv(derived, 'NASDAQ_SHORT_INTEREST_LEVEL');
+  if (nasdaqShortInterest === 1) {
+    weightedMet += 0.5; weightedMax += 0.5;
+    reasons.push('✓ SQQQ 20D +20%+ — 숏 누적, 스퀴즈 후보 (video6 §06:31, 가중치 0.5)');
+  }
+
+  // ★ === 30차 P2-E #27: EVENT_DAY_VOLATILITY_GUARD 확장 (Powell 포함) ===
+  // video6 §"중앙은행 한마디"
+  const eventGuardP2 = dv(derived, 'EVENT_DAY_VOLATILITY_GUARD');
+  if (eventGuardP2 === 1 && !unmetReasons.some(r => r.includes('EVENT_DAY_VOLATILITY_GUARD'))) {
+    unmetReasons.push('🛑 EVENT_DAY_VOLATILITY_GUARD=1 — CPI/FOMC/Powell 발언일 신규 매수 보류 (video6 §"중앙은행 한마디")');
+  }
+
+  // ★ === 30차 P2-E #29: USER_HORIZON_RISK_LEVEL — 신호 조정 ===
+  // video6 §"단기/스윙/장기"
+  const horizonRisk = dv(derived, 'USER_HORIZON_RISK_LEVEL');
+  if (horizonRisk === -1) {
+    unmetReasons.push('⚠️ USER_HORIZON_RISK_LEVEL=-1 (단기 투자자 위험 경고, video6 §"단기/스윙/장기")');
+  } else if (horizonRisk === 1) {
+    reasons.push('✓ USER_HORIZON_RISK_LEVEL=+1 (장기 투자자 분할매수 권장, video6 §"단기/스윙/장기")');
+  }
+
+
+
+    // ★ === 30차 P2-D #24: SEMI_HELIUM_RELIEF_RALLY_FLAG — 보조 가산 ===
   // stt_kospi §07:36 "반도체 조용한 호재" (NASDAQ도 연관)
   const semiHelium = dv(derived, 'SEMI_HELIUM_RELIEF_RALLY_FLAG');
   if (semiHelium === 1) {
