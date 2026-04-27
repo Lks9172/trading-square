@@ -9496,6 +9496,130 @@ export async function computeDerived(
 
   // ═══════════════════════════════════════════════════════════════════
 
+
+  // 30차 P2-C: video4 매크로 5건
+  // ═══════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P2-C #11: TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL (정밀화 — P1과 별개, 4축 카운트만) ===
+  // video4 §06:45 4축 (관세/기술/에너지/지정학) 동시 활성 카운트 (P1은 score 합성)
+  try {
+    const existing = d.TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL?.value ?? null;
+    if (existing === null) {
+      // fallback: 이미 P1 에서 계산됐으면 skip
+      const tariffAxis = (manualInputs as any)?.trumpTariffLevel ?? 0;
+      const techAxis = d.US_TECH_HEGEMONY_LEVEL?.value ?? 0;
+      const energyAxis = (val(raw, 'CRUDE_OIL') ?? 0) > 70 ? 1 : 0;
+      const geoAxis = (manualInputs?.geoRisk ?? 3) >= 4 ? 1 : 0;
+      const axisCount = [(tariffAxis as number) >= 1 ? 1 : 0, techAxis >= 1 ? 1 : 0, energyAxis, geoAxis].reduce((a, b) => a + b, 0);
+      d.TRUMP_FOUR_AXES_COUNT_ONLY = {
+        name: 'trump_four_axes_count_only',
+        value: axisCount,
+        date: today(),
+        formula: `4축 순수 카운트 (P1 TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL 와 별개). 관세=${(tariffAxis as number) >= 1 ? 1 : 0}, 기술=${techAxis >= 1 ? 1 : 0}, 에너지=${energyAxis}, 지정학=${geoAxis} → 합계=${axisCount}. ★ video4 §06:45.`,
+      };
+    }
+    // P1에서 이미 적용됐으면 그대로 두고 skip (중복 방지)
+  } catch { void 0; }
+
+  // ★ === 30차 P2-C #12: MMF_TBILL_PARK_FLAG ===
+  // video4 §07:13 "단기국채/MMF/현금성 자산에 고임"
+  // MMF 잔액 12-week 변화율 ≥ +5% AND IWM/HYG 12-week ≤ 0% → level=2
+  try {
+    const { fetchFredHistory } = await import('../collectors/fred');
+    const fredKey = process.env.FRED_API_KEY ?? '';
+    const mmfHist12 = await fetchFredHistory('WRMFNS', fredKey, 14);
+    const iwmHist = await fetchYahooHistory('IWM', 65);
+    const hygHist = await fetchYahooHistory('HYG', 65);
+    let level = 0;
+    let note = '';
+    if (mmfHist12.length >= 12) {
+      const mmfNow = mmfHist12[mmfHist12.length - 1]?.value ?? null;
+      const mmf12wAgo = mmfHist12[0]?.value ?? null;
+      const mmfChg = (mmfNow !== null && mmf12wAgo !== null && mmf12wAgo > 0)
+        ? ((mmfNow - mmf12wAgo) / mmf12wAgo) * 100 : null;
+      const iwmChg12w = (iwmHist.length >= 60) ? ((iwmHist[0].close - iwmHist[59].close) / iwmHist[59].close) * 100 : null;
+      const hygChg12w = (hygHist.length >= 60) ? ((hygHist[0].close - hygHist[59].close) / hygHist[59].close) * 100 : null;
+      const mmfFlowing = mmfChg !== null && mmfChg >= 5;
+      const riskOff = (iwmChg12w !== null && iwmChg12w <= 0) || (hygChg12w !== null && hygChg12w <= 0);
+      if (mmfFlowing && riskOff) { level = 2; note = `MMF ${mmfChg?.toFixed(1)}% 유입 + 위험자산 회피 (IWM ${iwmChg12w?.toFixed(1)}%, HYG ${hygChg12w?.toFixed(1)}%)`; }
+      else if (mmfFlowing) { level = 1; note = `MMF ${mmfChg?.toFixed(1)}% 유입 (위험자산 아직 OK)`; }
+      else { note = `MMF 유입 없음 (${mmfChg?.toFixed(1) ?? 'n/a'}%)`; }
+    }
+    d.MMF_TBILL_PARK_FLAG = {
+      name: 'mmf_tbill_park_flag',
+      value: level,
+      date: today(),
+      formula: `${note}. level=${level} (2=위험자산 회피+현금 고임). ★ video4 §07:13 "단기국채/MMF 고임". fallback=0.`,
+    };
+  } catch { d.MMF_TBILL_PARK_FLAG = { name: 'mmf_tbill_park_flag', value: 0, date: today(), formula: 'fallback=0. video4 §07:13.' }; }
+
+  // ★ === 30차 P2-C #13: MACRO_TRAFFIC_LIGHT_LEVEL ===
+  // video4 §08:13 "고금리 빨간불 / 저금리 초록불 / 노란불"
+  // RATE_TRAFFIC_LIGHT (FFR-R* gap) + GOLDILOCKS_ZONE 결합
+  try {
+    const goldiLocks = d.GOLDILOCKS_ZONE?.value ?? 0;
+    const bondVigilante = d.BOND_VIGILANTE_SCORE?.value ?? 0;
+    // RATE_TRAFFIC_LIGHT proxy: FFR vs neutral rate
+    // BOND_VIGILANTE_SCORE ≥ 4 → 빨간불, 2-4 → 노란불, <2 → 초록불
+    const trafficColor = (bondVigilante as number) >= 4 ? 'RED' : ((bondVigilante as number) >= 2 ? 'YELLOW' : 'GREEN');
+    let trafficLevel = 0;
+    if (trafficColor === 'GREEN' && goldiLocks >= 1) trafficLevel = 2;
+    else if (trafficColor === 'YELLOW' && goldiLocks === 0) trafficLevel = 0;
+    else if (trafficColor === 'RED' && goldiLocks <= -1) trafficLevel = -2;
+    else if (trafficColor === 'GREEN') trafficLevel = 1;
+    else if (trafficColor === 'RED') trafficLevel = -1;
+    d.MACRO_TRAFFIC_LIGHT_LEVEL = {
+      name: 'macro_traffic_light_level',
+      value: trafficLevel,
+      date: today(),
+      formula: `BOND_VIGILANTE_SCORE=${bondVigilante}→신호등=${trafficColor}, GOLDILOCKS_ZONE=${goldiLocks}. 초록+골디→+2, 노란+중립→0, 빨간+역골디→-2. level=${trafficLevel}. ★ video4 §08:13.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P2-C #14: BOND_VIGILANTE_TRAJECTORY_SCORE ===
+  // video4 §09:33 "3.3T 적자 / 5.8% / 2031 GDP 140%"
+  // FEDERAL_DEBT_GDP_TIER + FEDERAL_DEFICIT_GDP_TIER + US_DEBT_GDP_2031_PROJECTION 3축 합산
+  try {
+    const debtTier = d.FEDERAL_DEBT_GDP_TIER?.value ?? 0;
+    const deficitTier = d.FEDERAL_DEFICIT_GDP_TIER?.value ?? 0;
+    const proj2031 = d.US_DEBT_GDP_2031_PROJECTION?.value ?? 0;
+    const trajectorySum = (debtTier as number) + (deficitTier as number) + (proj2031 as number);
+    d.BOND_VIGILANTE_TRAJECTORY_SCORE = {
+      name: 'bond_vigilante_trajectory_score',
+      value: trajectorySum,
+      date: today(),
+      formula: `FEDERAL_DEBT_GDP_TIER=${debtTier} + FEDERAL_DEFICIT_GDP_TIER=${deficitTier} + US_DEBT_GDP_2031_PROJECTION=${proj2031} = ${trajectorySum}. ≤-3→STRONG_BUY 차단. ★ video4 §09:33 "3.3T/5.8%/2031 140%".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P2-C #15: POST_BREAKOUT_CONSOLIDATION_PENDING ===
+  // video2 §24:31 "박스권 돌파 후 V자 직행 거의 없음 / 횡보 후 추세 재개"
+  // BREAKOUT_CHASE_RISK 직후 D+5~D+15 변동성 ≤ 0.5 ATR 미충족 → level=1
+  try {
+    const breakoutChaseRisk = d.BREAKOUT_CHASE_RISK?.value ?? 0;
+    if (breakoutChaseRisk === 1) {
+      const nOhlcPB = await (async () => {
+        const { fetchYahooOHLC } = await import('../collectors/yahoo');
+        return fetchYahooOHLC('^IXIC', 20);
+      })();
+      if (nOhlcPB.length >= 10) {
+        const atr5 = nOhlcPB.slice(0, 5).reduce((s, c) => s + Math.abs(c.high - c.low), 0) / 5;
+        const avgClose = nOhlcPB.slice(0, 5).reduce((s, c) => s + c.close, 0) / 5;
+        const atrPct = avgClose > 0 ? atr5 / avgClose * 100 : 0;
+        const consolidated = atrPct <= 0.5;
+        const level = consolidated ? 0 : 1; // 수렴 미완성 → level=1 (BUY 차단)
+        d.POST_BREAKOUT_CONSOLIDATION_PENDING = {
+          name: 'post_breakout_consolidation_pending',
+          value: level,
+          date: today(),
+          formula: `BREAKOUT_CHASE_RISK=1 이후 5D ATR ${atrPct.toFixed(2)}% (≤0.5 수렴 기준). 수렴완성=${consolidated}. level=${level} (1=수렴 미완성→추격 재금지). ★ video2 §24:31 "V자 직행 거의 없음".`,
+        };
+      }
+    }
+  } catch { void 0; }
+
+  // ═══════════════════════════════════════════════════════════════════
+
   return d;
 }
 

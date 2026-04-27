@@ -1099,6 +1099,44 @@ function nasdaqSignal(
 
 
 
+    // ★ === 30차 P2-C #12: MMF_TBILL_PARK_FLAG — level=2 시 STRONG_BUY 차단 ===
+  // video4 §07:13 "현금 고임 → 위험자산 회피"
+  const mmfPark = dv(derived, 'MMF_TBILL_PARK_FLAG');
+  if (mmfPark !== null && mmfPark >= 2) {
+    unmetReasons.push('⚠️ MMF/단기국채 현금 고임 level=2 — STRONG_BUY 차단 (video4 §07:13)');
+    if (signal === 'STRONG_BUY') { signal = 'BUY'; overrides.push('MMF_TBILL_PARK_FLAG→STRONG_BUY→BUY'); }
+  } else if (mmfPark === 1) {
+    unmetReasons.push('⚠️ MMF 유입 관찰 level=1 (video4 §07:13)');
+  }
+
+  // ★ === 30차 P2-C #13: MACRO_TRAFFIC_LIGHT_LEVEL — met 가산/차감 ===
+  // video4 §08:13 "초록불/노란불/빨간불"
+  const trafficLight = dv(derived, 'MACRO_TRAFFIC_LIGHT_LEVEL');
+  if (trafficLight !== null && trafficLight >= 2) {
+    met += 1; total += 1; weightedMet += 1.0; weightedMax += 1.0;
+    reasons.push('✓ MACRO_TRAFFIC_LIGHT=+2 (초록+골디락스, video4 §08:13, 가중치 1.0)');
+  } else if (trafficLight !== null && trafficLight <= -2) {
+    weightedMax += 1.0;
+    unmetReasons.push('⚠️ MACRO_TRAFFIC_LIGHT=-2 (빨간+역골디락스, video4 §08:13)');
+  }
+
+  // ★ === 30차 P2-C #14: BOND_VIGILANTE_TRAJECTORY_SCORE — STRONG_BUY 차단 ===
+  // video4 §09:33 "적자/부채 3축 합산 ≤-3 시 차단"
+  const bvTrajectory = dv(derived, 'BOND_VIGILANTE_TRAJECTORY_SCORE');
+  if (bvTrajectory !== null && (bvTrajectory as number) <= -3) {
+    unmetReasons.push(`⚠️ BOND_VIGILANTE_TRAJECTORY=${bvTrajectory} ≤-3 — STRONG_BUY 차단 (video4 §09:33)`);
+    if (signal === 'STRONG_BUY') { signal = 'BUY'; overrides.push(`BOND_VIGILANTE_TRAJECTORY≤-3→STRONG_BUY→BUY`); }
+  }
+
+  // ★ === 30차 P2-C #15: POST_BREAKOUT_CONSOLIDATION_PENDING — BUY 차단 +1 ===
+  // video2 §24:31 "수렴 미완성 → 추격 재금지"
+  const postBreakoutConsolidation = dv(derived, 'POST_BREAKOUT_CONSOLIDATION_PENDING');
+  if (postBreakoutConsolidation === 1) {
+    unmetReasons.push('⚠️ POST_BREAKOUT_CONSOLIDATION_PENDING=1 — 돌파 후 수렴 미완성, 추격 재금지 (video2 §24:31)');
+  }
+
+
+
     // ★ === 30차 P1-A #2: TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL 신호 차단 ===
   // video4 §06:45 — 3축+ 동시 활성 시 BUY 강등, 4축 시 STRONG_BUY 차단.
   const trump4Axes = dv(derived, 'TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL');
