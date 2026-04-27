@@ -1137,6 +1137,19 @@ function nasdaqSignal(
 
 
 
+  
+  // ★ === 30차 P2-D #24: SEMI_HELIUM_RELIEF_RALLY_FLAG — 보조 가산 ===
+  // stt_kospi §07:36 "반도체 조용한 호재" (NASDAQ도 연관)
+  const semiHelium = dv(derived, 'SEMI_HELIUM_RELIEF_RALLY_FLAG');
+  if (semiHelium === 1) {
+    weightedMet += 0.5; weightedMax += 0.5;
+    reasons.push('✓ SEMI_HELIUM_RELIEF_RALLY=1 (호르무즈+헬륨+SOXX, stt_kospi §07:36, 가중치 0.5)');
+  }
+
+  // cap 재적용
+  if (met > total) met = total;
+  if (weightedMet > weightedMax) weightedMet = weightedMax;
+
     // ★ === 30차 P1-A #2: TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL 신호 차단 ===
   // video4 §06:45 — 3축+ 동시 활성 시 BUY 강등, 4축 시 STRONG_BUY 차단.
   const trump4Axes = dv(derived, 'TRUMP_FOUR_AXES_SIMULTANEOUS_LEVEL');
@@ -1468,7 +1481,44 @@ function goldSignal(
     unmetReasons.push('⚠️ GOLD 과열 2축 경계 (video1 §08:57)');
   }
 
-  // === 29차 fix-F — 자산군 × regime 정합 게이트 ===
+  // ★ === 30차 P2-D #17: GOLD_BREAK_VOLUME_BODY_STRENGTH — level=2 SELL 가산 ===
+  // video2 §25:21 "거래량 + 음봉 강도 → 진짜 이탈"
+  const goldBreakBody = dv(derived, 'GOLD_BREAK_VOLUME_BODY_STRENGTH');
+  if (goldBreakBody !== null && goldBreakBody >= 2) {
+    unmetReasons.push('⚠️ GOLD 박스권 이탈 — 거래량+음봉 강도 level=2 (진짜 이탈, video2 §25:21)');
+    if ((signal as string) !== 'SELL' && signal !== 'REDUCE') { signal = 'REDUCE'; overrides.push('GOLD_BREAK_BODY_STRENGTH level=2 → REDUCE'); }
+  }
+
+  // ★ === 30차 P2-D #19: REAL_YIELD_GOLD_INVERSE_CORR_90D — 금 관계 정상 가산 ===
+  // video2 §03:32 "실질금리 vs 금 거울 정확"
+  const ryGoldCorr = dv(derived, 'REAL_YIELD_GOLD_INVERSE_CORR_90D');
+  if (ryGoldCorr !== null) {
+    if ((ryGoldCorr as number) <= -0.5) {
+      score += 0.5; maxScore += 0.5;
+      reasons.push(`✓ 실질금리-금 90D 상관 ${(ryGoldCorr as number).toFixed(2)} ≤-0.5 — 관계 정상 (video2 §03:32, +0.5)`);
+    } else if ((ryGoldCorr as number) > -0.2) {
+      unmetReasons.push(`⚠️ 실질금리-금 90D 상관 ${(ryGoldCorr as number).toFixed(2)} > -0.2 — 관계 약화 경고 (video2 §03:32)`);
+    }
+  }
+
+  // ★ === 30차 P2-D #20: GOLD_2021_LIKE_REGIME — 금 황금 조합 가산 ===
+  // video2 §16:11 "인플레↑ + 실질금리↓ = 2020-2021 황금"
+  const gold2021 = dv(derived, 'GOLD_2021_LIKE_REGIME');
+  if (gold2021 === 1) {
+    score += 1.0; maxScore += 1.0; metCount += 1;
+    reasons.push('✓ GOLD_2021_LIKE_REGIME (인플레↑+실질금리↓, video2 §16:11, +1.0)');
+  }
+
+  // ★ === 30차 P2-D #21: GOLD_GEOPOLITICAL_CAUSAL_CHAIN — 금 SELL 가산 ===
+  // video2 §09:50 "지정학→유가→실질금리 상승→금 하락" 4축 인과 체인
+  const geoChain = dv(derived, 'GOLD_GEOPOLITICAL_CAUSAL_CHAIN');
+  if (geoChain !== null && (geoChain as number) <= -2) {
+    unmetReasons.push('⚠️ GOLD_GEOPOLITICAL_CAUSAL_CHAIN=-2 (지정학→유가→인플레→실질금리↑→금 역풍, video2 §09:50)');
+    if ((signal as string) !== 'SELL') { signal = 'REDUCE'; overrides.push('GOLD_GEO_CAUSAL_CHAIN=-2 → REDUCE'); }
+  }
+
+
+    // === 29차 fix-F — 자산군 × regime 정합 게이트 ===
   signal = applyRegimeCoherenceGate('GOLD', signal, regime.regime, overrides, unmetReasons);
 
   return withSignalExplanation({
@@ -2443,7 +2493,47 @@ function kospiSignal(
   }
   if (weightedMet > weightedMax) weightedMet = weightedMax;
 
-  // met cap 재적용
+  // ★ === 30차 P2-D #22: KRW_FX_CHANNEL_TRANCHE_FLAG — 환전 분할 표시 ===
+  // stt_kospi §09:36 "장기 채널 활용 환전"
+  const krwFxFlag = dv(derived, 'KRW_FX_CHANNEL_TRANCHE_FLAG');
+  if (krwFxFlag === 1) {
+    reasons.push('📌 KRW_FX_CHANNEL: USDKRW 52주 고점권 → KRW→USD 환전 분할 우호 (stt_kospi §09:36)');
+  } else if (krwFxFlag === -1) {
+    reasons.push('📌 KRW_FX_CHANNEL: USDKRW 52주 저점권 → USD→KRW 환전 분할 우호 (stt_kospi §09:36)');
+  }
+
+  // ★ === 30차 P2-D #23: KR_GDP_GROWTH_FORECAST + KR_FISCAL_GDP_BOOST_PCT — 보조 가산 ===
+  // stt_kospi §10:29 "추경 GDP +0.2pp"
+  const krGdpForecast = dv(derived, 'KR_GDP_GROWTH_FORECAST');
+  const krFiscalBoost = dv(derived, 'KR_FISCAL_GDP_BOOST_PCT');
+  if (krGdpForecast !== null && krFiscalBoost !== null) {
+    const combinedGdp = (krGdpForecast as number) + (krFiscalBoost as number);
+    if (combinedGdp >= 2.0) {
+      weightedMet += 0.5; weightedMax += 0.5;
+      reasons.push(`✓ KR GDP 전망 ${combinedGdp.toFixed(1)}% (기본 ${krGdpForecast.toFixed(1)} + 추경 +${krFiscalBoost.toFixed(1)}pp, stt_kospi §10:29, 가중치 0.5)`);
+    } else {
+      unmetReasons.push(`⚠️ KR GDP 전망 ${combinedGdp.toFixed(1)}% — 성장 모멘텀 부족 (stt_kospi §10:29)`);
+    }
+  }
+
+  // ★ === 30차 P2-D #24: SEMI_HELIUM_RELIEF_RALLY_FLAG — KOSPI 보조 ===
+  // stt_kospi §07:36 "반도체 조용한 호재"
+  const semiHeliumKospi = dv(derived, 'SEMI_HELIUM_RELIEF_RALLY_FLAG');
+  if (semiHeliumKospi === 1) {
+    weightedMet += 0.5; weightedMax += 0.5;
+    reasons.push('✓ SEMI_HELIUM_RELIEF_RALLY=1 (반도체 조용한 호재, stt_kospi §07:36, 가중치 0.5)');
+  }
+
+  // ★ === 30차 P2-E #25: INDIVIDUAL_CONTRA_CORRELATION_60D — KOSPI 보조 ===
+  // video6 §"개인 통계적 반대"
+  const individContra = dv(derived, 'INDIVIDUAL_CONTRA_CORRELATION_60D');
+  if (individContra === 1) {
+    weightedMet += 0.5; weightedMax += 0.5;
+    reasons.push('✓ INDIVIDUAL_CONTRA_CORRELATION=1 — 개인 contra 정합 (video6 §"개인 통계적 반대", 가중치 0.5)');
+  }
+
+
+    // met cap 재적용
   if (met > total) met = total;
 
   // === 29차 fix-F — 자산군 × regime 정합 게이트 ===

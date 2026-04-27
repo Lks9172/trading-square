@@ -9620,6 +9620,231 @@ export async function computeDerived(
 
   // ═══════════════════════════════════════════════════════════════════
 
+
+  // 30차 P2-D: video1+2 + KOSPI + video6 보강 9건
+  // ═══════════════════════════════════════════════════════════════════
+
+  // ★ === 30차 P2-D #16: BULL_BEAR_BODY_STRENGTH_RATIO ===
+  // video2 §20:30 "압도적 매도 vs 약한 반등 비교"
+  // 직전 60D 평균 양봉 몸통 vs 음봉 몸통 비율 (NASDAQ/GOLD/KOSPI)
+  try {
+    const { fetchYahooOHLC } = await import('../collectors/yahoo');
+    const targets: Array<[string, string]> = [
+      ['^IXIC', 'NASDAQ'], ['^KS11', 'KOSPI'], ['GC=F', 'GOLD'],
+    ];
+    for (const [sym, label] of targets) {
+      try {
+        const ohlcBB = await fetchYahooOHLC(sym, 65);
+        if (ohlcBB.length >= 30) {
+          const recent60 = ohlcBB.slice(0, 60);
+          const bulls = recent60.filter(c => c.close > c.open);
+          const bears = recent60.filter(c => c.close < c.open);
+          const avgBull = bulls.length > 0 ? bulls.reduce((s, c) => s + Math.abs(c.close - c.open), 0) / bulls.length : 0;
+          const avgBear = bears.length > 0 ? bears.reduce((s, c) => s + Math.abs(c.close - c.open), 0) / bears.length : 1;
+          const ratio = avgBear > 0 ? avgBull / avgBear : 1;
+          const level = ratio < 0.5 ? -1 : (ratio > 1.5 ? 1 : 0);
+          d[`BULL_BEAR_BODY_STRENGTH_RATIO_${label}`] = {
+            name: `bull_bear_body_strength_ratio_${label.toLowerCase()}`,
+            value: parseFloat(ratio.toFixed(2)),
+            date: today(),
+            formula: `${label} 60D 평균 양봉 몸통 ${avgBull.toFixed(2)} / 음봉 ${avgBear.toFixed(2)} = ${ratio.toFixed(2)}. <0.5→level=-1(매수동력 약). ★ video2 §20:30.`,
+          };
+        }
+      } catch { void 0; }
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-D #17: GOLD_BREAK_VOLUME_BODY_STRENGTH ===
+  // video2 §25:21 "거래량 + 음봉 강도 분리"
+  // 기존 GOLD_BREAK_VOLUME_CONFIRM 에 sub-flag breakBodyStrength 추가
+  try {
+    const goldBreakVol2 = d.GOLD_BREAK_VOLUME_CONFIRM?.value ?? 0;
+    const { fetchYahooOHLC } = await import('../collectors/yahoo');
+    const goldOhlc = await fetchYahooOHLC('GC=F', 30);
+    if (goldOhlc.length >= 10) {
+      const last = goldOhlc[0];
+      const atr = goldOhlc.slice(0, 14).reduce((s, c) => s + Math.abs(c.high - c.low), 0) / 14;
+      const body = Math.abs(last.close - last.open);
+      const breakBodyStrength = atr > 0 ? body / atr : 0;
+      const isBearBreak = last.close < last.open && breakBodyStrength >= 1.0;
+      const level = (goldBreakVol2 !== 0 && isBearBreak) ? 2 : (goldBreakVol2 !== 0 ? 1 : 0);
+      d.GOLD_BREAK_VOLUME_BODY_STRENGTH = {
+        name: 'gold_break_volume_body_strength',
+        value: level,
+        date: today(),
+        formula: `GOLD_BREAK_VOLUME_CONFIRM=${goldBreakVol2}, 음봉 몸통/ATR=${breakBodyStrength.toFixed(2)} (≥1.0=강). 양쪽 충족→level=2(강한 진짜 이탈). ★ video2 §25:21.`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-D #18: RECOMMENDED_TRANCHE_COUNT ===
+  // video1 §02:09 "100번 vs 10번 비효율 / 적정 분할"
+  // ENTRY_TIMING_QUINTILE (0~4) + MEAN_REVERSION (이격도) 결합
+  try {
+    const entryQ = d.ENTRY_TIMING_QUINTILE?.value ?? 2;
+    const nasdaqDisp = d.NASDAQ_DISPARITY?.value ?? 0;
+    let trancheCount = 5;
+    let note = '';
+    if ((entryQ <= 1 || entryQ === 0) && nasdaqDisp <= -15) {
+      trancheCount = 3; note = '극저점 (quintile≤1 + 이격≤-15%) → 3분할';
+    } else if (entryQ >= 3) {
+      trancheCount = 7; note = '고점권 (quintile≥3) → 7분할';
+    } else {
+      trancheCount = 5; note = '중간 구간 → 5분할';
+    }
+    d.RECOMMENDED_TRANCHE_COUNT = {
+      name: 'recommended_tranche_count',
+      value: trancheCount,
+      date: today(),
+      formula: `ENTRY_TIMING_QUINTILE=${entryQ}, NASDAQ 이격도=${nasdaqDisp.toFixed(1)}%. ${note}. ★ video1 §02:09 "적정 분할".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P2-D #19: REAL_YIELD_GOLD_INVERSE_CORR_90D ===
+  // video2 §03:32 "실질금리 vs 금 거울 정확"
+  // REAL_YIELD vs GOLD 90D 일간 변화율 Pearson 상관
+  try {
+    const ryHist90 = await fetchYahooHistory('RINF', 95); // RINF = 실질금리 ETF proxy
+    const goldHist90 = await fetchYahooHistory('GC=F', 95);
+    if (ryHist90.length >= 60 && goldHist90.length >= 60) {
+      const n90 = Math.min(ryHist90.length, goldHist90.length, 90) - 1;
+      const ryRets = Array.from({ length: n90 }, (_, i) => {
+        const cur = ryHist90[i].close, prev = ryHist90[i + 1].close;
+        return prev > 0 ? (cur - prev) / prev : 0;
+      });
+      const gRets = Array.from({ length: n90 }, (_, i) => {
+        const cur = goldHist90[i].close, prev = goldHist90[i + 1].close;
+        return prev > 0 ? (cur - prev) / prev : 0;
+      });
+      const meanRy = ryRets.reduce((a, b) => a + b, 0) / n90;
+      const meanG = gRets.reduce((a, b) => a + b, 0) / n90;
+      const cov = ryRets.reduce((s, r, i) => s + (r - meanRy) * (gRets[i] - meanG), 0) / n90;
+      const stdRy = Math.sqrt(ryRets.reduce((s, r) => s + (r - meanRy) ** 2, 0) / n90);
+      const stdG = Math.sqrt(gRets.reduce((s, r) => s + (r - meanG) ** 2, 0) / n90);
+      const corr = (stdRy > 0 && stdG > 0) ? cov / (stdRy * stdG) : 0;
+      const level = corr <= -0.5 ? 2 : (corr <= -0.2 ? 1 : 0);
+      d.REAL_YIELD_GOLD_INVERSE_CORR_90D = {
+        name: 'real_yield_gold_inverse_corr_90d',
+        value: parseFloat(corr.toFixed(3)),
+        date: today(),
+        formula: `실질금리(RINF proxy) vs 금 90D Pearson 상관 = ${corr.toFixed(3)}. ≤-0.5→+2(관계 정상), -0.5~-0.2→+1, >-0.2→0(약화). level=${level}. ★ video2 §03:32 "거울 정확".`,
+      };
+    }
+  } catch { void 0; }
+
+  // ★ === 30차 P2-D #20: GOLD_2021_LIKE_REGIME ===
+  // video2 §16:11 "인플레↑ + 실질금리↓ = 금 황금 조합"
+  // REAL_YIELD 30D Δ ≤ -0.1 AND CPI YoY 12M slope ≥ +0.5
+  try {
+    const ryTrend30 = d.REAL_YIELD_TREND?.value ?? null;
+    const cpiRaw = val(raw, 'CPIAUCSL');
+    const { fetchFredHistory } = await import('../collectors/fred');
+    const fredKey2 = process.env.FRED_API_KEY ?? '';
+    const cpiHist = await fetchFredHistory('CPIAUCSL', fredKey2, 14);
+    let cpiSlope = 0;
+    if (cpiHist.length >= 12) {
+      const cpiOld = cpiHist[0]?.value ?? null;
+      const cpiNew = cpiHist[cpiHist.length - 1]?.value ?? null;
+      if (cpiOld !== null && cpiNew !== null && cpiOld > 0) {
+        cpiSlope = ((cpiNew - cpiOld) / cpiOld) * 100;
+      }
+    }
+    const ryFalling30 = ryTrend30 !== null && ryTrend30 <= -0.1;
+    const cpiRising = cpiSlope >= 0.5;
+    const level = (ryFalling30 && cpiRising) ? 1 : 0;
+    d.GOLD_2021_LIKE_REGIME = {
+      name: 'gold_2021_like_regime',
+      value: level,
+      date: today(),
+      formula: `REAL_YIELD_TREND=${ryTrend30?.toFixed(3) ?? 'n/a'} (≤-0.1=${ryFalling30}), CPI 12M slope=${cpiSlope.toFixed(2)}% (≥+0.5=${cpiRising}). 동시충족→level=1 (2020-2021 황금 조합). ★ video2 §16:11.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P2-D #21: GOLD_GEOPOLITICAL_CAUSAL_CHAIN ===
+  // video2 §09:50 "지정학→유가→인플레→실질금리 상승→금 하락" 인과 체인
+  // 4단 verification: GEO + WTI 30D Δ ≥+10% + 5Y BE 30D Δ ≥+10bp + REAL_YIELD 30D Δ ≥+0.05
+  try {
+    const geoRiskHigh = (manualInputs?.geoRisk ?? 3) >= 4;
+    const wtiHist30 = await fetchYahooHistory('CL=F', 35);
+    const wtiChg30 = (wtiHist30.length >= 30) ? ((wtiHist30[0].close - wtiHist30[29].close) / wtiHist30[29].close) * 100 : null;
+    const wtiAxis = wtiChg30 !== null && wtiChg30 >= 10;
+    // 5Y breakeven: DFII5 FRED (proxy: T5YIE)
+    const t5yieNow = val(raw, 'T5YIE') ?? null;
+    // 30D 전 값은 derived 히스토리에 없으므로 단순 절대값으로 proxy
+    const beAxis = t5yieNow !== null && t5yieNow >= 2.5; // ≥2.5% = 인플레 기대 높음
+    const ryTrendPos = (d.REAL_YIELD_TREND?.value ?? null) !== null && (d.REAL_YIELD_TREND!.value as number) >= 0.05;
+    const allFour = geoRiskHigh && wtiAxis && beAxis && ryTrendPos;
+    const level = allFour ? -2 : 0;
+    d.GOLD_GEOPOLITICAL_CAUSAL_CHAIN = {
+      name: 'gold_geopolitical_causal_chain',
+      value: level,
+      date: today(),
+      formula: `GEO≥4=${geoRiskHigh}, WTI 30D ${wtiChg30?.toFixed(1) ?? 'n/a'}% ≥10=${wtiAxis}, 5YBE(T5YIE)=${t5yieNow?.toFixed(2) ?? 'n/a'} ≥2.5=${beAxis}, REAL_YIELD_TREND≥0.05=${ryTrendPos}. 4축 모두→level=-2 (금 역풍). ★ video2 §09:50.`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P2-D #22: KRW_FX_CHANNEL_TRANCHE_FLAG ===
+  // stt_kospi §09:36 "장기 채널 활용 환전"
+  // USDKRW_WEEKLY_CHANNEL_POSITION ≥ 0.9 → +1 (KRW→USD), ≤ 0.1 → -1 (USD→KRW)
+  try {
+    const usdkrwHist = await fetchYahooHistory('KRW=X', 260);
+    let krwChannelPos: number | null = null;
+    if (usdkrwHist.length >= 52) {
+      const closes = usdkrwHist.map(p => p.close);
+      const maxVal = Math.max(...closes.slice(0, 52));
+      const minVal = Math.min(...closes.slice(0, 52));
+      krwChannelPos = (maxVal - minVal) > 0 ? (closes[0] - minVal) / (maxVal - minVal) : 0.5;
+    }
+    const level = krwChannelPos !== null ? (krwChannelPos >= 0.9 ? 1 : (krwChannelPos <= 0.1 ? -1 : 0)) : 0;
+    d.KRW_FX_CHANNEL_TRANCHE_FLAG = {
+      name: 'krw_fx_channel_tranche_flag',
+      value: level,
+      date: today(),
+      formula: `USDKRW 52주 채널 내 위치 ${(krwChannelPos ?? 0.5 * 100).toFixed(1)}. ≥0.9→+1(KRW약세, 환전 분할), ≤0.1→-1(KRW강세, 역환전). ★ stt_kospi §09:36 "장기 채널 활용 환전".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P2-D #23: KR_GDP_GROWTH_FORECAST + KR_FISCAL_GDP_BOOST_PCT ===
+  // stt_kospi §10:29 "추경 GDP +0.2pp 효과"
+  try {
+    const krGdpForecast = (manualInputs as any)?.krGdpGrowthForecast ?? 1.7;
+    const krFiscalBoost = 0.2; // default, 추경 고정값
+    const combinedGdp = (krGdpForecast as number) + krFiscalBoost;
+    d.KR_GDP_GROWTH_FORECAST = {
+      name: 'kr_gdp_growth_forecast',
+      value: krGdpForecast as number,
+      date: today(),
+      formula: `수동 입력 krGdpGrowthForecast=${krGdpForecast}% (default 1.7). ★ stt_kospi §10:29.`,
+    };
+    d.KR_FISCAL_GDP_BOOST_PCT = {
+      name: 'kr_fiscal_gdp_boost_pct',
+      value: krFiscalBoost,
+      date: today(),
+      formula: `추경 GDP 부스트 ${krFiscalBoost}%p (고정값). 실질 예상 GDP = ${combinedGdp.toFixed(1)}%. ★ stt_kospi §10:29 "추경 +0.2pp".`,
+    };
+  } catch { void 0; }
+
+  // ★ === 30차 P2-D #24: SEMI_HELIUM_RELIEF_RALLY_FLAG ===
+  // stt_kospi §07:36 "호르무즈 정상화 + 헬륨 가격 하락 + SOXX 강세 = 조용한 호재"
+  // HORMUZ_LAG_DAYS strength=1 + HELIUM_AI_BOTTLENECK level≥0 + SOXX 30D ≥ +5%
+  try {
+    const hormuzStrength = d.HORMUZ_CHAIN_SCORE?.value ?? 0;
+    const heliumLevel = d.HELIUM_AI_BOTTLENECK?.value ?? 0;
+    const soxx30d = d.SECTOR_SOXX?.value ?? null;
+    const hormuzOk = (hormuzStrength as number) <= 1; // ≤1 = 정상화 (경계 이하)
+    const heliumOk = (heliumLevel as number) >= -1; // ≥-1 = 병목 없음
+    const soxxStrong = soxx30d !== null && (soxx30d as number) >= 5;
+    const level = (hormuzOk && heliumOk && soxxStrong) ? 1 : 0;
+    d.SEMI_HELIUM_RELIEF_RALLY_FLAG = {
+      name: 'semi_helium_relief_rally_flag',
+      value: level,
+      date: today(),
+      formula: `HORMUZ_CHAIN_SCORE=${hormuzStrength}(≤1=${hormuzOk}), HELIUM_AI_BOTTLENECK=${heliumLevel}(≥-1=${heliumOk}), SOXX 30D=${soxx30d?.toFixed(1) ?? 'n/a'}%(≥5=${soxxStrong}). 3축→level=1. ★ stt_kospi §07:36.`,
+    };
+  } catch { void 0; }
+
+  // ═══════════════════════════════════════════════════════════════════
+
   return d;
 }
 
