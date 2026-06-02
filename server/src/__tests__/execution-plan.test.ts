@@ -43,6 +43,96 @@ describe('computeExecutionPlans', () => {
     expect(nasdaq?.stages.map((stage) => stage.weightPct)).toEqual([...DEFAULT_TRANCHE_WEIGHTS]);
   });
 
+  it('adds timing confirmation metadata to execution plans', async () => {
+    const raw: Record<string, MarketDataPoint> = {
+      NASDAQ: { code: 'NASDAQ', value: 20000, date: '2026-01-01', source: 'YAHOO' },
+      VIXCLS: { code: 'VIXCLS', value: 24, date: '2026-01-01', source: 'FRED' },
+      ICSA: { code: 'ICSA', value: 220000, date: '2026-01-01', source: 'FRED' },
+    };
+    const derived: Record<string, DerivedIndicator> = {
+      OVERHEATED: { name: 'OVERHEATED', value: 1, date: '2026-01-01', formula: '' },
+    };
+    const signals: AssetSignal[] = [{
+      asset: 'NASDAQ',
+      signal: 'BUY',
+      conditionsMet: 3,
+      conditionsTotal: 5,
+      weightedScore: 5,
+      weightedMaxScore: 7,
+      reasons: ['200DMA 회복 대기'],
+      unmetReasons: ['과열 주의'],
+      date: '2026-01-01',
+      explanation: {
+        baseSignal: 'BUY',
+        finalSignal: 'BUY',
+        overrides: [],
+        macroReasons: ['유동성 개선'],
+        sectorReasons: ['기술 섹터 우위'],
+        flowReasons: ['기관 순매수'],
+        timingNotes: ['W 반등 대기'],
+      },
+    }];
+    const allocation: AllocationPlan = {
+      regime: 'RISK_ON',
+      score: 70,
+      allocations: { nasdaq: 35, cash: 65 },
+      leverageAllowed: false,
+      buyStage: 1,
+      date: '2026-01-01',
+    };
+    const regime: RegimeState = { regime: 'RISK_ON', score: 70, components: {}, date: '2026-01-01' };
+
+    const plans = await computeExecutionPlans(raw, derived, signals, allocation, regime);
+    const nasdaq = plans.find((plan) => plan.asset === 'NASDAQ');
+
+    expect(nasdaq?.timing?.macroAligned).toBe(true);
+    expect(nasdaq?.timing?.sectorAligned).toBe(true);
+    expect(nasdaq?.timing?.flowConfirmed).toBe(true);
+    expect(nasdaq?.timing?.chartConfirmed).toBe(true);
+    expect(nasdaq?.timing?.overheatingRisk).toBe(true);
+  });
+
+
+  it('does not mark chartConfirmed from non-chart timing notes alone', async () => {
+    const raw: Record<string, MarketDataPoint> = {
+      GOLD: { code: 'GOLD', value: 3000, date: '2026-01-01', source: 'YAHOO' },
+    };
+    const derived: Record<string, DerivedIndicator> = {};
+    const signals: AssetSignal[] = [{
+      asset: 'GOLD',
+      signal: 'BUY',
+      conditionsMet: 2,
+      conditionsTotal: 4,
+      weightedScore: 4,
+      weightedMaxScore: 8,
+      reasons: ['실질금리 하락'],
+      unmetReasons: [],
+      date: '2026-01-01',
+      explanation: {
+        baseSignal: 'BUY',
+        finalSignal: 'BUY',
+        overrides: [],
+        macroReasons: ['실질금리 부담 완화'],
+        timingNotes: ['과열 주의'],
+      },
+    }];
+    const allocation: AllocationPlan = {
+      regime: 'CAUTION',
+      score: 48,
+      allocations: { gold: 20, cash: 80 },
+      leverageAllowed: false,
+      buyStage: 1,
+      date: '2026-01-01',
+    };
+    const regime: RegimeState = { regime: 'CAUTION', score: 48, components: {}, date: '2026-01-01' };
+
+    const plans = await computeExecutionPlans(raw, derived, signals, allocation, regime);
+    const gold = plans.find((plan) => plan.asset === 'GOLD');
+
+    expect(gold?.timing?.chartConfirmed).toBe(false);
+    expect(gold?.timing?.overheatingRisk).toBe(true);
+  });
+
   it('keeps BUY playbooks aligned to the 30/30/40 tranche standard', async () => {
     const raw: Record<string, MarketDataPoint> = {
       GOLD: { code: 'GOLD', value: 3000, date: '2026-01-01', source: 'YAHOO' },

@@ -166,6 +166,27 @@ const DERIVED_LABELS: Record<string, { label: string; unit: string; desc: string
   GOLD_FIB_ZONE:      { label: "금 피보나치 구간", unit: "", desc: "3=0.618이하(강한조정), 2=0.5~0.618, 1=0.382~0.5, 0=고점근처", formula: "현재 금 가격의 피보나치 위치" },
 };
 
+
+const SECTOR_QUALITY_PREFIX_LABELS: Record<string, string> = {
+  SECTOR_POLICY_SUPPORT_: '정책',
+  SECTOR_STRUCTURAL_DEMAND_: '구조수요',
+  SECTOR_SUPPLY_TIGHTNESS_: '공급제약',
+  SECTOR_QUALITY_TOTAL_: '종합품질',
+};
+
+function sectorQualityDerivedItems(derived: Record<string, DerivedPoint>) {
+  return Object.keys(derived)
+    .filter((key) => Object.keys(SECTOR_QUALITY_PREFIX_LABELS).some((prefix) => key.startsWith(prefix)))
+    .sort();
+}
+
+function sectorQualityLabel(key: string): string {
+  const prefix = Object.keys(SECTOR_QUALITY_PREFIX_LABELS).find((item) => key.startsWith(item));
+  if (!prefix) return key;
+  const suffix = key.replace(prefix, '');
+  return `${suffix} ${SECTOR_QUALITY_PREFIX_LABELS[prefix]}`;
+}
+
 function formatValue(val: number, unit: string): string {
   if (unit === "$M" || unit === "$B") {
     if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(2)}T`;
@@ -188,6 +209,7 @@ export function IndicatorPanel({ raw, derived }: Props) {
   const fredKeys = Object.keys(FRED_LABELS).filter((k) => raw[k]);
   const yahooKeys = Object.keys(YAHOO_LABELS).filter((k) => raw[k]);
   const derivedKeys = Object.keys(DERIVED_LABELS).filter((k) => derived[k]);
+  const sectorQualityKeys = sectorQualityDerivedItems(derived);
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -248,6 +270,27 @@ export function IndicatorPanel({ raw, derived }: Props) {
                   value={formatValue(dp.value, info.unit)}
                   date={dp.date}
                   desc={`${info.desc}\n\n산식: ${info.formula}`}
+                  freq="계산"
+                  source="자체"
+                />
+              );
+            })}
+          </div>
+        </Section>
+      )}
+
+      {sectorQualityKeys.length > 0 && (
+        <Section title="섹터 품질 파생">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3">
+            {sectorQualityKeys.map((key) => {
+              const dp = derived[key];
+              return (
+                <Card
+                  key={key}
+                  label={sectorQualityLabel(key)}
+                  value={formatValue(dp.value, '')}
+                  date={dp.date}
+                  desc={dp.formula}
                   freq="계산"
                   source="자체"
                 />

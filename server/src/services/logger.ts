@@ -3,7 +3,10 @@ import path from 'path';
 import pino from 'pino';
 
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
-const LOG_DIR = process.env.LOG_DIR || '/app/logs';
+const DEFAULT_LOG_DIR = process.env.NODE_ENV === 'test'
+  ? path.join(process.cwd(), '.logs')
+  : '/app/logs';
+const LOG_DIR = process.env.LOG_DIR || DEFAULT_LOG_DIR;
 const LOG_FILE = path.join(LOG_DIR, 'server.log');
 
 const streams: pino.StreamEntry[] = [{ stream: process.stdout }];
@@ -12,7 +15,9 @@ try {
   fs.mkdirSync(LOG_DIR, { recursive: true });
   streams.push({ stream: pino.destination({ dest: LOG_FILE, sync: false }) });
 } catch (error) {
-  console.warn('[logger] file destination init failed, stdout only:', error);
+  if (process.env.NODE_ENV !== 'test') {
+    console.warn('[logger] file destination init failed, stdout only:', error);
+  }
 }
 
 export const logger = pino(

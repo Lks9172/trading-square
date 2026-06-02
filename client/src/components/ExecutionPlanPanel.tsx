@@ -15,7 +15,7 @@ interface ExecutionStage {
   weightPct: number;
   triggerCondition: string;
   triggerPrice?: number;
-  status: 'pending' | 'ready' | 'triggered';
+  status: 'pending' | 'ready' | 'triggered' | 'filled';
 }
 
 interface ExecutionPlan {
@@ -29,11 +29,28 @@ interface ExecutionPlan {
   takeProfit: { price: number | null; condition: string };
   validityDays: number;
   primaryReason: string;
+  timing?: {
+    macroAligned: boolean;
+    sectorAligned: boolean;
+    flowConfirmed: boolean;
+    chartConfirmed: boolean;
+    overheatingRisk: boolean;
+    notes: string[];
+  };
 }
 
 interface Props {
   plans?: ExecutionPlan[];
   currentRegime?: string;
+  topdown?: {
+    assetRationale?: Array<{
+      asset: string;
+      macroReasons?: string[];
+      sectorReasons?: string[];
+      flowReasons?: string[];
+      timingNotes?: string[];
+    }>;
+  };
 }
 
 interface TrancheSummary {
@@ -83,7 +100,22 @@ interface StageStatusInfo {
   color: string;  // Tailwind class
 }
 
+
+function timingBadge(active: boolean, positiveLabel: string, negativeLabel: string, tone: 'positive' | 'negative' = 'positive') {
+  const positive = active;
+  const label = positive ? positiveLabel : negativeLabel;
+  const cls = positive
+    ? tone === 'negative'
+      ? 'border-red-500/40 bg-red-500/15 text-red-200'
+      : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200'
+    : 'border-neutral-700 bg-neutral-800/70 text-neutral-400';
+  return { label, cls };
+}
+
 function stageStatusInfo(s: string): StageStatusInfo {
+  if (s === 'filled') {
+    return { icon: '✅', text: '집행 완료', color: 'text-violet-300' };
+  }
   if (s === 'triggered') {
     // 이미 조건 발동 (가장 강한 실행 상태)
     return { icon: '⚡', text: '발동', color: 'text-blue-400' };
@@ -96,10 +128,11 @@ function stageStatusInfo(s: string): StageStatusInfo {
   return { icon: '⏳', text: '대기', color: 'text-neutral-500' };
 }
 
-export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
+export function ExecutionPlanPanel({ plans, currentRegime, topdown }: Props) {
   const [summaries, setSummaries] = useState<Record<string, TrancheSummary>>({});
   const [pendingAsset, setPendingAsset] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState<string | null>(null);
+  const rationaleMap = new Map((topdown?.assetRationale ?? []).map((r) => [r.asset, r]));
 
   const refresh = useCallback(async () => {
     try {
@@ -166,7 +199,7 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
     <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
       <h3 className="text-base sm:text-lg font-semibold mb-1">실행 플레이북</h3>
       <p className="text-[11px] sm:text-xs text-[var(--muted)] mb-2">
-        자산별 진입 단계·손절·익절·유효기간 (영상 공통 "진단은 지표, 실행은 규칙")
+        자산별 진입 단계·손절·익절·유효기간 (영상 공통 &quot;진단은 지표, 실행은 규칙&quot;)
       </p>
 
       {/* 범례 */}
@@ -182,6 +215,7 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
         {plans.map((p) => {
           const style = ACTION_STYLE[p.action];
           const summary = summaries[p.asset];
+          const rationale = rationaleMap.get(p.asset);
           const executedSet = new Set(summary?.executedStages ?? []);
           // 추격 경고: 이전 집행 이후 레짐이 레벨업했는데 다음 트랑셰 미집행
           const chaseWarn =
@@ -235,7 +269,55 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
                 </div>
               </div>
 
-              <div className="text-[10px] text-[var(--muted)] italic mb-2">{p.primaryReason}</div>
+              <div className="text-[10px] leading-relaxed break-words text-[var(--muted)] italic mb-2">{p.primaryReason}</div>
+
+              {(rationale || p.timing) && (
+                <div className="mb-2 space-y-2">
+                  {rationale && (
+                    <div className="grid grid-cols-1 gap-1 text-[10px] leading-relaxed break-words text-[var(--muted)]">
+                      {rationale.macroReasons && rationale.macroReasons.length > 0 && (
+                        <div><span className="text-cyan-300 font-semibold mr-1">거시</span>{rationale.macroReasons.slice(0, 1).join(' · ')}</div>
+                      )}
+                      {rationale.sectorReasons && rationale.sectorReasons.length > 0 && (
+                        <div><span className="text-blue-300 font-semibold mr-1">섹터</span>{rationale.sectorReasons.slice(0, 1).join(' · ')}</div>
+                      )}
+                      {rationale.flowReasons && rationale.flowReasons.length > 0 && (
+                        <div><span className="text-emerald-300 font-semibold mr-1">수급</span>{rationale.flowReasons.slice(0, 1).join(' · ')}</div>
+                      )}
+                      {rationale.timingNotes && rationale.timingNotes.length > 0 && (
+                        <div><span className="text-yellow-300 font-semibold mr-1">타이밍</span>{rationale.timingNotes.slice(0, 1).join(' · ')}</div>
+                      )}
+                    </div>
+                  )}
+
+                  {p.timing && (() => {
+                    const badges = [
+                      timingBadge(p.timing.macroAligned, '거시 일치', '거시 재확인'),
+                      timingBadge(p.timing.sectorAligned, '섹터 정합', '섹터 약함'),
+                      timingBadge(p.timing.flowConfirmed, '수급 확인', '수급 대기'),
+                      timingBadge(p.timing.chartConfirmed, '차트 확인', '트리거 대기'),
+                      timingBadge(p.timing.overheatingRisk, '과열 주의', '과열 제한적', 'negative'),
+                    ];
+                    return (
+                      <div className="rounded-lg border border-[var(--card-border)] bg-black/15 p-2">
+                        <div className="mb-1 text-[10px] font-semibold text-[var(--muted)]">Execution timing</div>
+                        <div className="flex flex-wrap gap-1">
+                          {badges.map((badge) => (
+                            <span key={badge.label} className={`rounded-full border px-2 py-0.5 text-[10px] ${badge.cls}`}>
+                              {badge.label}
+                            </span>
+                          ))}
+                        </div>
+                        {p.timing.notes.length > 0 && (
+                          <div className="mt-1 text-[10px] leading-relaxed break-words text-[var(--muted)]">
+                            {p.timing.notes.slice(0, 2).join(' · ')}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
 
               {p.stages.length > 0 && (
                 <div className="space-y-1 mb-2">
@@ -245,7 +327,7 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
                     const pendingKey = `${p.asset}-${s.stage}`;
                     const isPending = pendingAsset === pendingKey;
                     return (
-                      <div key={s.stage} className="flex items-start gap-2 text-[11px]">
+                      <div key={s.stage} className="flex items-start gap-2 text-[11px] break-words">
                         <input
                           type="checkbox"
                           checked={executed}
@@ -263,7 +345,7 @@ export function ExecutionPlanPanel({ plans, currentRegime }: Props) {
                         <span className="text-[var(--muted)] font-mono shrink-0">
                           {s.stage}차 {s.weightPct}%
                         </span>
-                        <span className="flex-1">{s.triggerCondition}</span>
+                        <span className="flex-1 leading-relaxed">{s.triggerCondition}</span>
                         {s.triggerPrice !== undefined && (
                           <span className="font-mono text-[10px] text-neutral-400 shrink-0">
                             @{s.triggerPrice.toLocaleString('en-US')}

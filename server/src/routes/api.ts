@@ -17,6 +17,9 @@ import { DEFAULT_TRANCHE_WEIGHTS } from '../engines/execution_plan';
 import { readInvestmentPlan, writeInvestmentPlan, readRecentTradeLog, appendTradeLog, InvestmentPlan } from '../services/investment-plan';
 import { buildWeeklyReport, detectRuleViolations, formatWeeklyReportText } from '../services/weekly-report';
 import { fetchDomesticReportsLatest } from '../collectors/domestic-reports';
+import { buildCompanyResearch } from '../services/company-research';
+import { searchSecCompanies } from '../collectors/sec/ticker-map';
+import { RESEARCH_THEME_GROUPS } from '../services/company-peer-map';
 
 const router = Router();
 
@@ -97,6 +100,41 @@ router.get('/smart-money', async (_req: Request, res: Response) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+router.get('/company/:ticker', async (req: Request, res: Response) => {
+  try {
+    const ticker = String(Array.isArray(req.params.ticker) ? req.params.ticker[0] : req.params.ticker || '').trim().toUpperCase();
+    if (!ticker) {
+      res.status(400).json({ error: 'ticker is required' });
+      return;
+    }
+    const research = await buildCompanyResearch(ticker);
+    res.json(research);
+  } catch (err: any) {
+    const message = err?.message || 'Internal server error';
+    const status = /not found/i.test(message) ? 404 : 500;
+    res.status(status).json({ error: message });
+  }
+});
+
+router.get('/company-search', async (req: Request, res: Response) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const limit = Math.max(1, Math.min(12, parseInt(String(req.query.limit || '8'), 10) || 8));
+    if (q.length < 1) {
+      res.json({ items: [] });
+      return;
+    }
+    const items = await searchSecCompanies(q, limit);
+    res.json({ items });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+router.get('/research/themes', async (_req: Request, res: Response) => {
+  res.json({ themes: RESEARCH_THEME_GROUPS });
 });
 
 router.get('/earnings', async (_req: Request, res: Response) => {

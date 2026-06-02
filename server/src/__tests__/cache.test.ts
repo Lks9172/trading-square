@@ -9,7 +9,15 @@ jest.mock('../collectors', () => ({
 }));
 
 jest.mock('../engines/derived', () => ({
-  computeDerived: jest.fn(async () => ({})),
+  computeDerived: jest.fn(async () => ({
+    SECTOR_XLP: { name: 'sector_xlp', value: 2.1, date: '2026-01-01', formula: '' },
+    SECTOR_ITA: { name: 'sector_ita', value: 3.4, date: '2026-01-01', formula: '' },
+    SECTOR_GRID: { name: 'sector_grid', value: 4.2, date: '2026-01-01', formula: '' },
+    SECTOR_POLICY_SUPPORT_GRID: { name: 'sector_policy_support_grid', value: 78, date: '2026-01-01', formula: '' },
+    SECTOR_STRUCTURAL_DEMAND_GRID: { name: 'sector_structural_demand_grid', value: 84, date: '2026-01-01', formula: '' },
+    SECTOR_SUPPLY_TIGHTNESS_GRID: { name: 'sector_supply_tightness_grid', value: 72, date: '2026-01-01', formula: '' },
+    SECTOR_QUALITY_TOTAL_GRID: { name: 'sector_quality_total_grid', value: 79, date: '2026-01-01', formula: '' },
+  })),
 }));
 
 jest.mock('../engines/regime', () => ({
@@ -17,7 +25,26 @@ jest.mock('../engines/regime', () => ({
 }));
 
 jest.mock('../engines/signals', () => ({
-  computeSignals: jest.fn(() => []),
+  computeSignals: jest.fn(() => ([{
+    asset: 'NASDAQ',
+    signal: 'BUY',
+    conditionsMet: 3,
+    conditionsTotal: 5,
+    weightedScore: 3,
+    weightedMaxScore: 5,
+    reasons: ['기본 이유'],
+    unmetReasons: [],
+    date: '2026-01-01',
+    explanation: {
+      baseSignal: 'BUY',
+      finalSignal: 'BUY',
+      overrides: [],
+      macroReasons: ['유동성 개선'],
+      sectorReasons: ['전력망 CAPEX 우위'],
+      flowReasons: ['기관 흐름 개선'],
+      timingNotes: ['W 바닥 확인'],
+    },
+  }])),
 }));
 
 jest.mock('../engines/allocation', () => ({
@@ -53,7 +80,26 @@ jest.mock('../collectors/calendar', () => ({
 }));
 
 jest.mock('../engines/execution_plan', () => ({
-  computeExecutionPlans: jest.fn(() => []),
+  computeExecutionPlans: jest.fn(() => ([{
+    asset: 'NASDAQ',
+    action: 'BUY_NOW',
+    actionLabel: '지금 1차 매수',
+    currentPrice: 100,
+    targetAllocationPct: 35,
+    stages: [],
+    stopLoss: { price: null, condition: '— ' },
+    takeProfit: { price: null, condition: '— ' },
+    validityDays: 45,
+    primaryReason: '테스트',
+    timing: {
+      macroAligned: true,
+      sectorAligned: true,
+      flowConfirmed: true,
+      chartConfirmed: true,
+      overheatingRisk: false,
+      notes: ['전력/인프라 CAPEX 프록시 정합'],
+    },
+  }])),
 }));
 
 jest.mock('../utils/market-hours', () => ({
@@ -80,7 +126,7 @@ jest.mock('../services/policy-inputs', () => ({
 }));
 
 import { collectAll } from '../collectors';
-import { DEFAULT_PROFILE, getSnapshot, resetSnapshotStateForTests } from '../state/cache';
+import { DEFAULT_PROFILE, buildSnapshot, getSnapshot, resetSnapshotStateForTests } from '../state/cache';
 
 describe('getSnapshot', () => {
   beforeEach(() => {
@@ -96,6 +142,16 @@ describe('getSnapshot', () => {
 
     expect(collectAll).toHaveBeenCalledTimes(1);
     expect(first).toBe(second);
+  });
+
+
+  it('includes topdown sectors, signal explanations, and execution timing in snapshot shape', async () => {
+    const snapshot = await buildSnapshot(DEFAULT_PROFILE);
+
+    expect(snapshot.meta.topdown?.favoredSectors).toBeDefined();
+    expect(snapshot.meta.topdown?.favoredSectors?.some((sector) => ['SECTOR_GRID', 'SECTOR_ITA', 'SECTOR_XLP'].includes(sector.key))).toBe(true);
+    expect(snapshot.signals[0]?.explanation?.sectorReasons?.length).toBeGreaterThan(0);
+    expect(snapshot.meta.executionPlans?.[0]?.timing?.sectorAligned).toBe(true);
   });
 
   it('shares the in-flight build between forced and non-forced calls for the same profile', async () => {

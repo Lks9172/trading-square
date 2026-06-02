@@ -31,8 +31,12 @@ const YAHOO_SYMBOLS: Record<string, string> = {
   XLB: 'XLB',    // 소재 (원자재/화학)
   XLRE: 'XLRE',  // 부동산 (금리 민감)
   XLU: 'XLU',    // 유틸리티 (방어 섹터, 배당주)
+  XLP: 'XLP',    // 필수소비재 (방어 섹터)
   SOXX: 'SOXX',  // 반도체 ETF (영상2·5 AI·헬륨 반도체 특화)
   SMH: 'SMH',    // 반도체 ETF (더 좁은 대형주 중심)
+  ITA: 'ITA',    // 방산/항공우주 ETF (지정학/국방 예산 프록시)
+  GRID: 'GRID',  // 전력망/전력 인프라 ETF (AI 전력수요 프록시)
+  IGF: 'IGF',    // 글로벌 인프라 ETF (전력·운송·유틸리티 확장 프록시)
   TQQQ: 'TQQQ',  // 2x/3x 레버리지 ETF — 백테스트 leverage 비중 실현 수익률 계산용
   NQ_FUTURES: 'NQ=F',
   ES_FUTURES: 'ES=F',
@@ -76,6 +80,16 @@ async function fetchChart(symbol: string): Promise<ChartMeta | null> {
     }
   }
   throw new Error(`Yahoo ${symbol} fetch failed: ${serializeError(lastError).message}`);
+}
+
+export async function fetchYahooQuote(symbol: string): Promise<{ symbol: string; price: number; date: string } | null> {
+  const meta = await fetchChart(symbol);
+  if (!meta) return null;
+  return {
+    symbol: meta.symbol,
+    price: meta.regularMarketPrice,
+    date: new Date(meta.regularMarketTime * 1000).toISOString().split('T')[0],
+  };
 }
 
 function chartUrls(symbol: string, query: string) {

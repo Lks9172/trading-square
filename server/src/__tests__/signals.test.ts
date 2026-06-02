@@ -168,6 +168,59 @@ describe('computeSignals', () => {
     }
   });
 
+  it('builds layered explanations directly in signal engine for major assets', () => {
+    const raw = makeRaw({ VIXCLS: 36, ICSA: 220000, DXY: 99, WTI: 62, USDKRW: 1440 });
+    const derived = makeDerived({
+      NASDAQ_ABOVE_200DMA: 0,
+      NASDAQ_DISPARITY: -26,
+      LIQUIDITY_DIRECTION: 2,
+      REAL_YIELD: 1.2,
+      SECTOR_XLK: 4.5,
+      INSTITUTIONAL_NASDAQ_FLOW: 1,
+      KOSPI_ABOVE_200DMA: 0,
+      KOSPI_DISPARITY: -18,
+      KRW_FX_LEVEL: 1,
+      KOSPI_FOREIGN_NET_20D: 1200,
+      SECTOR_SOXX: 5.5,
+      GOLD_FIB_ZONE: 3,
+      REAL_YIELD_TREND: -0.1,
+    });
+    const profile = { ...defaultProfile, manualInputs: { ...defaultProfile.manualInputs, policyDirection: 1, geoRisk: 3 } };
+    const signals = computeSignals(raw, derived, { ...defaultRegime, regime: 'PANIC_BUT_OK' }, profile);
+
+    const nasdaq = signals.find((s) => s.asset === 'NASDAQ');
+    const kospi = signals.find((s) => s.asset === 'KOSPI');
+    const gold = signals.find((s) => s.asset === 'GOLD');
+
+    expect(nasdaq?.explanation?.macroReasons?.length).toBeGreaterThan(0);
+    expect(nasdaq?.explanation?.sectorReasons?.length).toBeGreaterThan(0);
+    expect(nasdaq?.explanation?.flowReasons?.length).toBeGreaterThan(0);
+    expect(kospi?.explanation?.flowReasons?.length).toBeGreaterThan(0);
+    expect(gold?.explanation?.macroReasons?.length).toBeGreaterThan(0);
+  });
+
+  it('limits explanation layers to prioritized top reasons', () => {
+    const raw = makeRaw({ VIXCLS: 37, ICSA: 220000, DXY: 99, WTI: 62, USDKRW: 1440 });
+    const derived = makeDerived({
+      NASDAQ_ABOVE_200DMA: 0,
+      NASDAQ_DISPARITY: -26,
+      LIQUIDITY_DIRECTION: 2,
+      REAL_YIELD: 1.2,
+      SECTOR_XLK: 4.5,
+      SECTOR_XLC: 3.2,
+      INSTITUTIONAL_NASDAQ_FLOW: 1,
+      SMART_MONEY_SCORE: 1,
+    });
+    const profile = { ...defaultProfile, manualInputs: { ...defaultProfile.manualInputs, policyDirection: 1, geoRisk: 3 } };
+    const signals = computeSignals(raw, derived, { ...defaultRegime, regime: 'PANIC_BUT_OK' }, profile);
+    const nasdaq = signals.find((s) => s.asset === 'NASDAQ');
+
+    expect((nasdaq?.explanation?.macroReasons?.length ?? 0)).toBeLessThanOrEqual(3);
+    expect((nasdaq?.explanation?.sectorReasons?.length ?? 0)).toBeLessThanOrEqual(3);
+    expect((nasdaq?.explanation?.flowReasons?.length ?? 0)).toBeLessThanOrEqual(3);
+    expect(nasdaq?.explanation?.macroReasons?.[0]).toContain('유동성');
+  });
+
   it('marks cash defensive in STAGFLATION and BOND_VIGILANTE regimes', () => {
     const raw = makeRaw({});
     const derived = makeDerived({});

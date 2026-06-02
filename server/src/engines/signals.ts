@@ -64,10 +64,61 @@ function disabledAssetSignal(asset: string, reason: string): AssetSignal {
   };
 }
 
+interface ExplanationLayers {
+  macroReasons?: string[];
+  sectorReasons?: string[];
+  assetReasons?: string[];
+  flowReasons?: string[];
+  timingNotes?: string[];
+}
+
+type ExplanationCategory = keyof ExplanationLayers;
+
+const EXPLANATION_PRIORITY_KEYWORDS: Record<ExplanationCategory, string[]> = {
+  macroReasons: ['유동성', '실질금리', '달러', '정책', '지정학', '경기', 'ISM'],
+  sectorReasons: ['반도체', 'AI', '기술', '유틸리티', '산업재', '소재', '에너지'],
+  assetReasons: ['200DMA', 'W ', 'W_', '피보', '이격도', '환율', 'VIX', '티어'],
+  flowReasons: ['기관', '외국인', '13F', '스마트머니', '중앙은행', '순매수', '구조적'],
+  timingNotes: ['과열', '추격', '극저점', 'W ', 'W_', '피보', '이격도', 'VIX'],
+};
+
+function normalizeReason(item: string): string {
+  return item.replace(/\s+/g, ' ').trim();
+}
+
+function uniq(items: Array<string | undefined | null>): string[] {
+  const seen = new Set<string>();
+  const results: string[] = [];
+  for (const item of items) {
+    if (typeof item !== 'string') continue;
+    const normalized = normalizeReason(item);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    results.push(normalized);
+  }
+  return results;
+}
+
+function prioritizeReasons(items: Array<string | undefined | null>, category: ExplanationCategory, limit = 3): string[] {
+  const deduped = uniq(items);
+  const keywords = EXPLANATION_PRIORITY_KEYWORDS[category];
+  return deduped
+    .map((item, index) => ({
+      item,
+      index,
+      score: keywords.reduce((sum, keyword, keywordIndex) => (item.includes(keyword) ? sum + (keywords.length - keywordIndex) * 10 : sum), 0)
+        + (/과열|추격|극저점|W 반등|200DMA|피보|이격도|외국인|기관|중앙은행|13F/.test(item) ? 15 : 0),
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, limit)
+    .map((entry) => entry.item);
+}
+
 function withSignalExplanation(
   signal: AssetSignal,
   baseSignal: Signal,
   overrides: string[] = [],
+  layers: ExplanationLayers = {},
 ): AssetSignal {
   return {
     ...signal,
@@ -75,7 +126,255 @@ function withSignalExplanation(
       baseSignal,
       finalSignal: signal.signal,
       overrides,
+      macroReasons: prioritizeReasons(layers.macroReasons ?? [], 'macroReasons'),
+      sectorReasons: prioritizeReasons(layers.sectorReasons ?? [], 'sectorReasons'),
+      assetReasons: prioritizeReasons(layers.assetReasons ?? signal.reasons.slice(0, 4), 'assetReasons'),
+      flowReasons: prioritizeReasons(layers.flowReasons ?? [], 'flowReasons'),
+      timingNotes: prioritizeReasons(layers.timingNotes ?? [], 'timingNotes'),
     },
+  };
+}
+
+function buildNasdaqExplanation(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
+  profile: UserProfile,
+  regime: RegimeState,
+  signal: Signal,
+): ExplanationLayers {
+  const liquidity = dv(derived, 'LIQUIDITY_DIRECTION');
+  const realYield = dv(derived, 'REAL_YIELD');
+  const xlk = dv(derived, 'SECTOR_XLK');
+  const xlc = dv(derived, 'SECTOR_XLC');
+  const grid = dv(derived, 'SECTOR_GRID');
+  const igf = dv(derived, 'SECTOR_IGF');
+  const techFlow = dv(derived, 'INSTITUTIONAL_SECTOR_TECH_FLOW');
+  const nqFlow = dv(derived, 'INSTITUTIONAL_NASDAQ_FLOW');
+  const vix = v(raw, 'VIXCLS');
+  const disparity = dv(derived, 'NASDAQ_DISPARITY');
+  return {
+    macroReasons: uniq([
+      liquidity !== null && liquidity > 0 ? `유동성 방향 ${liquidity.toFixed(0)}로 성장주 우호` : undefined,
+      realYield !== null && realYield < 1.5 ? `실질금리 ${realYield.toFixed(2)}%로 멀티플 부담 완화` : undefined,
+      (profile.manualInputs?.policyDirection ?? 0) > 0 ? `정책 완화 방향(${profile.manualInputs.policyDirection})이 위험자산 우호` : undefined,
+      regime.regime === 'PANIC_BUT_OK' ? '공포 국면이지만 펀더멘털 훼손은 제한적' : undefined,
+    ]),
+    sectorReasons: uniq([
+      xlk !== null && xlk > 0 ? `기술 섹터 상대강도 +${xlk.toFixed(1)}%` : undefined,
+      xlc !== null && xlc > 0 ? `커뮤니케이션/메가캡 지지 +${xlc.toFixed(1)}%` : undefined,
+      grid !== null && grid > 0 ? `전력망/AI 인프라 +${grid.toFixed(1)}%로 데이터센터 CAPEX 뒷받침` : undefined,
+      igf !== null && igf > 0 ? `글로벌 인프라 +${igf.toFixed(1)}%로 인프라 사이클 정합` : undefined,
+    ]),
+    flowReasons: uniq([
+      nqFlow !== null && nqFlow > 0 ? `기관 나스닥 흐름 ${nqFlow > 1 ? '강함' : '개선'}` : undefined,
+      techFlow !== null && techFlow > 0 ? `테크 13F 흐름 ${techFlow > 1 ? '강함' : '개선'}` : undefined,
+    ]),
+    timingNotes: uniq([
+      disparity !== null && disparity <= -25 ? `이격도 ${disparity.toFixed(1)}% 극저점 구간` : undefined,
+      disparity !== null && disparity >= 20 ? `이격도 ${disparity.toFixed(1)}% 과열 구간` : undefined,
+      vix !== null && vix >= 35 ? `VIX ${vix.toFixed(1)}로 공포 극대화` : undefined,
+      signal === 'REDUCE' || signal === 'SELL' ? '추격보다 비중 조절 우선' : undefined,
+    ]),
+  };
+}
+
+function buildGoldExplanation(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
+  profile: UserProfile,
+  signal: Signal,
+): ExplanationLayers {
+  const realYield = dv(derived, 'REAL_YIELD');
+  const dxy = v(raw, 'DXY');
+  const cbTonnage = dv(derived, 'CB_GOLD_TONNAGE_TREND');
+  const xlp = dv(derived, 'SECTOR_XLP');
+  const xlu = dv(derived, 'SECTOR_XLU');
+  const ita = dv(derived, 'SECTOR_ITA');
+  const geo = profile.manualInputs.geoRisk;
+  return {
+    macroReasons: uniq([
+      realYield !== null && realYield < 1.8 ? `실질금리 ${realYield.toFixed(2)}%로 금 부담 완화` : undefined,
+      dxy !== null && dxy < 103 ? `달러 ${dxy.toFixed(1)} 약세권` : undefined,
+      geo >= 3 ? `지정학 리스크 ${geo}단계로 안전자산 선호` : undefined,
+    ]),
+    sectorReasons: uniq([
+      '비달러 안전자산/중앙은행 준비자산 테마',
+      xlp !== null && xlp > 0 ? `필수소비재 +${xlp.toFixed(1)}%로 경기둔화 방어 정합` : undefined,
+      xlu !== null && xlu > 0 ? `유틸리티 +${xlu.toFixed(1)}%로 방어 자산 선호 확인` : undefined,
+      ita !== null && ita > 0 && geo >= 3 ? `방산 프록시 +${ita.toFixed(1)}%로 지정학 헤지 정합` : undefined,
+    ]),
+    flowReasons: uniq([
+      cbTonnage !== null && cbTonnage >= 1 ? '중앙은행 구조적 금 매수 지속' : undefined,
+      dv(derived, 'GOLD_DXY_DECOUPLE') === 1 ? '달러와 디커플링된 구조 수요 확인' : undefined,
+    ]),
+    timingNotes: uniq([
+      dv(derived, 'GOLD_FIB_ZONE') !== null && dv(derived, 'GOLD_FIB_ZONE')! >= 2 ? '피보나치 되돌림 바닥권 관찰' : undefined,
+      signal === 'REDUCE' ? '과열/박스 이탈 확인 전 추격 금지' : undefined,
+    ]),
+  };
+}
+
+function buildSilverExplanation(
+  derived: Record<string, DerivedIndicator>,
+  raw: Record<string, MarketDataPoint>,
+): ExplanationLayers {
+  const gsr = dv(derived, 'GOLD_SILVER_RATIO');
+  const ism = dv(derived, 'ISM_PROXY');
+  const xli = dv(derived, 'SECTOR_XLI');
+  return {
+    macroReasons: uniq([
+      ism !== null && ism >= 50 ? `ISM ${ism.toFixed(1)}로 경기 회복 신호` : undefined,
+      v(raw, 'ICSA') !== null && v(raw, 'ICSA')! < 250000 ? '실업수당 안정으로 경기민감 금속 우호' : undefined,
+    ]),
+    sectorReasons: uniq([
+      xli !== null && xli > 0 ? `산업재 섹터 +${xli.toFixed(1)}%로 은 산업수요 지지` : undefined,
+    ]),
+    flowReasons: uniq([
+      gsr !== null && gsr >= 70 ? `금은비 ${gsr.toFixed(1)}로 은 저평가 구간` : undefined,
+    ]),
+    timingNotes: uniq([
+      dv(derived, 'GOLD_SILVER_RATIO_HISTORICAL_BAND') === 2 ? '금은비 역사적 극단 — 평균회귀 후보' : undefined,
+    ]),
+  };
+}
+
+function buildCopperExplanation(
+  derived: Record<string, DerivedIndicator>,
+  raw: Record<string, MarketDataPoint>,
+): ExplanationLayers {
+  const ism = dv(derived, 'ISM_PROXY');
+  const xli = dv(derived, 'SECTOR_XLI');
+  const xlb = dv(derived, 'SECTOR_XLB');
+  const igf = dv(derived, 'SECTOR_IGF');
+  return {
+    macroReasons: uniq([
+      v(raw, 'ICSA') !== null && v(raw, 'ICSA')! < 250000 ? '실업수당 감소로 경기민감 자산 우호' : undefined,
+      ism !== null && ism >= 50 ? `ISM ${ism.toFixed(1)} 확장 국면` : undefined,
+    ]),
+    sectorReasons: uniq([
+      xli !== null && xli > 0 ? `산업재 +${xli.toFixed(1)}%` : undefined,
+      xlb !== null && xlb > 0 ? `소재 +${xlb.toFixed(1)}%` : undefined,
+      igf !== null && igf > 0 ? `글로벌 인프라 +${igf.toFixed(1)}%로 원자재 수요 정합` : undefined,
+    ]),
+    flowReasons: uniq([
+      dv(derived, 'COPPER_GOLD_RATIO_UPTURN') === 1 ? '구리/금 비율 상승 전환' : undefined,
+      dv(derived, 'RECOVERY_TRIPLE_SIGNAL') !== null && dv(derived, 'RECOVERY_TRIPLE_SIGNAL')! >= 2 ? '경기 회복 3축 정합' : undefined,
+    ]),
+    timingNotes: uniq([
+      dv(derived, 'COPPER_TIMEFRAME_SPLIT') === -1 ? '단기 에너지/인플레 역풍 주의' : undefined,
+    ]),
+  };
+}
+
+function buildCashExplanation(regime: RegimeState, derived?: Record<string, DerivedIndicator>): ExplanationLayers {
+  const xlp = derived ? dv(derived, 'SECTOR_XLP') : null;
+  const xlu = derived ? dv(derived, 'SECTOR_XLU') : null;
+  return {
+    macroReasons: uniq([
+      ['CAUTION', 'CORRECTION', 'RECESSION_RISK', 'STAGFLATION', 'BOND_VIGILANTE', 'STAGFLATION_BOND_VIGILANTE'].includes(regime.regime)
+        ? `현재 레짐 ${regime.regime}에서 방어 자산 선호`
+        : undefined,
+    ]),
+    sectorReasons: uniq([
+      xlp !== null && xlp > 0 ? `필수소비재 +${xlp.toFixed(1)}%로 방어 수요 확인` : undefined,
+      xlu !== null && xlu > 0 ? `유틸리티 +${xlu.toFixed(1)}%로 현금/방어 자산 선호 정합` : undefined,
+    ]),
+    timingNotes: uniq([
+      regime.regime === 'RISK_ON' ? '위험선호 국면에서는 현금 기회비용 증가' : undefined,
+    ]),
+  };
+}
+
+function buildLeverageExplanation(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
+  signal: Signal,
+  tier: LeverageTier | null | undefined,
+): ExplanationLayers {
+  const disparity = dv(derived, 'NASDAQ_DISPARITY');
+  const vix = v(raw, 'VIXCLS');
+  const icsa = v(raw, 'ICSA');
+  const grid = dv(derived, 'SECTOR_GRID');
+  return {
+    macroReasons: uniq([
+      icsa !== null && icsa < 300000 ? `실업수당 ${Math.round(icsa / 1000)}K로 침체 확정 전` : undefined,
+    ]),
+    sectorReasons: uniq([
+      '나스닥/성장주 환경과 강하게 연동',
+      grid !== null && grid > 0 ? `전력망 +${grid.toFixed(1)}%로 AI CAPEX 지지` : undefined,
+    ]),
+    flowReasons: uniq([
+      tier ? `${tier} tier 레버리지 조건 충족` : undefined,
+    ]),
+    timingNotes: uniq([
+      disparity !== null ? `이격도 ${disparity.toFixed(1)}%` : undefined,
+      vix !== null && (vix <= 15 || vix >= 28) ? `VIX ${vix.toFixed(1)}` : undefined,
+      signal === 'REDUCE' ? '시간 경과/회복 구간에서는 레버리지 청산 우선' : undefined,
+    ]),
+  };
+}
+
+function buildKospiExplanation(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
+  signal: Signal,
+): ExplanationLayers {
+  const fxLevel = dv(derived, 'KRW_FX_LEVEL');
+  const foreign20 = dv(derived, 'KOSPI_FOREIGN_NET_20D');
+  const xlk = dv(derived, 'SECTOR_XLK');
+  const soxx = dv(derived, 'SECTOR_SOXX');
+  const xlp = dv(derived, 'SECTOR_XLP');
+  const ita = dv(derived, 'SECTOR_ITA');
+  const disparity = dv(derived, 'KOSPI_DISPARITY');
+  return {
+    macroReasons: uniq([
+      fxLevel !== null && fxLevel >= 1 ? `환율 우호 레벨 ${fxLevel}` : undefined,
+      v(raw, 'WTI') !== null && v(raw, 'WTI')! < 65 ? `유가 ${v(raw, 'WTI')!.toFixed(1)}달러로 비용 부담 완화` : undefined,
+      v(raw, 'VIXCLS') !== null && v(raw, 'VIXCLS')! < 25 ? `VIX ${v(raw, 'VIXCLS')!.toFixed(1)} 안정 구간` : undefined,
+    ]),
+    sectorReasons: uniq([
+      xlk !== null && xlk > 0 ? `기술 섹터 +${xlk.toFixed(1)}%` : undefined,
+      soxx !== null && soxx > 0 ? `반도체 프록시 +${soxx.toFixed(1)}%` : undefined,
+      xlp !== null && xlp > 0 ? `방어 섹터(XLP) 강세로 한국 증시 공격 비중은 제한` : undefined,
+      ita !== null && ita > 0 ? `방산 프록시 +${ita.toFixed(1)}%로 지정학 민감도 경계` : undefined,
+    ]),
+    flowReasons: uniq([
+      foreign20 !== null && foreign20 > 0 ? `외국인 20일 순매수 ${Math.round(foreign20).toLocaleString('en-US')}억` : undefined,
+      dv(derived, 'WGBI_INFLOW_TAILWIND') === 1 ? 'WGBI 편입 기대 자금 유입' : undefined,
+    ]),
+    timingNotes: uniq([
+      disparity !== null && disparity <= -25 ? `코스피 이격도 ${disparity.toFixed(1)}% 극저점` : undefined,
+      disparity !== null && disparity >= 20 ? `코스피 이격도 ${disparity.toFixed(1)}% 과열` : undefined,
+      signal === 'REDUCE' || signal === 'SELL' ? '환율/외인 흐름 재확인 전 공격적 진입 금지' : undefined,
+    ]),
+  };
+}
+
+function buildEmergingExplanation(
+  raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
+  profile: UserProfile,
+): ExplanationLayers {
+  const dxy = v(raw, 'DXY');
+  const m2 = dv(derived, 'GLOBAL_M2_PROXY');
+  const igf = dv(derived, 'SECTOR_IGF');
+  const grid = dv(derived, 'SECTOR_GRID');
+  return {
+    macroReasons: uniq([
+      dxy !== null && dxy < 103 ? `달러 ${dxy.toFixed(1)} 약세권` : undefined,
+      m2 !== null && m2 > 0 ? `글로벌 M2 +${m2.toFixed(1)}% 확장` : undefined,
+      (profile.manualInputs?.policyDirection ?? 0) > 0 ? `정책 완화 방향(${profile.manualInputs.policyDirection})` : undefined,
+    ]),
+    sectorReasons: uniq([
+      grid !== null && grid > 0 ? `전력망 +${grid.toFixed(1)}%로 EM 인프라/전력 투자 사이클 우호` : undefined,
+      igf !== null && igf > 0 ? `글로벌 인프라 +${igf.toFixed(1)}%로 자본재/인프라 투자 정합` : undefined,
+    ]),
+    flowReasons: uniq([
+      dv(derived, 'REAL_YIELD_TREND') !== null && dv(derived, 'REAL_YIELD_TREND')! < -0.05 ? '실질금리 하락으로 신흥국 자금 우호' : undefined,
+    ]),
+    timingNotes: uniq([
+      dv(derived, 'DXY_TREND') !== null && dv(derived, 'DXY_TREND')! > 1 ? '달러 단기 반등 시 변동성 확대 주의' : undefined,
+    ]),
   };
 }
 
@@ -573,7 +872,7 @@ function nasdaqSignal(
       reasons: ['200DMA 하회 + 실업수당 30만 초과 → 구조적 위험'],
       unmetReasons,
       date: new Date().toISOString().split('T')[0],
-    }, 'SELL');
+    }, 'SELL', [], buildNasdaqExplanation(raw, derived, profile, regime, 'SELL'));
   }
 
   // 29차 fix-E: baseSignal 결정 위치 정합성 — 신규 P1/P2 가산 (RECOVERY_TRIPLE,
@@ -1318,7 +1617,7 @@ function nasdaqSignal(
     reasons,
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  }, baseSignal, overrides);
+  }, baseSignal, overrides, buildNasdaqExplanation(raw, derived, profile, regime, signal));
 }
 
 function goldSignal(
@@ -1554,7 +1853,7 @@ function goldSignal(
       reasons: ['실질금리 상승 + DXY 강세 → 지정학만으로 매수 위험'],
       unmetReasons,
       date: new Date().toISOString().split('T')[0],
-    }, 'HOLD');
+    }, 'HOLD', [], buildGoldExplanation(raw, derived, profile, 'HOLD'));
   }
 
   let signal: Signal;
@@ -1672,7 +1971,7 @@ function goldSignal(
     reasons,
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  }, baseSignal, overrides);
+  }, baseSignal, overrides, buildGoldExplanation(raw, derived, profile, signal));
 }
 
 function silverSignal(
@@ -1801,7 +2100,7 @@ function silverSignal(
     reasons: reasons.length > 0 ? reasons : ['조건 미충족, 대기'],
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  }, baseSignal, overrides);
+  }, baseSignal, overrides, buildSilverExplanation(derived, raw));
 }
 
 function copperSignal(
@@ -1911,10 +2210,10 @@ function copperSignal(
     reasons,
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  }, baseSignal, overrides);
+  }, baseSignal, overrides, buildCopperExplanation(derived, raw));
 }
 
-function cashSignal(regime: RegimeState): AssetSignal {
+function cashSignal(regime: RegimeState, derived: Record<string, DerivedIndicator>): AssetSignal {
   const map: Record<string, Signal> = {
     RECESSION_RISK: 'STRONG_BUY',
     BOND_VIGILANTE: 'STRONG_BUY',
@@ -1955,7 +2254,7 @@ function cashSignal(regime: RegimeState): AssetSignal {
     reasons: [reasons[regime.regime] ?? ''],
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  }, baseSignal, overrides);
+  }, baseSignal, overrides, buildCashExplanation(regime, derived));
 }
 
 function leverageCheck(
@@ -2002,7 +2301,7 @@ function leverageCheck(
       unmetReasons,
       date: new Date().toISOString().split('T')[0],
       tier: null,
-    }, 'REDUCE');
+    }, 'REDUCE', [], buildLeverageExplanation(raw, derived, 'REDUCE', null));
   }
 
   if (disparity !== null && disparity > -10 && disparity < 0 && met < 3) {
@@ -2090,7 +2389,7 @@ function leverageCheck(
     unmetReasons,
     date: today,
     tier,
-  }, baseSignal, overrides);
+  }, baseSignal, overrides, buildLeverageExplanation(raw, derived, signal, tier));
 }
 
 function kospiSignal(
@@ -2245,7 +2544,7 @@ function kospiSignal(
       reasons: ['코스피 200DMA 하회 + 환율 1500원 돌파 → 외국인 매도 압력 극대화'],
       unmetReasons,
       date: new Date().toISOString().split('T')[0],
-    }, 'SELL');
+    }, 'SELL', [], buildKospiExplanation(raw, derived, 'SELL'));
   }
 
   // 29차 fix-E: KOSPI baseSignal 결정 위치 정합성 — NASDAQ 와 동일 패턴.
@@ -2716,7 +3015,7 @@ function kospiSignal(
     reasons,
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  }, baseSignal, overrides);
+  }, baseSignal, overrides, buildKospiExplanation(raw, derived, signal));
 }
 
 /**
@@ -2821,7 +3120,7 @@ function emergingSignal(
     reasons: reasons.length > 0 ? reasons : ['조건 미충족, 대기'],
     unmetReasons,
     date: new Date().toISOString().split('T')[0],
-  }, baseSignal, overrides);
+  }, baseSignal, overrides, buildEmergingExplanation(raw, derived, profile));
 }
 
 export function computeSignals(
@@ -2837,7 +3136,7 @@ export function computeSignals(
     silverSignal(derived, raw, regime),
     copperSignal(derived, raw, profile, regime),
     emergingSignal(raw, derived, profile, regime),
-    cashSignal(regime),
+    cashSignal(regime, derived),
     leverageCheck(raw, derived, profile, regime),
   ].map((signal) => signal.explanation
     ? signal

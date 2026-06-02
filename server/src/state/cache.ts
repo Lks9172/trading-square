@@ -16,6 +16,7 @@ import { withSpan } from '../observability/trace';
 import { childLogger, serializeError } from '../services/logger';
 import { DEFAULT_MANUAL_INPUTS, mergeEffectiveManualInputs } from '../services/policy-inputs';
 import { logDecisionDetails } from '../services/decision-logging';
+import { buildTopDownView, enrichSignalExplanations } from '../services/topdown-view';
 
 const log = childLogger({ module: 'state.cache' });
 
@@ -182,6 +183,8 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
     s.setAttribute('signals.count', r.length);
     return Promise.resolve(r);
   });
+  const topdown = buildTopDownView(raw, derived, regime, signals);
+  enrichSignalExplanations(signals, topdown);
   const allocation = await withSpan('macrosquare.engine.allocation', () =>
     Promise.resolve(
       computeAllocation(
@@ -291,6 +294,7 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
       inputMode: isDefaultManual ? 'auto' : 'manual',
       staleness: computeStaleness(raw),
       smartMoney,
+      topdown,
       calendar,
       executionPlans,
     },

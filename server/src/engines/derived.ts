@@ -15,6 +15,7 @@ import {
   detectYearlyAreaIndex,
 } from './candles';
 import { withSpan } from '../observability/trace';
+import { buildSectorQualityDerived } from './sector-derived';
 
 function val(raw: Record<string, MarketDataPoint>, key: string): number | null {
   return raw[key]?.value ?? null;
@@ -877,8 +878,8 @@ export async function computeDerived(
   // 15차 Phase 2-G (2026-04): 섹터 4종 추가 — XLC 통신 / XLB 소재 / XLRE 부동산 / XLU 유틸리티.
   const sectorEtfs: Array<[string, string]> = [
     ['XLK','기술'],['XLF','금융'],['XLE','에너지'],['XLV','헬스케어'],['XLI','산업재'],['XLY','임의소비재'],
-    ['XLC','통신'],['XLB','소재'],['XLRE','부동산'],['XLU','유틸리티'],
-    ['SOXX','반도체(광역)'],['SMH','반도체(대형주)'],
+    ['XLC','통신'],['XLB','소재'],['XLRE','부동산'],['XLU','유틸리티'],['XLP','필수소비재'],
+    ['SOXX','반도체(광역)'],['SMH','반도체(대형주)'],['ITA','방산/항공우주'],['GRID','전력망'],['IGF','인프라'],
   ];
   try {
     // 2026-04 로그 관측성 개선: derived 7s 병목 세분화 — 섹터/MTF/yearly 각각 child span.
@@ -6519,9 +6520,9 @@ export async function computeDerived(
     };
     if (regimeStr !== null && expected[regimeStr]) {
       const expSet = expected[regimeStr];
-      // 실제 sector 30D returns top 3 (XLP 는 sectorEtfs 에 없음 — 모듈 보강 필요. 기존 9 sector 사용).
+      // 실제 sector 30D returns top 3. 방어(XLP) + 신규 프록시(ITA/GRID/IGF)도 포함.
       const actualReturns: Array<{ key: string; ret: number }> = [];
-      const sectorKeysToCheck = ['XLK','XLY','XLC','XLF','XLI','XLV','XLU','XLE','GLD'];
+      const sectorKeysToCheck = ['XLK','XLY','XLC','XLF','XLI','XLV','XLU','XLP','XLE','ITA','GRID','IGF','GLD'];
       for (const k of sectorKeysToCheck) {
         const sv = d[`SECTOR_${k}`]?.value ?? null;
         if (sv !== null) actualReturns.push({ key: k, ret: sv });
@@ -10753,6 +10754,16 @@ export async function computeDerived(
       date: today(),
       formula: `핵심 derived ${criticalKeysP3D.length}종 중 결측 ${missingP3D.length}종${missingP3D.length > 0 ? `: ${missingP3D.slice(0, 5).join(', ')}` : ''}. 30차 P3-D 갱신 (25차→30차).`,
     };
+  } catch { void 0; }
+
+  // === 섹터 설명용 파생지표 (정책/구조수요/공급제약) ===
+  try {
+    Object.assign(d, buildSectorQualityDerived(raw, d, dt, {
+      regime: 'NEUTRAL',
+      score: 50,
+      date: dt,
+      components: { geoRisk: manualInputs?.geoRisk ?? 0 },
+    }));
   } catch { void 0; }
 
   return d;

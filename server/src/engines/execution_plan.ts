@@ -90,12 +90,59 @@ function actionLabel(action: ExecutionAction): string {
   return map[action] || action;
 }
 
+function hasAny(items?: string[]): boolean {
+  return Array.isArray(items) && items.length > 0;
+}
+
+function buildTiming(
+  asset: string,
+  signal: AssetSignal,
+  derived: Record<string, DerivedIndicator>,
+  regime: RegimeState,
+): ExecutionPlan['timing'] {
+  const explanation = signal.explanation;
+  const macroAligned = hasAny(explanation?.macroReasons)
+    || ['RISK_ON', 'NEUTRAL', 'PANIC_BUT_OK'].includes(regime.regime) && ['NASDAQ', 'KOSPI', 'EMERGING', 'LEVERAGE', 'COPPER', 'SILVER'].includes(asset)
+    || ['CAUTION', 'CORRECTION', 'RECESSION_RISK', 'STAGFLATION', 'BOND_VIGILANTE', 'STAGFLATION_BOND_VIGILANTE'].includes(regime.regime) && ['GOLD', 'CASH'].includes(asset);
+  const sectorAligned = hasAny(explanation?.sectorReasons);
+  const flowConfirmed = hasAny(explanation?.flowReasons)
+    || ['NASDAQ', 'KOSPI'].includes(asset) && (signal.reasons.some((r) => r.includes('외국인')) || signal.reasons.some((r) => r.includes('기관')));
+  const chartConfirmed = signal.reasons.some((r) => /W_BOTTOM|W 반등|200DMA|이격도|피보|추세선|RSI/i.test(r))
+    || (explanation?.timingNotes ?? []).some((r) => /W 바닥|W 반등|극저점|이격도|피보|추세|200DMA|트리거/i.test(r));
+  const overheatingRisk =
+    (derived.OVERHEATED?.value ?? 0) === 1
+    || signal.unmetReasons.some((r) => /과열|추격|overheat|ATH|소진/i.test(r))
+    || (explanation?.timingNotes ?? []).some((r) => /과열|추격/i.test(r));
+
+  const proxyNote = asset === 'NASDAQ'
+    ? (vDer(derived, 'SECTOR_GRID') ?? 0) > 0 || (vDer(derived, 'SECTOR_IGF') ?? 0) > 0 ? '전력/인프라 CAPEX 프록시 정합' : null
+    : asset === 'GOLD' || asset === 'CASH'
+      ? (vDer(derived, 'SECTOR_XLP') ?? 0) > 0 || (vDer(derived, 'SECTOR_XLU') ?? 0) > 0 ? '방어 섹터 프록시 정합' : null
+      : asset === 'KOSPI'
+        ? (vDer(derived, 'SECTOR_ITA') ?? 0) > 0 ? '방산/지정학 프록시 병행 확인 필요' : null
+        : asset === 'EMERGING'
+          ? (vDer(derived, 'SECTOR_IGF') ?? 0) > 0 ? '인프라 투자 사이클 프록시 우호' : null
+          : null;
+
+  const notes = [
+    macroAligned ? '거시 방향 일치' : '거시 방향 추가 확인 필요',
+    sectorAligned ? '섹터 논리 정합' : '섹터 우위 확인 약함',
+    flowConfirmed ? '수급/자금 흐름 확인' : '수급 확인 전',
+    chartConfirmed ? '차트/트리거 확인' : '차트 트리거 대기',
+    overheatingRisk ? '과열/추격 리스크 있음' : '과열 리스크 제한적',
+    proxyNote,
+  ].filter((item): item is string => Boolean(item));
+
+  return { macroAligned, sectorAligned, flowConfirmed, chartConfirmed, overheatingRisk, notes };
+}
+
 /** NASDAQ 플레이북 — 이격도·200DMA·VIX·ICSA 기반 */
 function nasdaqPlan(
   raw: Record<string, MarketDataPoint>,
   derived: Record<string, DerivedIndicator>,
   signal: AssetSignal,
   alloc: number,
+  regime: RegimeState,
 ): ExecutionPlan {
   const price = vRaw(raw, 'NASDAQ');
   const sma200 = vDer(derived, 'NASDAQ_SMA200');
@@ -191,6 +238,7 @@ function nasdaqPlan(
     takeProfit: { price: takePrice, condition: takeCond || '— ' },
     validityDays: 45,
     primaryReason: reason,
+    timing: buildTiming('NASDAQ', signal, derived, regime),
   };
 }
 
@@ -200,6 +248,7 @@ function goldPlan(
   derived: Record<string, DerivedIndicator>,
   signal: AssetSignal,
   alloc: number,
+  regime: RegimeState,
 ): ExecutionPlan {
   const price = vRaw(raw, 'GOLD');
   const sma200 = vDer(derived, 'GOLD_SMA200');
@@ -267,6 +316,7 @@ function goldPlan(
     takeProfit: { price: takePrice, condition: takeCond || '— ' },
     validityDays: 60,
     primaryReason: reason,
+    timing: buildTiming('GOLD', signal, derived, regime),
   };
 }
 
@@ -276,6 +326,7 @@ function kospiPlan(
   derived: Record<string, DerivedIndicator>,
   signal: AssetSignal,
   alloc: number,
+  regime: RegimeState,
 ): ExecutionPlan {
   const price = vRaw(raw, 'KOSPI');
   const sma200 = vDer(derived, 'KOSPI_SMA200');
@@ -358,6 +409,7 @@ function kospiPlan(
     takeProfit: { price: null, condition: takeCond || '— ' },
     validityDays: 45,
     primaryReason: reason,
+    timing: buildTiming('KOSPI', signal, derived, regime),
   };
 }
 
@@ -367,6 +419,7 @@ function leveragePlan(
   derived: Record<string, DerivedIndicator>,
   signal: AssetSignal,
   alloc: number,
+  regime: RegimeState,
 ): ExecutionPlan {
   const price = vRaw(raw, 'NASDAQ'); // 참조 가격
   const disparity = vDer(derived, 'NASDAQ_DISPARITY');
@@ -404,6 +457,7 @@ function leveragePlan(
     takeProfit: { price: null, condition: takeCond || '— ' },
     validityDays: 60,  // 영상1 "2~3개월 짧게"
     primaryReason: reason,
+    timing: buildTiming('LEVERAGE', signal, derived, regime),
   };
 }
 
@@ -413,6 +467,7 @@ function emergingPlan(
   derived: Record<string, DerivedIndicator>,
   signal: AssetSignal,
   alloc: number,
+  regime: RegimeState,
 ): ExecutionPlan {
   const price = vRaw(raw, 'EWZ');  // 대표 대리 심볼
   const dxy = vRaw(raw, 'DXY');
@@ -463,6 +518,7 @@ function emergingPlan(
     takeProfit: { price: null, condition: takeCond || '— ' },
     validityDays: 90, // 신흥국은 달러 사이클이 길어 유효기간 길게
     primaryReason: reason,
+    timing: buildTiming('EMERGING', signal, derived, regime),
   };
 }
 
@@ -470,9 +526,11 @@ function emergingPlan(
 function genericAssetPlan(
   asset: string,
   raw: Record<string, MarketDataPoint>,
+  derived: Record<string, DerivedIndicator>,
   signal: AssetSignal,
   alloc: number,
   rawKey: string,
+  regime: RegimeState,
 ): ExecutionPlan {
   const price = vRaw(raw, rawKey);
   let action: ExecutionAction = 'HOLD';
@@ -509,6 +567,7 @@ function genericAssetPlan(
     takeProfit: { price: null, condition: '— ' },
     validityDays: 45,
     primaryReason: reason,
+    timing: buildTiming(asset, signal, derived, regime),
   };
 }
 
@@ -517,7 +576,7 @@ export async function computeExecutionPlans(
   derived: Record<string, DerivedIndicator>,
   signals: AssetSignal[],
   allocation: AllocationPlan,
-  _regime: RegimeState,
+  regime: RegimeState,
 ): Promise<ExecutionPlan[]> {
   const allocMap = allocation.allocations;
   const plans: ExecutionPlan[] = [];
@@ -526,13 +585,13 @@ export async function computeExecutionPlans(
     const allocKey = ASSET_ALLOC_KEY[sig.asset];
     const alloc = allocKey ? allocMap[allocKey] ?? 0 : 0;
 
-    if (sig.asset === 'NASDAQ') plans.push(nasdaqPlan(raw, derived, sig, alloc));
-    else if (sig.asset === 'KOSPI') plans.push(kospiPlan(raw, derived, sig, alloc));
-    else if (sig.asset === 'GOLD') plans.push(goldPlan(raw, derived, sig, alloc));
-    else if (sig.asset === 'LEVERAGE') plans.push(leveragePlan(raw, derived, sig, alloc));
-    else if (sig.asset === 'SILVER') plans.push(genericAssetPlan('SILVER', raw, sig, alloc, 'SILVER'));
-    else if (sig.asset === 'COPPER') plans.push(genericAssetPlan('COPPER', raw, sig, alloc, 'COPPER'));
-    else if (sig.asset === 'EMERGING') plans.push(emergingPlan(raw, derived, sig, alloc));
+    if (sig.asset === 'NASDAQ') plans.push(nasdaqPlan(raw, derived, sig, alloc, regime));
+    else if (sig.asset === 'KOSPI') plans.push(kospiPlan(raw, derived, sig, alloc, regime));
+    else if (sig.asset === 'GOLD') plans.push(goldPlan(raw, derived, sig, alloc, regime));
+    else if (sig.asset === 'LEVERAGE') plans.push(leveragePlan(raw, derived, sig, alloc, regime));
+    else if (sig.asset === 'SILVER') plans.push(genericAssetPlan('SILVER', raw, derived, sig, alloc, 'SILVER', regime));
+    else if (sig.asset === 'COPPER') plans.push(genericAssetPlan('COPPER', raw, derived, sig, alloc, 'COPPER', regime));
+    else if (sig.asset === 'EMERGING') plans.push(emergingPlan(raw, derived, sig, alloc, regime));
     // CASH 는 플레이북 없음 (보조 자산)
   }
 

@@ -79,7 +79,54 @@ export interface AssetSignal {
     baseSignal: Signal;
     finalSignal: Signal;
     overrides: string[];
+    macroReasons?: string[];
+    sectorReasons?: string[];
+    assetReasons?: string[];
+    flowReasons?: string[];
+    timingNotes?: string[];
   };
+}
+
+export type SectorClassification = 'cyclical' | 'structural' | 'defensive';
+
+export interface SectorQualityScore {
+  policySupport: number;
+  structuralDemand: number;
+  supplyTightness: number;
+  marketConcentration: number;
+  totalScore: number;
+}
+
+export interface TopDownSectorView {
+  key: string;
+  label: string;
+  classification: SectorClassification;
+  score: number | null;
+  quality?: SectorQualityScore;
+  stance: 'favored' | 'avoided' | 'neutral';
+  reasons: string[];
+}
+
+export interface TopDownAssetRationale {
+  asset: string;
+  label: string;
+  macroReasons: string[];
+  sectorReasons: string[];
+  flowReasons: string[];
+  timingNotes: string[];
+}
+
+export interface TopDownView {
+  summary: string;
+  macroView: Array<{
+    key: string;
+    label: string;
+    stance: 'positive' | 'negative' | 'neutral';
+    detail: string;
+  }>;
+  favoredSectors: TopDownSectorView[];
+  avoidedSectors: TopDownSectorView[];
+  assetRationale: TopDownAssetRationale[];
 }
 
 // ── 비중 ──
@@ -217,6 +264,7 @@ export interface SystemSnapshot {
     inputMode: 'auto' | 'manual';
     staleness: Record<string, { date: string; daysAgo: number; frequency: string }>;
     smartMoney?: { insiderBuyRatio: number; recentInsiderBuys: number; recentInsiderSells: number; score: number; lastUpdated: string } | null;
+    topdown?: TopDownView;
     calendar?: Array<{
       date: string;
       name: string;
@@ -258,4 +306,12 @@ export interface ExecutionPlan {
   takeProfit: { price: number | null; condition: string };
   validityDays: number;         // 유효기간 (영상1 레버리지 60~90일, 일반 자산 기본 45일)
   primaryReason: string;        // 이 action 을 택한 1줄 이유
+  timing?: {
+    macroAligned: boolean;
+    sectorAligned: boolean;
+    flowConfirmed: boolean;
+    chartConfirmed: boolean;
+    overheatingRisk: boolean;
+    notes: string[];
+  };
 }

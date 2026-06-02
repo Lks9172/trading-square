@@ -49,6 +49,18 @@ interface Lens {
   metrics: Array<{ label: string; value: string }>;
 }
 
+
+function topSectorQuality(derived?: Record<string, DerivedPoint>) {
+  if (!derived) return null;
+  const qualityEntries = Object.entries(derived)
+    .filter(([key, point]) => key.startsWith('SECTOR_QUALITY_TOTAL_') && typeof point.value === 'number')
+    .sort((a, b) => b[1].value - a[1].value);
+  if (qualityEntries.length === 0) return null;
+  const [key, point] = qualityEntries[0];
+  const suffix = key.replace('SECTOR_QUALITY_TOTAL_', '');
+  return { suffix, total: point.value, policy: derived[`SECTOR_POLICY_SUPPORT_${suffix}`]?.value, demand: derived[`SECTOR_STRUCTURAL_DEMAND_${suffix}`]?.value, supply: derived[`SECTOR_SUPPLY_TIGHTNESS_${suffix}`]?.value };
+}
+
 function computeLenses(raw?: Record<string, RawPoint>, derived?: Record<string, DerivedPoint>, meta?: Props['meta']): Lens[] {
   const r = raw || {};
   const d = derived || {};
@@ -209,12 +221,13 @@ function computeLenses(raw?: Record<string, RawPoint>, derived?: Record<string, 
 
 export function LensPanel({ raw, derived, meta }: Props) {
   const lenses = computeLenses(raw, derived, meta);
+  const sectorQuality = topSectorQuality(derived);
 
   return (
     <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
       <h3 className="text-base sm:text-lg font-semibold mb-1">7-렌즈 종합</h3>
       <p className="text-[11px] sm:text-xs text-[var(--muted)] mb-4">
-        정책·지정학·유동성·매크로·모멘텀·기관·차트 (영상4 §04 "단일 지표 의존 금지")
+        정책·지정학·유동성·매크로·모멘텀·기관·차트 (영상4 §04 &quot;단일 지표 의존 금지&quot;)
       </p>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
@@ -242,6 +255,19 @@ export function LensPanel({ raw, derived, meta }: Props) {
           );
         })}
       </div>
+
+      {sectorQuality && (
+        <div className="mt-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
+          <div className="text-xs font-semibold text-cyan-200 mb-1">섹터 품질 요약</div>
+          <div className="flex flex-wrap items-center gap-2 text-[11px] sm:text-xs">
+            <span className="font-semibold text-white">{sectorQuality.suffix}</span>
+            <span className="text-[var(--muted)]">종합 {Math.round(sectorQuality.total)}</span>
+            {typeof sectorQuality.policy === 'number' && <span className="text-cyan-200">정책 {Math.round(sectorQuality.policy)}</span>}
+            {typeof sectorQuality.demand === 'number' && <span className="text-blue-200">수요 {Math.round(sectorQuality.demand)}</span>}
+            {typeof sectorQuality.supply === 'number' && <span className="text-amber-200">공급 {Math.round(sectorQuality.supply)}</span>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
