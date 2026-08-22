@@ -9,9 +9,15 @@ interface ManualInputs {
   ismPmi?: number | null;
 }
 
+interface AutomaticInputs extends ManualInputs {
+  policyConfidence?: number;
+  policySource?: string;
+  policyAsOf?: string;
+}
+
 interface Props {
   initial: ManualInputs;
-  autoInputs?: ManualInputs | null;
+  autoInputs?: AutomaticInputs | null;
   inputMode?: 'auto' | 'manual';
   investmentHorizon?: string;
   loading: boolean;
@@ -61,17 +67,20 @@ export function ManualInputsPanel({ initial, autoInputs, inputMode, investmentHo
         <div className="flex items-center justify-between gap-2 mb-1">
           <h3 className="text-base sm:text-lg font-semibold">판단 입력</h3>
           <span className={`px-2 py-0.5 rounded text-[10px] sm:text-xs font-semibold ${inputMode === 'auto' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
-            {inputMode === 'auto' ? '자동 (GPR + FRED + 금/DXY 프록시)' : '수동 오버라이드'}
+            {inputMode === 'auto' ? '자동 (GPR + Fed 원문/FRED + 금·DXY)' : '수동 오버라이드'}
           </span>
         </div>
         <p className="text-[11px] sm:text-xs text-[var(--muted)]">
-          자동: GPR 지정학 지수, FRED 금리 추세, 금/달러 역행 감지로 계산.
+          자동: GPR 지정학 지수, Fed 공식 원문 NLP(근거 부족 시 FRED 추세), 금/달러 역행 감지로 계산.
           슬라이더 변경 후 적용하면 수동 모드로 전환됨.
         </p>
         {autoInputs && inputMode === 'auto' && (
           <div className="mt-2 flex flex-wrap gap-2 text-[10px] sm:text-xs">
             <span className="px-1.5 py-0.5 rounded bg-neutral-700">GPR→지정학: {autoInputs.geoRisk}</span>
-            <span className="px-1.5 py-0.5 rounded bg-neutral-700">EFFR→정책: {autoInputs.policyDirection > 0 ? '+' : ''}{autoInputs.policyDirection}</span>
+            <span className="px-1.5 py-0.5 rounded bg-neutral-700">
+              {autoInputs.policySource ? 'Fed 원문 NLP' : 'FRED 추세'}→정책: {autoInputs.policyDirection > 0 ? '+' : ''}{autoInputs.policyDirection}
+              {autoInputs.policyConfidence != null ? ` · 근거 ${autoInputs.policyConfidence}%` : ''}
+            </span>
             <span className="px-1.5 py-0.5 rounded bg-neutral-700">금/DXY→CB매수: {autoInputs.cbBuying ? '지속' : '둔화'}</span>
           </div>
         )}
@@ -168,6 +177,19 @@ export function ManualInputsPanel({ initial, autoInputs, inputMode, investmentHo
             className="w-full rounded-lg border border-[var(--card-border)] bg-[var(--background)] px-3 py-2 text-sm font-mono text-white placeholder:text-neutral-600 focus:border-blue-500 focus:outline-none"
           />
         </div>
+
+        <label className="block rounded-lg border border-[var(--card-border)] bg-[var(--background)] p-3">
+          <span className="mb-2 block text-sm">투자 시간 프레임</span>
+          <select
+            value={horizon}
+            onChange={(event) => setHorizon(event.target.value)}
+            className="w-full rounded-lg border border-[var(--card-border)] bg-black/20 px-3 py-2 text-sm outline-none focus:border-blue-500"
+          >
+            {Object.entries(HORIZON_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </label>
 
         <div className="flex gap-2">
           <button

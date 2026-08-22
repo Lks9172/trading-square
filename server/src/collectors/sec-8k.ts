@@ -9,11 +9,12 @@
 
 import axios from 'axios';
 import { childLogger, serializeError } from '../services/logger';
+import { SEC_8K_FRESH_MS } from '../services/company-refresh-policy';
 import { readSourceCacheWithin, writeSourceCache } from '../services/source-cache';
 
 const log = childLogger({ module: 'collector.sec-8k' });
 const CACHE_KEY = 'sec-8k-24h';
-const FRESH_MS = 2 * 60 * 60 * 1000;
+const FRESH_MS = SEC_8K_FRESH_MS;
 const STALE_MS = 24 * 60 * 60 * 1000;
 
 export interface Sec8KSnapshot {

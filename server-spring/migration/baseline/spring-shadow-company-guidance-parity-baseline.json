@@ -1,0 +1,298 @@
+{
+  "capturedAt": "2026-07-20T10:53:57.499579+00:00",
+  "milestone": "spring-shadow-company-guidance-parity",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "clientContainer": "macrosquare-client",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25 / Spring Boot 4.1.0 / Tomcat 11.0.22 / Apache PDFBox 3.0.8",
+    "nodePort": 5846,
+    "clientPort": 5847,
+    "springShadowPort": 5856,
+    "springMemoryLimit": "1GiB"
+  },
+  "scope": {
+    "implemented": "bounded, attachment-derived revenue, margin, CAPEX, and free-cash-flow guidance parsing on top of direct SEC filing-detail and PDF extraction",
+    "internalEndpoint": "/internal/v1/migration/company-filing-detail-parity/{ticker}",
+    "architecture": {
+      "domain": "framework-free guidance value, metric, summary, analysis models and pure parsing policy",
+      "application": "loads each selected document once, invokes the domain policy, enforces extraction coverage, and projects a parity report",
+      "outboundAdapter": "existing bounded SEC HTML, text, and PDF document loader; no parser dependency on HTTP, PDFBox, Jackson, or cache types",
+      "inboundAdapter": "additive bounded guidance DTOs; full filing body is never returned",
+      "forbiddenOutsideAdapters": [
+        "Spring",
+        "HTTP client",
+        "Jackson",
+        "PDFBox",
+        "java.io stream",
+        "cache implementation"
+      ]
+    },
+    "parsedMetrics": ["revenue", "margin", "capex", "freeCashFlow"],
+    "directions": ["mentioned", "raised", "lowered", "affirmed"],
+    "stances": ["unclear", "raised", "lowered", "affirmed", "mixed"],
+    "valueSupport": {
+      "currencies": ["USD", "US$", "$", "EUR", "€"],
+      "magnitudes": ["billion", "bn", "million", "mn", "b", "m"],
+      "ranges": true,
+      "lowerAndUpperBounds": true,
+      "percentageAndBasisPointTolerance": true,
+      "qualitativeBands": ["low", "mid", "high"]
+    },
+    "falsePositiveGuards": [
+      "historical actuals and movement clauses",
+      "deferred revenue",
+      "safe-harbor and forward-looking topic enumerations",
+      "GAAP and non-GAAP reconciliation or definition text",
+      "forecast-versus-actual comparison clauses",
+      "historical and guidance comparison tables",
+      "free-cash-flow tables and project descriptors"
+    ],
+    "metricAnchoring": "each metric is parsed from a bounded, position-aware slice so an action or number belonging to a later metric cannot leak backward",
+    "remainingInNode": [
+      "public company orchestration and route-cache ownership",
+      "segment and geography fact enrichment",
+      "production filing schedulers and persistence",
+      "production score integration and Telegram notifications"
+    ],
+    "productionTrafficCutover": false,
+    "comparableForFinalRuntimeDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 224,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "domain": 53,
+      "application": 46,
+      "adapters": 110,
+      "bootstrap": 11,
+      "architecture": 4
+    },
+    "nodeCharacterization": {
+      "tickers": 12,
+      "observation": "the serving Node public recent-filing projection did not expose attachment-derived structured guidance values for the captured cases",
+      "artifact": "migration/benchmark-results/company-guidance-parity/node-guidance-characterization-12.json"
+    },
+    "localLiveGuidance": {
+      "tickers": 12,
+      "migrationReady": 12,
+      "metadataPreserved": 12,
+      "summariesMatched": 11,
+      "directDiscoveryImproved": 12,
+      "guidanceCoverageReady": 12,
+      "eligibleMaterials": 41,
+      "analyzedMaterials": 41,
+      "relevantMaterials": 23,
+      "structuredMaterials": 17,
+      "structuredMetrics": 24,
+      "durationMs": {"total": 20776.708, "median": 1569.82, "max": 3380.138}
+    },
+    "homeLiveGuidance": {
+      "tickers": 12,
+      "migrationReady": 12,
+      "metadataPreserved": 12,
+      "summariesMatched": 11,
+      "directDiscoveryImproved": 12,
+      "guidanceCoverageReady": 12,
+      "eligibleMaterials": 41,
+      "analyzedMaterials": 41,
+      "relevantMaterials": 23,
+      "structuredMaterials": 17,
+      "structuredMetrics": 24,
+      "allGuidanceExtractionCoveragePassed": true,
+      "durationMs": {"total": 15607.364, "median": 1223.61, "max": 2111.173}
+    },
+    "numericProofs": [
+      {
+        "ticker": "NVDA",
+        "source": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000051/q1fy27pr.htm",
+        "revenue": {"min": 89180000000, "max": 92820000000, "unit": "usd"},
+        "margin": {"min": 74.4, "max": 75.5, "unit": "percent"}
+      },
+      {
+        "ticker": "TSM",
+        "revenue": {"min": 44600000000, "max": 45800000000, "unit": "usd"},
+        "margin": {"min": 65, "max": 67, "unit": "percent"}
+      },
+      {
+        "ticker": "META",
+        "capex": {"min": 125000000000, "max": 145000000000, "unit": "usd", "direction": "raised"},
+        "stance": "mixed"
+      },
+      {
+        "ticker": "XOM",
+        "capex": {"min": 27000000000, "max": 29000000000, "unit": "usd", "direction": "affirmed"}
+      },
+      {
+        "ticker": "ASML",
+        "revenue": {"min": 43000000000, "max": 45000000000, "unit": "eur"},
+        "safeHarborMarginFalsePositiveRemoved": true
+      }
+    ],
+    "priceSignalRegression": {
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true,
+      "durationMs": {"total": 9068.875, "median": 180.23, "max": 348.205}
+    },
+    "publicEndpointRegression": {
+      "statusAndByteExactMatches": 8,
+      "total": 8,
+      "allMatched": true
+    },
+    "timeVaryingNonSliceRegressions": {
+      "submissions": {
+        "matched": 45,
+        "total": 48,
+        "affectedTickers": ["JPM", "GS", "MS"],
+        "cause": "Node remained on its July 17 submissions snapshot while the freshly started Spring adapter observed new July 20 SEC 424B2/FWP rows",
+        "guidanceCodeRegression": false,
+        "artifact": "migration/benchmark-results/company-guidance-parity/submissions-temporal-drift.json"
+      },
+      "companyResearch": {
+        "matched": 47,
+        "total": 48,
+        "affectedTickers": ["AAPL"],
+        "cause": "live Yahoo analyst score and the independently persisted shadow history point crossed a refresh boundary",
+        "unchangedDecisionFields": {"totalScore": 73, "buyScore": 68},
+        "guidanceCodeRegression": false
+      }
+    },
+    "deploymentIsolation": {
+      "springOnlyRecreated": true,
+      "nodeAndClientWereNotRecreated": true,
+      "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+      "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+      "springContainerId": "e9d0ac79655221ca46dafed5ecfc67cebf3cf5133bd55957a907e56a026119aa",
+      "legacySourceCacheMountReadOnly": true,
+      "analystHistoryReadMode": "shadow-preferred"
+    }
+  },
+  "httpBenchmarks": {
+    "homeWarmGuidanceConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "responseBytes": 7067,
+      "totalErrorCount": 0,
+      "medianThroughputPerSecond": 42.712,
+      "medianP50Ms": 209.932,
+      "medianP95Ms": 337.75,
+      "medianP99Ms": 464.2,
+      "maxAcrossRunsMs": 499.561
+    },
+    "homeWarmGuidanceSequential": {
+      "requests": 200,
+      "concurrency": 1,
+      "responseBytes": 7067,
+      "errorCount": 0,
+      "throughputPerSecond": 12.258,
+      "p50Ms": 80.289,
+      "p95Ms": 87.931,
+      "p99Ms": 105.686,
+      "maxMs": 116.239
+    },
+    "homeLoadProbe": {
+      "requests": 300,
+      "concurrency": 10,
+      "errorCount": 0,
+      "throughputPerSecond": 45.005,
+      "p50Ms": 212.506,
+      "p95Ms": 301.448,
+      "p99Ms": 359.253,
+      "maxMs": 461.607
+    },
+    "interpretation": "the internal parity endpoint intentionally reparses bounded cached document text on each request; parsed-summary persistence or a bounded infrastructure cache is required before public cutover"
+  },
+  "resources": {
+    "springIdle10Samples": {
+      "memoryMedianMiB": 236.6,
+      "memoryMinMiB": 236.6,
+      "memoryMaxMiB": 237.0,
+      "cpuMedianPct": 0.09,
+      "cpuMaxPct": 3.61,
+      "pidsMedian": 36.0,
+      "pidsMax": 39
+    },
+    "nodeSameWindow10Samples": {
+      "memoryMedianMiB": 158.85,
+      "memoryMinMiB": 158.6,
+      "memoryMaxMiB": 159.2,
+      "cpuMedianPct": 0.665,
+      "cpuMaxPct": 1.65,
+      "pidsMedian": 11.0,
+      "pidsMax": 11
+    },
+    "springLoadWindow": {
+      "memoryMedianMiB": 236.9,
+      "memoryMaxMiB": 240.1,
+      "cpuMeanPct": 132.418,
+      "cpuMaxPct": 781.37,
+      "pidsMax": 43
+    },
+    "warning": "Node serves all production traffic and schedulers while Spring serves migration shadow requests only; these numbers are not a final language-runtime comparison. Docker CPU may exceed 100 percent on a multicore host."
+  },
+  "springJvmFinal": {
+    "memoryUsedBytes": 153407168.0,
+    "memoryCommittedBytes": 197459968.0,
+    "gcPauseCount": 162.0,
+    "gcPauseTotalSeconds": 0.297,
+    "gcPauseMaxSeconds": 0.006
+  },
+  "runtime": {
+    "springReadiness": "UP",
+    "springLiveness": "UP",
+    "springDockerHealth": "healthy",
+    "nodeHealth": "ok",
+    "clientHttpStatus": 200,
+    "springBootReportedStartedSeconds": 2.958,
+    "springWarningCount": 0,
+    "springErrorCount": 0,
+    "springExceptionCount": 0,
+    "springRestartCount": 0,
+    "nodeRestartCount": 0,
+    "clientRestartCount": 0,
+    "springImageId": "sha256:f3998bd6b95bcc3440c47b312ac0ac000da066f844aecf60a48f9ef28e350ade"
+  },
+  "disk": {
+    "springImageBytes": 253366834,
+    "previousPdfMilestoneImageBytes": 253331811,
+    "imageIncreaseBytes": 35023,
+    "containerWritableLayerBytes": 32768,
+    "sourceCacheMountReadOnly": true
+  },
+  "rollback": {
+    "preHardeningImageTag": "macrosquare-server-spring:rollback-company-guidance-parity-pre-hardening",
+    "preHardeningImageId": "sha256:cad7f5108ec6bf57916625a27eb63317ff7698c5cc5996fdf6cf8a3153ad8006",
+    "pdfMilestoneImageTag": "macrosquare-server-spring:rollback-company-filing-pdf-parity",
+    "pdfMilestoneImageId": "sha256:839477889a8d64f0ec622b1846b420d6737cd84a7a080fe8a789de00b2ed5eef",
+    "nodeAndClientWereNotRecreated": true,
+    "configurationRollbackModes": ["dual-compare", "legacy"]
+  },
+  "evidenceArtifacts": [
+    "migration/benchmark-results/company-guidance-parity/spring-local-clean-verify.log",
+    "migration/benchmark-results/company-guidance-parity/node-guidance-characterization-12.json",
+    "migration/benchmark-results/company-guidance-parity/spring-local-guidance-12.json",
+    "migration/benchmark-results/company-guidance-parity/home-guidance-12.json",
+    "migration/benchmark-results/company-guidance-parity/home-submissions-48.json",
+    "migration/benchmark-results/company-guidance-parity/submissions-temporal-drift.json",
+    "migration/benchmark-results/company-guidance-parity/home-price-48.json",
+    "migration/benchmark-results/company-guidance-parity/home-research-48.json",
+    "migration/benchmark-results/company-guidance-parity/home-public-regression-8.json",
+    "migration/benchmark-results/company-guidance-parity/concurrent-1.json",
+    "migration/benchmark-results/company-guidance-parity/concurrent-2.json",
+    "migration/benchmark-results/company-guidance-parity/concurrent-3.json",
+    "migration/benchmark-results/company-guidance-parity/sequential.json",
+    "migration/benchmark-results/company-guidance-parity/load-benchmark.json",
+    "migration/benchmark-results/company-guidance-parity/resources-summary.json",
+    "migration/benchmark-results/company-guidance-parity/runtime-home.json"
+  ],
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "internalStructuredGuidanceShadowAllowed": true,
+    "reason": "structured guidance extraction and its coverage gate passed, but segment/geography enrichment, public orchestration, persistence, schedulers, score integration, and notification side effects still belong to Node."
+  }
+}

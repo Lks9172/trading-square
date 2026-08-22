@@ -1,0 +1,215 @@
+{
+  "capturedAt": "2026-07-19T11:13:22Z",
+  "milestone": "spring-shadow-company-detail-public-read",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25.0.3 LTS / Spring Boot 4.1.0 / Tomcat 11.0.22",
+    "nodePort": 5846,
+    "springShadowPort": 5856
+  },
+  "scope": {
+    "implementedPublicReads": [
+      "GET /api/company/{ticker}"
+    ],
+    "behavior": [
+      "Spring owns ticker normalization, the public controller, explicit 25-field top-level response DTO, application query use case, and transport-neutral immutable structured projection",
+      "all nested fields, insertion order, nulls, arrays, booleans, strings, and numeric values are preserved without exposing Jackson, HTTP, SEC, cache-client, or Node transport types to application or domain",
+      "profile, quote, financials, score, buyScore, filings, irMaterials, highlights, peerGroup, bottleneck, narrative, capitalFlow, cashFlowQuality, multipleInsight, guidanceInsight, timeframeView, correctionAssessment, thesisMonitor, reversalConfirmation, sectorContext, verdicts, bottomSignal, positionSizing, executionBridge, and peers are required in the legacy projection",
+      "successful detail projections are fresh for five minutes and usable as stale for at most thirty minutes while one background refresh per normalized ticker executes",
+      "detail projection and serialized payload cache cardinality are each bounded to 128 tickers; malformed, unavailable, and 404 responses never replace a successful value",
+      "serialized bytes are reused only while the same immutable application projection instance remains current, so inbound serialization caching cannot extend data freshness",
+      "identity JSON field order and bytes match Node, while gzip only changes the negotiated wire representation"
+    ],
+    "remainingInNode": [
+      "company research calculation and enrichment ownership",
+      "Yahoo, SEC, analyst, filing, IR, news, and related collectors",
+      "analyst history and source-cache persistence",
+      "company research route-cache refresh behavior",
+      "schedulers, notifications, and Telegram"
+    ],
+    "upstreamSideEffectBoundary": "Spring adds no local write, collector, scheduler, or notification. Until calculation ownership is migrated, its read-only ACL calls the existing Node company GET, whose current implementation can refresh route/source caches and record an analyst snapshot.",
+    "comparableForFinalDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 80,
+      "failures": 0,
+      "domain": 19,
+      "application": 14,
+      "adapters": 41,
+      "bootstrap": 2,
+      "architecture": 4
+    },
+    "localLiveContractParity": {
+      "cases": ["NVDA", "NEM", "JPM", "BRK.B", "NOTREAL"],
+      "statusMatches": 5,
+      "objectMatches": 5,
+      "byteMatches": 5,
+      "warmSpringP50RangeMs": [2.633, 2.814]
+    },
+    "homeServerCompanyContractParity": {
+      "cases": ["NVDA", "nvda", "NEM", "JPM", "BRK.B", "NOTREAL"],
+      "statusMatches": 6,
+      "objectMatches": 6,
+      "byteMatches": 6,
+      "responseBytes": {
+        "NVDA": 30664,
+        "NEM": 30147,
+        "JPM": 28740,
+        "BRK.B": 25996,
+        "NOTREAL": 52
+      }
+    },
+    "existingEndpointRegression": {
+      "exactStatusObjectAndByteCases": 10,
+      "exactStatusObjectAndByteMatches": 10,
+      "covered": [
+        "company search",
+        "company summaries",
+        "research theme catalog",
+        "research sector catalog",
+        "research theme success detail",
+        "research theme 404",
+        "research sector detail",
+        "crypto catalog",
+        "crypto BTC detail",
+        "crypto 404"
+      ],
+      "narrativeSemanticCases": 2,
+      "narrativeSemanticMatches": 2,
+      "narrativeVolatileDifference": "Only independently captured generatedAt differed by 46ms; all other overview and ai-power fields matched. Node and Spring intentionally do not share one response timestamp or Node history-write side effect."
+    },
+    "runtime": {
+      "springReadiness": "UP",
+      "springLogWarningCount": 0,
+      "springLogErrorOrExceptionCount": 0,
+      "springRestartCount": 0,
+      "nodeRestartCount": 0,
+      "clientRestartCount": 0,
+      "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+      "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+      "springContainerId": "316e96b466c51cdcb9bc247a9d9646be346decaa6058d866d88a20664ce3eb8b",
+      "springImageId": "sha256:c52bcd204e701ef9c3e07a642b872d4677c37f462d821ee9d1dab48058714f25",
+      "springContainerStartedAt": "2026-07-19T11:12:36.010446145Z"
+    }
+  },
+  "httpBenchmarks": {
+    "homeServerLoopbackIdentityConcurrent": {
+      "path": "/api/company/NVDA",
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "responseBytes": 30664,
+      "totalErrorCount": 0,
+      "node": {
+        "medianThroughputPerSecond": 403.691,
+        "medianP50Ms": 23.209,
+        "medianP95Ms": 30.017,
+        "medianP99Ms": 32.415
+      },
+      "spring": {
+        "medianThroughputPerSecond": 956.252,
+        "medianP50Ms": 9.42,
+        "medianP95Ms": 16.539,
+        "medianP99Ms": 17.864
+      },
+      "springDifferencePct": {
+        "throughput": 136.88,
+        "p50": -59.41,
+        "p95": -44.9,
+        "p99": -44.89
+      }
+    },
+    "homeServerLoopbackIdentitySequential": {
+      "requests": 200,
+      "concurrency": 1,
+      "totalErrorCount": 0,
+      "node": {
+        "throughputPerSecond": 355.628,
+        "p50Ms": 2.546,
+        "p95Ms": 3.891,
+        "p99Ms": 7.968
+      },
+      "spring": {
+        "throughputPerSecond": 546.3,
+        "p50Ms": 1.711,
+        "p95Ms": 2.086,
+        "p99Ms": 2.601
+      }
+    },
+    "homeServerLoopbackGzipConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "totalErrorCount": 0,
+      "node": {
+        "contentEncoding": null,
+        "wireBytes": 30664,
+        "medianThroughputPerSecond": 389.986,
+        "medianP50Ms": 23.94,
+        "medianP95Ms": 33.518,
+        "medianP99Ms": 42.627
+      },
+      "spring": {
+        "contentEncoding": "gzip",
+        "wireBytes": 8446,
+        "medianThroughputPerSecond": 981.535,
+        "medianP50Ms": 9.751,
+        "medianP95Ms": 14.075,
+        "medianP99Ms": 16.413
+      },
+      "wireReductionPct": 72.46,
+      "decodedJsonByteExact": true
+    }
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.597,
+    "springProcessRunningSeconds": 3.085
+  },
+  "disk": {
+    "nodeImageBytes": 266577284,
+    "springImageBytes": 249189365,
+    "springImageDifferencePct": -6.52,
+    "previousSpringImageBytes": 249166807,
+    "springMilestoneIncreasePct": 0.01,
+    "applicationIoComparisonDeferred": true
+  },
+  "sameWindowIdle10SamplesAfterHttpWarmup": {
+    "node": {
+      "memoryMedianMiB": 148.8,
+      "memoryMinMiB": 148.7,
+      "memoryMaxMiB": 149.1,
+      "cpuMedianPct": 0.69,
+      "cpuMeanPct": 0.776,
+      "cpuMaxPct": 1.55,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 197.4,
+      "memoryMinMiB": 197.4,
+      "memoryMaxMiB": 197.4,
+      "cpuMedianPct": 0.045,
+      "cpuMeanPct": 0.062,
+      "cpuMaxPct": 0.18,
+      "pidCountMedian": 30
+    },
+    "warning": "Node serves the full production workload while Spring serves only shadow reads, so these values are not a final runtime comparison."
+  },
+  "springJvmAfterHttpWarmup": {
+    "heapUsedBytes": 49448592,
+    "heapCommittedBytes": 105578496,
+    "nonHeapUsedBytes": 75004888,
+    "nonHeapCommittedBytes": 77004800,
+    "gcPauseCount": 3,
+    "gcPauseTotalSeconds": 0.042,
+    "liveJvmThreads": 23,
+    "peakJvmThreads": 23
+  },
+  "rollback": {
+    "previousImageId": "sha256:ba9f133dbfc9ea46131fef15ef20057326af919ef2fbd28e41dc35447847bb52",
+    "previousImageStillPresent": true,
+    "nodeAndClientWereNotRecreated": true
+  }
+}

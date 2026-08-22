@@ -203,7 +203,7 @@ function computeLenses(raw?: Record<string, RawPoint>, derived?: Record<string, 
       status: smScore >= 1 && foreignNet20D > 0 ? '내·외국인 매수' : smScore <= -1 || foreignNet20D < 0 ? '기관 매도 우위' : '혼조',
       metrics: [
         { label: 'SmartMoney', value: String(smScore) },
-        { label: '외국인 20D', value: `${foreignNet20D >= 0 ? '+' : ''}${Math.round(foreignNet20D / 1000)}조` },
+        { label: '외국인 20D', value: `${foreignNet20D >= 0 ? '+' : ''}${(foreignNet20D / 10_000).toFixed(1)}조` },
       ],
     },
     {

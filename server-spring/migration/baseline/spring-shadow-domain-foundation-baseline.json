@@ -1,0 +1,130 @@
+{
+  "capturedAt": "2026-07-19T06:36:39.949371+00:00",
+  "milestone": "spring-shadow-domain-foundation",
+  "environment": {
+    "host": "home-server",
+    "architecture": "x86_64",
+    "logicalCpuCount": 8,
+    "memoryBytes": 16631459840,
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow"
+  },
+  "scope": {
+    "springImplemented": [
+      "compatibility health endpoint",
+      "company score domain policy and internal endpoint",
+      "company buy score domain policy",
+      "bottom pattern domain policy",
+      "deep-bottom and reversal-confirmation domain policies",
+      "bottleneck candidate score domain policy"
+    ],
+    "springNotYetImplemented": [
+      "collectors",
+      "persistent data adapters",
+      "schedulers",
+      "Telegram side effects",
+      "snapshot/company/sector/crypto public read models",
+      "write use cases"
+    ],
+    "comparableForFinalDecision": false
+  },
+  "startup": {
+    "springReadinessMsMedianOf3": 3522,
+    "springReadinessMsRuns": [
+      3522,
+      3603,
+      3314
+    ],
+    "springBootReportedStartupSecondsMedianOf3": 2.556,
+    "springBootReportedStartupSecondsRuns": [
+      2.556,
+      2.664,
+      2.406
+    ],
+    "nodeReadinessMs": null,
+    "note": "Node production was intentionally not restarted."
+  },
+  "disk": {
+    "nodeImageBytes": 266577284,
+    "springImageBytes": 248818498,
+    "springImageDifferencePct": -6.66,
+    "nodeWritableLayerBytes": 0,
+    "springWritableLayerBytes": 32768,
+    "nodePersistentDataBytes": 1060100910,
+    "springPersistentDataBytes": null,
+    "note": "Application I/O throughput and write amplification are deferred until identical persistence adapters and workloads exist."
+  },
+  "springJvmAfterWarmup": {
+    "heapUsedBytes": 46098040,
+    "nonHeapUsedBytes": 58016072,
+    "heapMaxBytes": 727842816,
+    "gcPauseCount": 1,
+    "gcPauseTotalSeconds": 0.046,
+    "gcPauseMaxSeconds": 0.046,
+    "liveJvmThreads": 14,
+    "jvmArguments": [
+      "-XX:InitialRAMPercentage=10.0",
+      "-XX:MaxRAMPercentage=70.0"
+    ]
+  },
+  "healthTransportBenchmark": {
+    "lanClient300RequestsConcurrency15MedianOf3": {
+      "node": {
+        "throughputPerSecond": 788.08,
+        "p50Ms": 13.718,
+        "p95Ms": 36.888,
+        "p99Ms": 76.802,
+        "errors": 0
+      },
+      "spring": {
+        "throughputPerSecond": 1055.277,
+        "p50Ms": 11.566,
+        "p95Ms": 17.334,
+        "p99Ms": 51.433,
+        "errors": 0
+      }
+    },
+    "sameHost1000RequestsConcurrency50MedianOf3": {
+      "node": {
+        "throughputPerSecond": 530.616,
+        "p50Ms": 60.645,
+        "p95Ms": 134.696,
+        "p99Ms": 739.658,
+        "errors": 0
+      },
+      "spring": {
+        "throughputPerSecond": 846.04,
+        "p50Ms": 23.539,
+        "p95Ms": 110.126,
+        "p99Ms": 685.673,
+        "errors": 0
+      }
+    },
+    "warning": "Health transport figures were re-used from the scaffold benchmark because the exposed endpoint and web stack are unchanged. They are not evidence of full application performance."
+  },
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "reason": "Feature and persistence parity are not complete; no final resource or performance conclusion is valid yet."
+  },
+  "sameWindowIdle10Samples": {
+    "node": {
+      "memoryMedianMiB": 121.7,
+      "memoryMinMiB": 121.6,
+      "memoryMaxMiB": 122.0,
+      "cpuMedianPct": 0.66,
+      "cpuMeanPct": 0.592,
+      "cpuMaxPct": 0.74,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 157.9,
+      "memoryMinMiB": 157.7,
+      "memoryMaxMiB": 158.0,
+      "cpuMedianPct": 0.055,
+      "cpuMeanPct": 0.118,
+      "cpuMaxPct": 0.45,
+      "pidCountMedian": 22
+    },
+    "warning": "Spring has no collectors or schedulers, while Node is the live production workload. These numbers are an early reference only."
+  }
+}

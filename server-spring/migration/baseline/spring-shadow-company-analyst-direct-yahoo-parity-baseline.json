@@ -1,0 +1,252 @@
+{
+  "capturedAt": "2026-07-19T15:02:00Z",
+  "milestone": "spring-shadow-company-analyst-direct-yahoo-current-consensus-parity",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25.0.3 LTS / Spring Boot 4.1.0 / Tomcat 11.0.22",
+    "nodePort": 5846,
+    "springShadowPort": 5856,
+    "springMemoryLimit": "1GiB"
+  },
+  "scope": {
+    "implementedInternalRead": "GET /internal/v1/migration/company-research-parity/{ticker}",
+    "behavior": [
+      "Spring directly collects current analyst consensus from Yahoo recommendationTrend and financialData instead of reading it from the legacy company projection",
+      "the exact megacap batch is AAPL, MSFT, GOOGL, AMZN, NVDA, META, and TSLA with sequential 200 ms pacing and at least three successful tickers",
+      "the 0m recommendation trend is preferred and the weighted recommendation score and target-price upside preserve Node rounding",
+      "Yahoo cookie and crumb authentication is cached for one hour, invalidated on 401, and never written to logs",
+      "a successful direct consensus snapshot is fresh for one hour and usable stale for seven days; failed refreshes do not replace success",
+      "all cold requests share one global single-flight batch and non-megacap requests perform no analyst network request",
+      "the Node-owned persisted consensus snapshot is used only when the full direct batch is below the minimum success threshold and no usable direct stale exists",
+      "per-ticker analyst history remains a read-only Node-owned input and exact 30-day revision calculation remains a pure Java domain policy",
+      "source-cache paths, Yahoo transport, cookie handling, JSON parsing, cache state, and sleep pacing remain in outbound adapters",
+      "domain and application contain no HTTP, Jackson, filesystem, cache-client, controller, or DTO types",
+      "Spring performs no analyst persistence, scheduler, notification, Telegram, or startup network side effect"
+    ],
+    "remainingInNode": [
+      "analyst history persistence and its production scheduler",
+      "Yahoo price history used by bottom and reversal signals",
+      "SEC submissions, filings, IR, segment, and company enrichment",
+      "public company detail calculation and route-cache ownership",
+      "company research schedulers and Telegram notifications"
+    ],
+    "legacyCalculationInputsStillUsed": [],
+    "nodeOwnedPersistedInputsStillUsed": [
+      "per-ticker analyst history"
+    ],
+    "nodeOwnedPersistedFallbackOnly": [
+      "current analyst consensus snapshot"
+    ],
+    "comparableForFinalDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 137,
+      "failures": 0,
+      "domain": 29,
+      "application": 22,
+      "adapters": 80,
+      "bootstrap": 2,
+      "architecture": 4
+    },
+    "isolatedDirectCollectionProof": {
+      "persistedConsensusFilePresent": false,
+      "historyFilesPresent": 281,
+      "sourceCacheReadOnly": true,
+      "ticker": "AAPL",
+      "durationMs": 4856.393,
+      "allMatched": true,
+      "analystConsensusMatched": true,
+      "legacyAnalystScore": 0.66,
+      "springAnalystScore": 0.66,
+      "legacyUpsidePct": -4.64,
+      "springUpsidePct": -4.64,
+      "differences": []
+    },
+    "localColdParityWithoutPersistedConsensus": {
+      "tickers": 48,
+      "matched": 48,
+      "analystConsensusMatched": 48,
+      "expectationsMatched": 48,
+      "scoreMatched": 48,
+      "buyScoreMatched": 48,
+      "medianDurationMs": 1213.864,
+      "maxDurationMs": 28977.116,
+      "totalDurationMs": 87161.794,
+      "maxDurationExplanation": "a legacy Node company route-cache refresh was included; it is not the direct Yahoo consensus batch duration"
+    },
+    "localWarmParityWithoutPersistedConsensus": {
+      "tickers": 48,
+      "matched": 48,
+      "analystConsensusMatched": 48,
+      "expectationsMatched": 48,
+      "medianDurationMs": 2.58,
+      "maxDurationMs": 13.108,
+      "totalDurationMs": 139.73
+    },
+    "homeColdLanParity": {
+      "tickers": 48,
+      "matched": 48,
+      "identityMatched": 48,
+      "quoteMatched": 48,
+      "analystConsensusMatched": 48,
+      "expectationsMatched": 48,
+      "fundamentalsMatched": 48,
+      "scoreMatched": 48,
+      "buyScoreMatched": 48,
+      "medianDurationMs": 736.247,
+      "maxDurationMs": 5041.218,
+      "totalDurationMs": 40427.506,
+      "slowestTicker": "NVDA",
+      "slowestExplanation": "the first request includes the demand-driven seven-ticker Yahoo analyst batch"
+    },
+    "homeWarmLoopbackParity": {
+      "tickers": 48,
+      "matched": 48,
+      "analystConsensusMatched": 48,
+      "expectationsMatched": 48,
+      "medianDurationMs": 2.622,
+      "maxDurationMs": 28.812,
+      "totalDurationMs": 163.77
+    },
+    "currentMegacapConsensusExamples": {
+      "AAPL": {"analystScore": 0.66, "upsidePct": -4.64},
+      "MSFT": {"analystScore": 1.158, "upsidePct": 41.74},
+      "GOOGL": {"analystScore": 1.109, "upsidePct": 25.01},
+      "AMZN": {"analystScore": 1.215, "upsidePct": 27.1},
+      "NVDA": {"analystScore": 1.098, "upsidePct": 49.06},
+      "META": {"analystScore": 1.016, "upsidePct": 27.35},
+      "TSLA": {"analystScore": 0.404, "upsidePct": 11.65}
+    },
+    "nonMegacapNullContract": ["NEM", "JPM"],
+    "existingPublicEndpointRegression": {
+      "statusObjectAndByteExactMatches": 8,
+      "total": 8,
+      "responseBytes": {
+        "companyDetail": 30664,
+        "company404": 51,
+        "companySearch": 70,
+        "companySummaries": 1082,
+        "cryptoCatalog": 135728,
+        "cryptoBtcDetail": 25945,
+        "researchThemeCatalog": 8103,
+        "researchSectorCatalog": 27641
+      }
+    },
+    "failureAndConcurrencyCoverage": [
+      "non-megacap request performs no Yahoo analyst network call",
+      "batch with fewer than three successes uses persisted fallback",
+      "failed refresh retains usable direct stale",
+      "concurrent cold requests share one global batch",
+      "crumb request explicitly accepts text/plain",
+      "missing, malformed, expired, and unreadable persisted fallback fails closed",
+      "path traversal ticker is rejected"
+    ]
+  },
+  "httpBenchmarks": {
+    "homeLoopbackFreshConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "responseBytes": 3815,
+      "totalErrorCount": 0,
+      "medianThroughputPerSecond": 391.113,
+      "medianP50Ms": 8.677,
+      "medianP95Ms": 158.922,
+      "medianP99Ms": 186.825,
+      "medianMaxMs": 189.208,
+      "runsDetail": [
+        {"throughputPerSecond": 384.003, "p50Ms": 9.215, "p95Ms": 158.922, "p99Ms": 186.825, "maxMs": 194.393, "errors": 0},
+        {"throughputPerSecond": 391.113, "p50Ms": 8.677, "p95Ms": 160.024, "p99Ms": 187.19, "maxMs": 189.208, "errors": 0},
+        {"throughputPerSecond": 394.658, "p50Ms": 8.483, "p95Ms": 148.136, "p99Ms": 182.91, "maxMs": 187.295, "errors": 0}
+      ]
+    },
+    "homeLoopbackFreshSequential": {
+      "requests": 200,
+      "concurrency": 1,
+      "totalErrorCount": 0,
+      "throughputPerSecond": 395.606,
+      "p50Ms": 2.24,
+      "p95Ms": 2.804,
+      "p99Ms": 3.013,
+      "maxMs": 32.36,
+      "responseBytes": 3815
+    }
+  },
+  "sameWindowIdle10SamplesAfter48TickerAndHttpWarmup": {
+    "node": {
+      "memoryMedianMiB": 313.9,
+      "memoryMinMiB": 313.9,
+      "memoryMaxMiB": 314.0,
+      "cpuMedianPct": 0.665,
+      "cpuMeanPct": 0.807,
+      "cpuMaxPct": 2.55,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 230.1,
+      "memoryMinMiB": 230.1,
+      "memoryMaxMiB": 230.5,
+      "cpuMedianPct": 0.06,
+      "cpuMeanPct": 0.336,
+      "cpuMaxPct": 2.72,
+      "pidCountMedian": 38
+    },
+    "warning": "Node serves the full production workload while Spring still serves read-only shadow traffic, so this is not a final runtime comparison."
+  },
+  "springJvmFinal": {
+    "heapUsedBytes": 61084944,
+    "heapCommittedBytes": 105578496,
+    "heapMaxBytes": 727842816,
+    "nonHeapUsedBytes": 86428920,
+    "nonHeapCommittedBytes": 88539136,
+    "nonHeapMaxBytes": 1325408255,
+    "gcPauseCount": 13,
+    "gcPauseTotalSeconds": 0.124,
+    "gcPauseMaxSeconds": 0.011,
+    "liveJvmThreads": 25,
+    "peakJvmThreads": 34
+  },
+  "runtime": {
+    "springReadiness": "UP",
+    "springDockerHealth": "healthy",
+    "springWarningCount": 0,
+    "springErrorCount": 0,
+    "springExceptionCount": 0,
+    "springRestartCount": 0,
+    "nodeRestartCount": 0,
+    "clientRestartCount": 0,
+    "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+    "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+    "springContainerId": "6d9d3d001f591d5a701cea7a6acceb6e279526099a7ba99643e7317d7991ec48",
+    "springImageId": "sha256:37b888205cf5e04ad25cfceedf4d829e2092de9c23a018d718504cbbb65423b9",
+    "springContainerStartedAt": "2026-07-19T14:55:06.463750834Z"
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.82,
+    "springProcessRunningSeconds": 3.372,
+    "actuatorApplicationReadySeconds": 2.903
+  },
+  "disk": {
+    "springImageBytes": 249337414,
+    "previousSpringImageBytes": 249307686,
+    "imageIncreaseBytes": 29728,
+    "imageIncreasePct": 0.0119,
+    "containerWritableLayerBytes": 32768,
+    "sourceCacheMountReadOnly": true,
+    "sourceCacheMountDestination": "/app/legacy-source-cache",
+    "applicationIoComparisonDeferred": true
+  },
+  "rollback": {
+    "previousImageId": "sha256:d6b282d8621e7310a83d977fc06d9cc110e203d884ac3a2b73de232e5f780ca9",
+    "previousImageTag": "macrosquare-server-spring:rollback-company-analyst-persisted-evidence",
+    "previousImageStillPresent": true,
+    "nodeAndClientWereNotRecreated": true
+  },
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "reason": "Analyst history writer, remaining collectors, public company calculation ownership, schedulers, and Telegram side effects are not yet migrated."
+  }
+}

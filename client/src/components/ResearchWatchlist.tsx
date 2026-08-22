@@ -1,36 +1,87 @@
 "use client";
+import { SmartLink } from "@/components/SmartLink";
 
-import Link from "next/link";
-import { useState } from "react";
+import { useSyncExternalStore } from "react";
 
 const STORAGE_KEY = "macrosquare_research_watchlist";
+const WATCHLIST_CHANGED_EVENT = "macrosquare:watchlist-changed";
+const EMPTY_WATCHLIST: string[] = [];
+
+let cachedRaw: string | null | undefined;
+let cachedWatchlist: string[] = EMPTY_WATCHLIST;
+
+function normalizeWatchlist(value: unknown): string[] {
+  if (!Array.isArray(value)) return EMPTY_WATCHLIST;
+  return [
+    ...new Set(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  ].slice(0, 20);
+}
+
+function getWatchlistSnapshot(): string[] {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw === cachedRaw) return cachedWatchlist;
+    cachedRaw = raw;
+    cachedWatchlist = raw ? normalizeWatchlist(JSON.parse(raw)) : EMPTY_WATCHLIST;
+    return cachedWatchlist;
+  } catch {
+    cachedRaw = null;
+    cachedWatchlist = EMPTY_WATCHLIST;
+    return cachedWatchlist;
+  }
+}
+
+function subscribeToWatchlist(onStoreChange: () => void): () => void {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === STORAGE_KEY) {
+      cachedRaw = undefined;
+      onStoreChange();
+    }
+  };
+  const onLocalChange = () => {
+    cachedRaw = undefined;
+    onStoreChange();
+  };
+
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(WATCHLIST_CHANGED_EVENT, onLocalChange);
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(WATCHLIST_CHANGED_EVENT, onLocalChange);
+  };
+}
+
+function saveWatchlist(next: string[]) {
+  const normalized = normalizeWatchlist(next);
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // Storage may be unavailable in private/restricted browsing.
+  }
+  cachedRaw = undefined;
+  window.dispatchEvent(new Event(WATCHLIST_CHANGED_EVENT));
+}
 
 export function useResearchWatchlist() {
-  const [watchlist, setWatchlist] = useState<string[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
-    } catch {
-      return [];
-    }
-  });
-
-  function save(next: string[]) {
-    setWatchlist(next);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // noop
-    }
-  }
+  const watchlist = useSyncExternalStore(
+    subscribeToWatchlist,
+    getWatchlistSnapshot,
+    () => EMPTY_WATCHLIST,
+  );
 
   function toggle(ticker: string) {
-    const normalized = ticker.toUpperCase();
-    if (watchlist.includes(normalized)) save(watchlist.filter((item) => item !== normalized));
-    else save([...watchlist, normalized].slice(0, 20));
+    const normalized = ticker.trim().toUpperCase();
+    if (!normalized) return;
+    if (watchlist.includes(normalized)) {
+      saveWatchlist(watchlist.filter((item) => item !== normalized));
+    } else {
+      saveWatchlist([...watchlist, normalized]);
+    }
   }
 
   return { watchlist, toggle };
@@ -53,13 +104,13 @@ export function ResearchWatchlist() {
       <div className="font-semibold text-white mb-3">Watchlist</div>
       <div className="flex flex-wrap gap-2">
         {watchlist.map((ticker) => (
-          <Link
+          <SmartLink
             key={ticker}
             href={`/company/${ticker}`}
-            className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-200 hover:bg-amber-500/20"
+            className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-200 cursor-pointer hover:bg-amber-500/20 active:scale-[0.99]"
           >
             ★ {ticker}
-          </Link>
+          </SmartLink>
         ))}
       </div>
     </section>

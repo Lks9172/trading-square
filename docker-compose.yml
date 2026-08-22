@@ -1,4 +1,128 @@
 services:
+  postgres:
+    image: postgres:18.4-alpine3.24
+    container_name: macrosquare-postgres
+    environment:
+      POSTGRES_DB: macrosquare
+      POSTGRES_USER: macrosquare
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      # PostgreSQL 18 stores major-version data below /var/lib/postgresql.
+      - macrosquare-postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U macrosquare -d macrosquare"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+    shm_size: 128mb
+    mem_limit: 512m
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: macrosquare-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-macrosquare}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set}
+    ports:
+      - "127.0.0.1:5900:9000"
+      - "127.0.0.1:5901:9001"
+    volumes:
+      - macrosquare-minio:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/ready >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+    mem_limit: 768m
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: macrosquare-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-macrosquare}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set}
+      MINIO_APP_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY:-macrosquare-app}
+      MINIO_APP_SECRET_KEY: ${MINIO_APP_SECRET_KEY:?MINIO_APP_SECRET_KEY must be set}
+      MINIO_BUCKET: ${MINIO_BUCKET:-macrosquare-artifacts}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 2; done
+        until mc ready local; do sleep 2; done
+        mc mb --ignore-existing "local/$$MINIO_BUCKET"
+        mc version enable "local/$$MINIO_BUCKET"
+        mc anonymous set none "local/$$MINIO_BUCKET"
+        cat >/tmp/macrosquare-app-policy.json <<POLICY
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": ["s3:GetBucketLocation", "s3:ListBucket", "s3:ListBucketVersions", "s3:ListBucketMultipartUploads"],
+              "Resource": ["arn:aws:s3:::$$MINIO_BUCKET"]
+            },
+            {
+              "Effect": "Allow",
+              "Action": ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
+              "Resource": ["arn:aws:s3:::$$MINIO_BUCKET/*"]
+            }
+          ]
+        }
+        POLICY
+        mc admin policy create local macrosquare-app /tmp/macrosquare-app-policy.json
+        mc admin user add local "$$MINIO_APP_ACCESS_KEY" "$$MINIO_APP_SECRET_KEY" || \
+          mc admin user enable local "$$MINIO_APP_ACCESS_KEY"
+        mc admin policy attach local macrosquare-app --user "$$MINIO_APP_ACCESS_KEY"
+    restart: "no"
+
+  # Explicit rollback/bootstrap tool only. It is excluded from the default
+  # production graph, so legacy files can remain preserved on disk without
+  # being mounted into any running service.
+  minio-seed-import:
+    profiles: ["legacy-seed"]
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-macrosquare}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set}
+      MINIO_BUCKET: ${MINIO_BUCKET:-macrosquare-artifacts}
+    volumes:
+      - ./server/data/spring-projections:/seed:ro
+      - ./server/data/source-cache:/source-cache:ro
+      - ./server/data/history:/legacy-history:ro
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mirror --quiet --overwrite /seed "local/$$MINIO_BUCKET/seed-projections"
+        mc mirror --quiet --overwrite --exclude "*.tmp-*" /source-cache "local/$$MINIO_BUCKET/source-cache"
+        mc mirror --quiet --overwrite /legacy-history "local/$$MINIO_BUCKET/legacy-history"
+    restart: "no"
+
   # MacroSquare 전용 Jaeger (기존 호스트 jaeger 컨테이너와 완전 분리).
   # 포트: UI 16687 / OTLP HTTP 4328 — 기존 jaeger :16686/:4318 과 완전 분리.
   # Badger 영속 스토리지 → ./jaeger-data (홈서버 재부팅 후에도 trace 복구).
@@ -13,8 +137,8 @@ services:
       - BADGER_DIRECTORY_KEY=/badger/key
       - COLLECTOR_OTLP_ENABLED=true
     ports:
-      - "16687:16686"   # UI (외부 http://192.168.0.200:16687)
-      - "4328:4318"     # OTLP HTTP (외부/내부 분리용 전용 포트)
+      - "127.0.0.1:16687:16686" # UI는 SSH tunnel/홈서버 loopback에서만 접근
+      - "127.0.0.1:4328:4318"   # OTLP 수집기는 외부 LAN에 노출하지 않음
     volumes:
       - jaeger-data:/badger
     logging:
@@ -29,37 +153,234 @@ services:
       timeout: 5s
       retries: 3
 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.156.0
+    container_name: macrosquare-otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yml"]
+    volumes:
+      - ./observability/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro
+    ports:
+      - "127.0.0.1:4338:4318"
+      - "127.0.0.1:13133:13133"
+    depends_on:
+      jaeger:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 160m
+
+  prometheus:
+    image: prom/prometheus:v3.13.1
+    container_name: macrosquare-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - macrosquare-prometheus:/prometheus
+    ports:
+      - "127.0.0.1:5902:9090"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 384m
+
+  loki:
+    image: grafana/loki:3.7.3
+    container_name: macrosquare-loki
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    volumes:
+      - ./observability/loki.yml:/etc/loki/local-config.yaml:ro
+      - macrosquare-loki:/loki
+    ports:
+      - "127.0.0.1:5903:3100"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 384m
+
+  alloy:
+    image: grafana/alloy:v1.18.0
+    container_name: macrosquare-alloy
+    user: "0:0"
+    # Root is required to read root-owned Docker JSON logs. With every Linux
+    # capability dropped it cannot traverse Alloy's image-owned (473:473)
+    # storage parent unless the image group is explicitly retained.
+    group_add:
+      - "473"
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./observability/alloy.alloy:/etc/alloy/config.alloy:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - macrosquare-alloy:/var/lib/alloy/data
+    ports:
+      - "127.0.0.1:5904:12345"
+    depends_on:
+      loki:
+        condition: service_started
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 384m
+
   server:
-    build: ./server
+    build: ./server-spring
+    image: macrosquare-server-spring:production
     container_name: macrosquare-server
     ports:
-      - "5846:5846"
+      - "127.0.0.1:5846:5846"
     volumes:
-      - ./server/data:/app/data
       - ./server-logs:/app/logs
     environment:
       - PORT=5846
+      - STORAGE_MODE=postgres-minio
+      - DATABASE_URL=jdbc:postgresql://postgres:5432/macrosquare
+      - DATABASE_USERNAME=macrosquare
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD}
+      - DATABASE_POOL_MAX_SIZE=8
+      - DATABASE_KEEPALIVE_TIME_MS=120000
+      - DATABASE_LEAK_DETECTION_THRESHOLD_MS=60000
+      - DATABASE_CONNECTION_INIT_SQL=select set_config('statement_timeout','30000',false), set_config('lock_timeout','5000',false), set_config('idle_in_transaction_session_timeout','60000',false)
+      - EXCLUSIVE_TASK_MAX_CONCURRENCY=4
+      - FLYWAY_ENABLED=true
+      - OBJECT_STORAGE_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_APP_ACCESS_KEY:-macrosquare-app}
+      - MINIO_SECRET_KEY=${MINIO_APP_SECRET_KEY}
+      - MINIO_BUCKET=${MINIO_BUCKET:-macrosquare-artifacts}
+      - LEGACY_IMPORT_ENABLED=false
+      - INVESTMENT_EXECUTION_IMPORT_LEGACY=false
+      - SINGLE_WRITER_GUARD_ENABLED=false
       - FRED_API_KEY=${FRED_API_KEY}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-      - NODE_OPTIONS=--dns-result-order=ipv4first
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
-      - OTEL_SERVICE_NAME=macrosquare-server
-      - OTEL_TRACES_EXPORTER=otlp
+      - TELEGRAM_NOTIFICATIONS_ENABLED=true
+      - TELEGRAM_STARTUP_DELAY=8s
+      - MARKET_READ_MODE=spring-native
+      - MARKET_SNAPSHOT_FILE=/app/spring-data/projections/latest-system-snapshot-default-v1.json
+      - MARKET_SEED_SNAPSHOT_FILE=/app/spring-projections/latest-system-snapshot-default-v1.json
+      - MARKET_HISTORY_DIR=/app/spring-data/market-observations/history
+      - MARKET_LEGACY_HISTORY_DIR=/app/legacy-history
+      - MARKET_COLLECTION_ENABLED=true
+      - MARKET_HISTORY_SEED_ENABLED=false
+      - MARKET_SNAPSHOT_REFRESH_ENABLED=true
+      - MARKET_COLLECTION_DIR=/app/spring-data/market-observations
+      # Price/sector leadership inputs stay near-real-time without changing API payload density.
+      - YAHOO_COLLECTION_FIXED_DELAY=5m
+      - KRX_COLLECTION_FIXED_DELAY=30m
+      - COMPANY_READ_MODE=file-only
+      - COMPANY_READ_SOURCE_CACHE_DIR=/app/spring-projections
+      - COMPANY_ANALYST_SOURCE_CACHE_DIR=/app/legacy-source-cache
+      - COMPANY_ANALYST_HISTORY_ENABLED=true
+      - COMPANY_ANALYST_HISTORY_STARTUP_DELAY=15m
+      - COMPANY_RESEARCH_SUMMARY_ENABLED=true
+      - COMPANY_RESEARCH_SUMMARY_STARTUP_DELAY=3m
+      - COMPANY_RESEARCH_SUMMARY_FIXED_DELAY=30m
+      - COMPANY_RESEARCH_SUMMARY_CONCURRENCY=4
+      - DATA_INTEGRITY_MONITOR_ENABLED=true
+      - DATA_INTEGRITY_EXPECTED_COMPANY_UNIVERSE=277
+      - DATA_INTEGRITY_CALCULATION_VERSION=5
+      - DATA_INTEGRITY_MAXIMUM_SUMMARY_AGE=2h
+      # Startup collectors must first reclassify durable source state under the
+      # current policy; ongoing recurrence checks still run every minute.
+      - DATA_INTEGRITY_MONITOR_INITIAL_DELAY=5m
+      - DATA_INTEGRITY_MONITOR_FIXED_DELAY=1m
+      - TELEGRAM_POST_STARTUP_RECALCULATION_DELAY=20m
+      - COMPANY_ANALYST_HISTORY_READ_MODE=store-preferred
+      - COMPANY_ANALYST_HISTORY_DIR=/app/spring-data/company-analyst-history
+      - COMPANY_ANALYST_CONSENSUS_CACHE_TTL=1h
+      - YAHOO_PRICE_HISTORY_CACHE_TTL=15m
+      - SEC_COMPANYFACTS_CACHE_TTL=4h
+      - SEC_SUBMISSIONS_CACHE_TTL=30m
+      - SEC_FILING_DETAIL_CACHE_TTL=6h
+      - INSTITUTIONAL_COLLECTION_ENABLED=true
+      - SEC_13F_STARTUP_FRESHNESS=2h
+      - POLICY_COLLECTION_ENABLED=true
+      - PEER_DISCOVERY_ENABLED=true
+      - NARRATIVE_SOURCE_COLLECTION_ENABLED=true
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
+      - DART_COLLECTION_ENABLED=${DART_COLLECTION_ENABLED:-false}
+      - DART_API_KEY=${DART_API_KEY:-}
+      - RESEARCH_CATALOG_READ_MODE=file-only
+      - SECTOR_MARKET_EVIDENCE_ENABLED=true
+      - SECTOR_MARKET_EVIDENCE_STARTUP_DELAY=90s
+      - SECTOR_MARKET_EVIDENCE_FIXED_DELAY=6h
+      - CRYPTO_READ_MODE=file-only
+      - PERSISTED_PROJECTION_DIR=/app/spring-projections
+      - INVESTMENT_EXECUTION_DATA_DIR=/app/spring-data
+      - LEGACY_DATA_DIR=/app/legacy-data
+      - NOTIFICATION_DATA_DIR=/app/spring-data/notifications
+      - JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
+      - TRACING_EXPORT_ENABLED=true
+      - TRACING_SAMPLING_PROBABILITY=0.10
     depends_on:
-      - jaeger
+      jaeger:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Heap remains ~576 MiB through MaxRAMPercentage=45; the larger cgroup
+    # ceiling is native-memory safety margin, not permission to grow the heap.
+    mem_limit: 1280m
 
   client:
     build:
       context: ./client
       args:
         - NEXT_PUBLIC_API_URL=http://${HOST_IP:-localhost}:5846
+    image: macrosquare-client:production
     container_name: macrosquare-client
     ports:
       - "5847:5847"
@@ -68,13 +389,30 @@ services:
       - HOSTNAME=0.0.0.0
       - SSR_API_URL=http://macrosquare-server:5846
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
 
 volumes:
   jaeger-data:
+  macrosquare-prometheus:
+    name: macrosquare-prometheus
+  macrosquare-loki:
+    name: macrosquare-loki
+  macrosquare-alloy:
+    name: macrosquare-alloy
+  macrosquare-postgres:
+    name: macrosquare-postgres
+  macrosquare-minio:
+    name: macrosquare-minio

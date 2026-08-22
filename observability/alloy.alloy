@@ -1,0 +1,52 @@
+// Read Docker's rotated JSON log files directly instead of granting Alloy
+// access to the Docker control socket. The socket remains writable through
+// its API even when bind-mounted with `:ro`, so avoiding it is the safer
+// production default for a log-only agent.
+local.file_match "docker" {
+  path_targets = [{
+    "__path__" = "/var/lib/docker/containers/*/*-json.log",
+    "job"      = "docker",
+    "stack"    = "macrosquare-host",
+  }]
+
+  sync_period = "10s"
+}
+
+loki.source.file "docker" {
+  targets       = local.file_match.docker.targets
+  forward_to    = [loki.process.docker.receiver]
+  tail_from_end = true
+}
+
+loki.process "docker" {
+  stage.json {
+    expressions = {
+      output    = "log",
+      stream    = "stream",
+      timestamp = "time",
+    }
+  }
+
+  stage.timestamp {
+    source = "timestamp"
+    format = "RFC3339Nano"
+  }
+
+  stage.labels {
+    values = {
+      stream = "",
+    }
+  }
+
+  stage.output {
+    source = "output"
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

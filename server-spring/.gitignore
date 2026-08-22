@@ -1,0 +1,7 @@
+**/target/
+.idea/
+*.iml
+migration/baseline/responses/*
+!migration/baseline/responses/.gitkeep
+migration/baseline/runtime-manifest.json
+migration/benchmark-results/

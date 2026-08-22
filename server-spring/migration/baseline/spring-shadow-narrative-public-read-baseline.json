@@ -1,0 +1,116 @@
+{
+  "capturedAt": "2026-07-19T07:47:07Z",
+  "milestone": "spring-shadow-narrative-public-read",
+  "environment": {
+    "host": "home-server",
+    "client": "Mac on same LAN",
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow"
+  },
+  "scope": {
+    "implementedPublicReads": [
+      "GET /api/narrative/themes",
+      "GET /api/narrative/overview",
+      "GET /api/narrative/themes/{id}"
+    ],
+    "behavior": [
+      "current heat, stage, drivers, risks and proxy scores are recomputed by the Spring domain policy",
+      "external signals and history are read from the normalized legacy snapshot",
+      "theme definition drift fails closed",
+      "unknown theme IDs preserve the Node 404 body",
+      "reads do not persist history or send side effects"
+    ],
+    "comparableForFinalDecision": false
+  },
+  "liveContractParity": {
+    "catalogExact": true,
+    "overviewExactForSameSnapshot": true,
+    "detailExactForSameSnapshot": true,
+    "unknownThemeStatus": 404,
+    "unknownThemeBody": {
+      "error": "narrative theme not found"
+    },
+    "internalNarrativesMatched": "11/11",
+    "rotationMatched": true,
+    "springLogWarningsOrErrors": 0,
+    "springRestartCount": 0,
+    "nodeRestartCount": 0
+  },
+  "httpBenchmarks": {
+    "nodeCatalog": {
+      "requests": 300,
+      "concurrency": 15,
+      "throughputPerSecond": 649.388,
+      "p50Ms": 18.183,
+      "p95Ms": 31.543,
+      "p99Ms": 85.967,
+      "errorCount": 0,
+      "responseBytes": 4085
+    },
+    "springCatalog": {
+      "requests": 300,
+      "concurrency": 15,
+      "throughputPerSecond": 843.638,
+      "p50Ms": 14.036,
+      "p95Ms": 31.487,
+      "p99Ms": 64.648,
+      "errorCount": 0,
+      "responseBytes": 4085
+    },
+    "springOverview": {
+      "requests": 200,
+      "concurrency": 10,
+      "throughputPerSecond": 358.659,
+      "p50Ms": 22.631,
+      "p95Ms": 44.845,
+      "p99Ms": 78.621,
+      "errorCount": 0,
+      "responseBytes": 17256,
+      "note": "Node overview was not load-tested because its current GET path records history and calls external proxy collectors."
+    }
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.446,
+    "springProcessRunningSeconds": 2.96
+  },
+  "disk": {
+    "nodeImageBytes": 266577284,
+    "springImageBytes": 248936650,
+    "springImageDifferencePct": -6.62,
+    "applicationIoComparisonDeferred": true
+  },
+  "sameWindowIdle10SamplesAfterHttpWarmup": {
+    "node": {
+      "memoryMedianMiB": 151.0,
+      "memoryMinMiB": 151.0,
+      "memoryMaxMiB": 151.0,
+      "cpuMedianPct": 0.665,
+      "cpuMeanPct": 0.68,
+      "cpuMaxPct": 1.05,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 181.5,
+      "memoryMinMiB": 181.5,
+      "memoryMaxMiB": 181.9,
+      "cpuMedianPct": 0.055,
+      "cpuMeanPct": 0.354,
+      "cpuMaxPct": 3.08,
+      "pidCountMedian": 27
+    },
+    "warning": "Node serves production workload while Spring only serves a shadow read slice."
+  },
+  "springJvmAfterHttpWarmup": {
+    "heapUsedBytes": 28852144,
+    "nonHeapUsedBytes": 71103200,
+    "heapMaxBytes": 727842816,
+    "gcPauseCount": 6,
+    "gcPauseTotalSeconds": 0.038,
+    "gcPauseMaxSeconds": 0.013,
+    "liveJvmThreads": 16
+  },
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "reason": "The narrative public read contract is complete, but the remaining public read models and data ownership still reside on Node."
+  }
+}

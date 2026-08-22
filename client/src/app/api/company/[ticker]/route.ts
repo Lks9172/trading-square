@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const INTERNAL_API_URL = process.env.SSR_API_URL || 'http://macrosquare-server:5846';
+const INTERNAL_API_URL =
+  process.env.SSR_API_URL ||
+  process.env.INTERNAL_API_URL ||
+  (process.env.NODE_ENV === 'development'
+    ? 'http://localhost:5846'
+    : 'http://macrosquare-server:5846');
 
 export async function GET(
   _request: NextRequest,

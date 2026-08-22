@@ -1,0 +1,49 @@
+{
+  "source": "server/src/engines/fundamentals/company-score.ts",
+  "input": {
+    "ticker": "TEST",
+    "revenueGrowthYoY": 25,
+    "operatingMargin": 25,
+    "freeCashFlowMargin": 20,
+    "roe": 20,
+    "operatingMarginTrend": 3,
+    "evToSales": 3,
+    "evToFcf": 20,
+    "netDebtToRevenue": 0,
+    "cash": 150,
+    "debt": 90,
+    "shareDilutionYoY": 0,
+    "stockCompToRevenue": 3
+  },
+  "expected": {
+    "ticker": "TEST",
+    "totalScore": 87,
+    "growth": {
+      "value": 90,
+      "reasons": ["매출 YoY 25.0% 고성장"]
+    },
+    "quality": {
+      "value": 87,
+      "reasons": [
+        "영업이익률 25.0% 우수",
+        "FCF 마진 20.0% 우수",
+        "ROE 20.0% 우수",
+        "마진 추세 +3.0%p 개선"
+      ]
+    },
+    "valuation": {
+      "value": 85,
+      "reasons": ["EV/Sales 3.0x 저평가 구간", "EV/FCF 20.0x 매력적"]
+    },
+    "balanceSheet": {
+      "value": 84,
+      "reasons": ["순현금 또는 무차입 구조", "주식수 YoY 0.0%로 희석 제한적"]
+    },
+    "reasons": [
+      "매출 YoY 25.0% 고성장",
+      "영업이익률 25.0% 우수",
+      "EV/Sales 3.0x 저평가 구간",
+      "순현금 또는 무차입 구조"
+    ]
+  }
+}

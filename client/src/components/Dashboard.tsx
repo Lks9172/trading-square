@@ -1,27 +1,71 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { type ComponentProps, useMemo, useState } from "react";
+import type { IndicatorPanel as IndicatorPanelComponent } from "./IndicatorPanel";
+import type { ManualInputsPanel as ManualInputsPanelComponent } from "./ManualInputsPanel";
 import { RegimeHeader } from "./RegimeHeader";
-import { IndicatorPanel } from "./IndicatorPanel";
 import { SignalPanel } from "./SignalPanel";
 import { AllocationPanel } from "./AllocationPanel";
 import { MetaBar } from "./MetaBar";
-import { ManualInputsPanel } from "./ManualInputsPanel";
-import { HistoryPanel } from "./HistoryPanel";
-import { BacktestPanel } from "./BacktestPanel";
 import { SectorPanel } from "./SectorPanel";
-import { StalenessPanel } from "./StalenessPanel";
 import { RealtimePanel } from "./RealtimePanel";
-import { SmartMoneyPanel } from "./SmartMoneyPanel";
-import { CalendarPanel } from "./CalendarPanel";
+import type { CalendarPanel as CalendarPanelComponent } from "./CalendarPanel";
 import { MultiTimeframePanel } from "./MultiTimeframePanel";
 import { ExecutionPlanPanel } from "./ExecutionPlanPanel";
 import { LensPanel } from "./LensPanel";
-import { OptionsVolatilityPanel } from "./OptionsVolatilityPanel";
-import { SentimentPanel } from "./SentimentPanel";
+import type { OptionsVolatilityPanel as OptionsVolatilityPanelComponent } from "./OptionsVolatilityPanel";
+import type { SentimentPanel as SentimentPanelComponent } from "./SentimentPanel";
 import { ConvictionPanel } from "./ConvictionPanel";
+import { LiquidityImpulsePanel } from "./LiquidityImpulsePanel";
 import { Onboarding } from "./Onboarding";
+import { ResearchHighlightsPanel } from "./ResearchHighlightsPanel";
+import { MarketBreadthGatePanel } from "./MarketBreadthGatePanel";
+import { ScoreLegend } from "./ScoreUI";
 import { formatKstDateTime } from "@/lib/format";
+import type { StalenessPanel as StalenessPanelComponent } from "./StalenessPanel";
+
+const ManualInputsPanel = dynamic(() => import("./ManualInputsPanel").then((mod) => mod.ManualInputsPanel), {
+  loading: () => <DeferredPanelSkeleton title="수동 입력 패널 로딩 중…" />,
+});
+const HistoryPanel = dynamic(() => import("./HistoryPanel").then((mod) => mod.HistoryPanel), {
+  loading: () => <DeferredPanelSkeleton title="히스토리 로딩 중…" />,
+});
+const BacktestPanel = dynamic(() => import("./BacktestPanel").then((mod) => mod.BacktestPanel), {
+  loading: () => <DeferredPanelSkeleton title="백테스트 로딩 중…" />,
+});
+const StalenessPanel = dynamic(() => import("./StalenessPanel").then((mod) => mod.StalenessPanel), {
+  loading: () => <DeferredPanelSkeleton title="staleness 로딩 중…" />,
+});
+const SmartMoneyPanel = dynamic(() => import("./SmartMoneyPanel").then((mod) => mod.SmartMoneyPanel), {
+  loading: () => <DeferredPanelSkeleton title="스마트머니 로딩 중…" />,
+});
+const InstitutionalFlowPanel = dynamic(() => import("./InstitutionalFlowPanel").then((mod) => mod.InstitutionalFlowPanel), {
+  loading: () => <DeferredPanelSkeleton title="기관 13F 로딩 중…" />,
+});
+const PolicyIntelligencePanel = dynamic(() => import("./PolicyIntelligencePanel").then((mod) => mod.PolicyIntelligencePanel), {
+  loading: () => <DeferredPanelSkeleton title="정책 원문 분석 로딩 중…" />,
+});
+const CalendarPanel = dynamic(() => import("./CalendarPanel").then((mod) => mod.CalendarPanel), {
+  loading: () => <DeferredPanelSkeleton title="캘린더 로딩 중…" />,
+});
+const OptionsVolatilityPanel = dynamic(() => import("./OptionsVolatilityPanel").then((mod) => mod.OptionsVolatilityPanel), {
+  loading: () => <DeferredPanelSkeleton title="옵션 변동성 로딩 중…" />,
+});
+const SentimentPanel = dynamic(() => import("./SentimentPanel").then((mod) => mod.SentimentPanel), {
+  loading: () => <DeferredPanelSkeleton title="심리 패널 로딩 중…" />,
+});
+const IndicatorPanel = dynamic(() => import("./IndicatorPanel").then((mod) => mod.IndicatorPanel), {
+  loading: () => <DeferredPanelSkeleton title="지표 패널 로딩 중…" />,
+});
+
+function DeferredPanelSkeleton({ title }: { title: string }) {
+  return (
+    <section className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
+      <div className="text-sm text-[var(--muted)]">{title}</div>
+    </section>
+  );
+}
 
 type RegimeHeaderProps = ComponentProps<typeof RegimeHeader>;
 type RealtimePanelProps = ComponentProps<typeof RealtimePanel>;
@@ -33,12 +77,12 @@ type SectorPanelProps = ComponentProps<typeof SectorPanel>;
 type ConvictionPanelProps = ComponentProps<typeof ConvictionPanel>;
 type LensPanelProps = ComponentProps<typeof LensPanel>;
 type MultiTimeframePanelProps = ComponentProps<typeof MultiTimeframePanel>;
-type OptionsVolatilityPanelProps = ComponentProps<typeof OptionsVolatilityPanel>;
-type SentimentPanelProps = ComponentProps<typeof SentimentPanel>;
-type CalendarPanelProps = ComponentProps<typeof CalendarPanel>;
-type StalenessPanelProps = ComponentProps<typeof StalenessPanel>;
-type IndicatorPanelProps = ComponentProps<typeof IndicatorPanel>;
-type ManualInputsPanelProps = ComponentProps<typeof ManualInputsPanel>;
+type OptionsVolatilityPanelProps = ComponentProps<typeof OptionsVolatilityPanelComponent>;
+type SentimentPanelProps = ComponentProps<typeof SentimentPanelComponent>;
+type CalendarPanelProps = ComponentProps<typeof CalendarPanelComponent>;
+type StalenessPanelProps = ComponentProps<typeof StalenessPanelComponent>;
+type IndicatorPanelProps = ComponentProps<typeof IndicatorPanelComponent>;
+type ManualInputsPanelProps = ComponentProps<typeof ManualInputsPanelComponent>;
 
 type RawPoint = RealtimePanelProps["raw"][string];
 type DerivedPoint = RealtimePanelProps["derived"][string] & {
@@ -48,6 +92,9 @@ type CalendarEvent = NonNullable<CalendarPanelProps["events"]>[number];
 type ManualInputs = ManualInputsPanelProps["initial"];
 type AutoInputs = {
   policyDirection: number;
+  policyConfidence?: number;
+  policySource?: string;
+  policyAsOf?: string;
   geoRisk: number;
   cbBuying: boolean;
   ismPmi: number | null;
@@ -61,6 +108,8 @@ type DashboardStaleness = StalenessPanelProps["staleness"];
 type DashboardMetaBar = NonNullable<MetaBarProps["meta"]>;
 interface DashboardTopdown {
   summary?: string;
+  narrativeSummary?: string[];
+  bottleneckSummary?: string[];
   favoredSectors?: SectorPanelProps["topdown"] extends infer T
     ? T extends { favoredSectors?: infer U }
       ? U
@@ -88,9 +137,62 @@ interface DashboardMeta extends DashboardMetaBar {
   autoInputs: AutoInputs | null;
   inputMode: ManualInputsPanelProps["inputMode"];
   executionPlans?: DashboardExecutionPlans;
+  executionPlanFreshness?: {
+    source: string;
+    eligibleForExecution: boolean;
+    reason: string;
+  };
+  topdownFreshness?: {
+    source: string;
+    eligibleForCurrentRanking: boolean;
+    reason: string;
+  };
   calendar?: CalendarEvent[];
+  calendarMethodology?: CalendarPanelProps["methodology"];
   staleness?: DashboardStaleness;
+  inputFreshness?: {
+    rawUsable: number;
+    rawExcluded: number;
+    derivedUsable: number;
+    derivedExcluded: number;
+    excludedKeys?: string[];
+    policy?: string;
+  };
+  collectionHealth?: StalenessPanelProps["collectionHealth"];
   smartMoney?: DashboardSmartMoney | null;
+  marketBreadthGate?: {
+    updatedAt: string;
+    mode: '실전 개선형';
+    summary: string;
+    markets: Array<{
+      asset: 'NASDAQ' | 'SP500';
+      label: string;
+      mode: '실전 개선형';
+      status: 'ON' | 'RECENT' | 'OFF';
+      active: boolean;
+      signalDate: string | null;
+      daysSinceSignal: number | null;
+      perYear: number;
+      avg1m: number | null;
+      avg2m: number | null;
+      avg3m: number | null;
+      win1m: number | null;
+      win2m: number | null;
+      win3m: number | null;
+      shortThreshold: number;
+      mediumOversoldThreshold: number;
+      mediumRecoveryFloor: number;
+      lookbackDays: number;
+      regimeFilter: string;
+      summary: string;
+      recentSignals: Array<{
+        signalDate: string;
+        oneMonthReturn: number | null;
+        twoMonthReturn: number | null;
+        threeMonthReturn: number | null;
+      }>;
+    }>;
+  } | null;
 }
 
 interface DashboardSnapshot {
@@ -120,6 +222,13 @@ export function Dashboard({ snapshot }: Props) {
     }),
     [currentSnapshot]
   );
+  const decisionInputs = useMemo(() => {
+    const raw = Object.fromEntries(Object.entries(currentSnapshot?.raw ?? {})
+      .filter(([, point]) => point.eligibleForSignals !== false)) as DashboardSnapshot["raw"];
+    const derived = Object.fromEntries(Object.entries(currentSnapshot?.derived ?? {})
+      .filter(([, point]) => point.eligibleForSignals !== false)) as DashboardSnapshot["derived"];
+    return { raw, derived };
+  }, [currentSnapshot]);
 
   if (!currentSnapshot) {
     return (
@@ -148,35 +257,44 @@ export function Dashboard({ snapshot }: Props) {
   } satisfies SignalPanelProps;
   const allocationProps = {
     allocation: currentSnapshot.allocation,
-    overheated: currentSnapshot.derived.OVERHEATED?.value === 1,
-    fxComboAlert: currentSnapshot.derived.FX_FOREIGN_COMBO_ALERT?.value ?? null,
+    overheated: decisionInputs.derived.OVERHEATED?.value === 1,
+    fxComboAlert: decisionInputs.derived.FX_FOREIGN_COMBO_ALERT?.value ?? null,
   } satisfies AllocationPanelProps;
   const executionPlanProps = {
     plans: currentSnapshot.meta.executionPlans,
     currentRegime: currentSnapshot.regime.regime,
     topdown: currentSnapshot.meta.topdown,
+    freshness: currentSnapshot.meta.executionPlanFreshness,
   } satisfies ExecutionPlanPanelProps;
   const sectorPanelProps = {
-    derived: currentSnapshot.derived,
+    derived: decisionInputs.derived,
     topdown: currentSnapshot.meta.topdown,
+    topdownFreshness: currentSnapshot.meta.topdownFreshness,
   } satisfies SectorPanelProps;
   const convictionPanelProps = { derived: currentSnapshot.derived } satisfies ConvictionPanelProps;
   const lensPanelProps = {
-    raw: currentSnapshot.raw,
-    derived: currentSnapshot.derived,
+    raw: decisionInputs.raw,
+    derived: decisionInputs.derived,
     meta: currentSnapshot.meta,
   } satisfies LensPanelProps;
-  const multiTimeframeProps = { derived: currentSnapshot.derived } satisfies MultiTimeframePanelProps;
+  const multiTimeframeProps = { derived: decisionInputs.derived } satisfies MultiTimeframePanelProps;
   const optionsVolatilityProps = {
-    raw: currentSnapshot.raw,
-    derived: currentSnapshot.derived,
+    raw: decisionInputs.raw,
+    derived: decisionInputs.derived,
   } satisfies OptionsVolatilityPanelProps;
   const sentimentPanelProps = {
-    raw: currentSnapshot.raw,
-    derived: currentSnapshot.derived,
+    raw: decisionInputs.raw,
+    derived: decisionInputs.derived,
   } satisfies SentimentPanelProps;
-  const calendarPanelProps = { events: currentSnapshot.meta.calendar } satisfies CalendarPanelProps;
-  const stalenessPanelProps = { staleness: currentSnapshot.meta.staleness } satisfies StalenessPanelProps;
+  const calendarPanelProps = {
+    events: currentSnapshot.meta.calendar,
+    methodology: currentSnapshot.meta.calendarMethodology,
+  } satisfies CalendarPanelProps;
+  const stalenessPanelProps = {
+    staleness: currentSnapshot.meta.staleness,
+    inputFreshness: currentSnapshot.meta.inputFreshness,
+    collectionHealth: currentSnapshot.meta.collectionHealth,
+  } satisfies StalenessPanelProps;
   const indicatorPanelProps = {
     raw: currentSnapshot.raw,
     derived: currentSnapshot.derived,
@@ -225,6 +343,8 @@ export function Dashboard({ snapshot }: Props) {
 
       <RegimeHeader {...regimeHeaderProps} />
 
+      <LiquidityImpulsePanel derived={currentSnapshot.derived} />
+
       {/* 19차 P1#1: 18·19차 신규 derived 통합 노출 */}
       <ConvictionPanel {...convictionPanelProps} />
 
@@ -234,6 +354,8 @@ export function Dashboard({ snapshot }: Props) {
 
       <MetaBar {...metaBarProps} />
 
+      <PolicyIntelligencePanel />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         <SignalPanel {...signalPanelProps} />
         <AllocationPanel {...allocationProps} />
@@ -242,6 +364,18 @@ export function Dashboard({ snapshot }: Props) {
       <ExecutionPlanPanel {...executionPlanProps} />
 
       <SectorPanel {...sectorPanelProps} />
+
+      <section className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
+        <div className="mb-3">
+          <h3 className="text-base sm:text-lg font-semibold">점수 해석</h3>
+          <p className="text-[11px] sm:text-xs text-[var(--muted)] mt-1">B는 지금 사도 되는지, Q는 체력/구조, 과열은 추격 위험을 뜻합니다.</p>
+        </div>
+        <ScoreLegend defaultOpen />
+      </section>
+
+      <MarketBreadthGatePanel gate={currentSnapshot.meta.marketBreadthGate} />
+
+      <ResearchHighlightsPanel />
 
       <MultiTimeframePanel {...multiTimeframeProps} />
 
@@ -256,6 +390,8 @@ export function Dashboard({ snapshot }: Props) {
       <BacktestPanel />
 
       <SmartMoneyPanel />
+
+      <InstitutionalFlowPanel />
 
       <CalendarPanel {...calendarPanelProps} />
 

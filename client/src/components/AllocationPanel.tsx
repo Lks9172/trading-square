@@ -47,7 +47,7 @@ interface Props {
     buyStage: number | null;
   };
   overheated?: boolean;
-  // 7차 TOP3 Fix #2: FX_FOREIGN_COMBO_ALERT (HARD=2, SOFT=1, WATCH=-1, null=해당 없음)
+  // FX_FOREIGN_COMBO_ALERT: HARD=2, SOFT=1, WATCH=-1, 0=중립, null=데이터 없음.
   fxComboAlert?: number | null;
 }
 
@@ -69,7 +69,7 @@ function FxComboBadge({ level }: { level: number }) {
   if (level === -1) {
     return (
       <div className="mt-2 text-[10px] sm:text-xs text-green-200 bg-green-500/10 border border-green-500/40 rounded-lg p-2.5">
-        🟢 외인 복귀 유리 (WATCH) — 원/달러 1400원 이하 + 외국인 매도 streak 소멸. 분할 진입 호재.
+        🟢 외인 복귀 유리 (WATCH) — 원/달러 1480원 이하 + 외국인 매도 streak 소멸. 분할 진입 호재.
       </div>
     );
   }

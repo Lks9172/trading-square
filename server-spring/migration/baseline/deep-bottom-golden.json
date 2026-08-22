@@ -1,0 +1,69 @@
+{
+  "capturedAt": "2026-07-19T06:15:00Z",
+  "source": "Node production /api/company responses",
+  "fixtures": [
+    {
+      "ticker": "NVDA",
+      "input": {
+        "signalDate": "2026-06-26",
+        "recentVolumeRatio": 1.18,
+        "contractionRatio": 1.0,
+        "drawdown120dPct": -14.0,
+        "ma20GapPct": 0.3,
+        "recentDrop3dPct": -3.8,
+        "ma20Below50": true,
+        "daysSinceAbsorption": 14,
+        "reboundSinceAbsorptionPct": 5.3,
+        "failureRiskScore": 52
+      },
+      "expected": {
+        "score": 56,
+        "state": "미충족",
+        "actionBias": "대기",
+        "reversalStatus": "OFF"
+      }
+    },
+    {
+      "ticker": "ISRG",
+      "input": {
+        "signalDate": "2026-07-17",
+        "recentVolumeRatio": 2.04,
+        "contractionRatio": 1.0,
+        "drawdown120dPct": -34.7,
+        "ma20GapPct": -14.4,
+        "recentDrop3dPct": -9.0,
+        "ma20Below50": true,
+        "daysSinceAbsorption": 0,
+        "reboundSinceAbsorptionPct": 0.0,
+        "failureRiskScore": 44
+      },
+      "expected": {
+        "score": 100,
+        "state": "확신",
+        "actionBias": "분할 매수",
+        "reversalStatus": "STRONG"
+      }
+    },
+    {
+      "ticker": "NEM",
+      "input": {
+        "signalDate": "2026-07-17",
+        "recentVolumeRatio": 0.99,
+        "contractionRatio": 1.0,
+        "drawdown120dPct": -32.0,
+        "ma20GapPct": -5.9,
+        "recentDrop3dPct": -5.3,
+        "ma20Below50": true,
+        "daysSinceAbsorption": 0,
+        "reboundSinceAbsorptionPct": 0.0,
+        "failureRiskScore": 62
+      },
+      "expected": {
+        "score": 62,
+        "state": "후보",
+        "actionBias": "관찰 매수",
+        "reversalStatus": "EARLY"
+      }
+    }
+  ]
+}

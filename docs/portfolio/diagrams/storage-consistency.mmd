@@ -1,0 +1,13 @@
+sequenceDiagram
+    participant UC as "Use Case"
+    participant MI as "MinIO"
+    participant PG as "PostgreSQL"
+    participant RD as "Reader"
+    UC->>MI: "PUT versioned body"
+    MI-->>UC: "version + ETag"
+    UC->>UC: "SHA-256 + size"
+    UC->>PG: "metadata + active pointer transaction"
+    PG-->>UC: "COMMIT"
+    RD->>PG: "load exact pointer"
+    RD->>MI: "GET exact version"
+    RD->>RD: "checksum verification"

@@ -1,0 +1,177 @@
+{
+  "capturedAt": "2026-07-19T13:06:02Z",
+  "milestone": "spring-shadow-company-identity-direct-sec-parity",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25.0.3 LTS / Spring Boot 4.1.0 / Tomcat 11.0.22",
+    "nodePort": 5846,
+    "springShadowPort": 5856,
+    "springMemoryLimit": "1GiB"
+  },
+  "scope": {
+    "implementedInternalRead": "GET /internal/v1/migration/company-research-parity/{ticker}",
+    "behavior": [
+      "Spring resolves ticker identity directly from SEC company_tickers.json instead of consuming the legacy company CIK as its calculation input",
+      "ticker trim, upper-case, dot-to-hyphen normalization, ten-digit CIK padding, and missing-only manual aliases preserve the Node ticker-map contract",
+      "SEC directory JSON and HTTP/cache types remain inside the outbound adapter; application receives a framework-free identity with ordered fundamentals CIK candidates",
+      "one successful directory snapshot is fresh for twenty-four hours, usable stale for at most seven days, and protected by global single-flight",
+      "malformed or failed directory responses never replace the last successful snapshot",
+      "the endpoint remains demand-driven and adds no startup fetch, persistence write, scheduler, notification, or Telegram side effect"
+    ],
+    "successorContinuity": {
+      "ticker": "XOM",
+      "effectiveDate": "2026-07-01",
+      "registryCik": "0002115436",
+      "predecessorFundamentalsCik": "0000034088",
+      "selectionRule": "try the successor first and use the predecessor only while the successor has no core revenue, operating-income, net-income, or operating-cash-flow XBRL evidence",
+      "automaticSwitch": true
+    },
+    "remainingInNode": [
+      "current Yahoo quote collection",
+      "analyst consensus collection and history persistence",
+      "SEC submissions and filing enrichment",
+      "company detail enrichment and route-cache ownership",
+      "company research schedulers and Telegram notifications"
+    ],
+    "legacyInputsStillUsed": ["current quote", "analyst expectations"],
+    "comparableForFinalDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 104,
+      "failures": 0,
+      "domain": 22,
+      "application": 19,
+      "adapters": 57,
+      "bootstrap": 2,
+      "architecture": 4
+    },
+    "localDirectIdentityParity": {
+      "tickers": 48,
+      "matched": 48,
+      "identityFundamentalsScoreBuyScoreAndReasonsExact": true,
+      "medianDurationMs": 572.068,
+      "maxDurationMs": 1559.723
+    },
+    "homeColdDirectIdentityParity": {
+      "tickers": 48,
+      "matched": 48,
+      "identityFundamentalsScoreBuyScoreAndReasonsExact": true,
+      "medianDurationMs": 561.266,
+      "maxDurationMs": 2144.453,
+      "totalDurationMs": 30389.395
+    },
+    "homeXomContinuity": {
+      "registryCik": "0002115436",
+      "fundamentalsCik": "0000034088",
+      "allMatched": true,
+      "differences": []
+    },
+    "existingPublicEndpointRegression": {
+      "statusObjectAndByteExactMatches": 8,
+      "total": 8,
+      "covered": [
+        "company detail success",
+        "company detail 404",
+        "company search",
+        "company summaries",
+        "crypto catalog",
+        "crypto BTC detail",
+        "research theme catalog",
+        "research sector catalog"
+      ]
+    },
+    "internalUnknownTicker": {
+      "status": 404,
+      "safeErrorBody": true
+    }
+  },
+  "httpBenchmarks": {
+    "homeLoopbackFreshConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "responseBytes": 3273,
+      "totalErrorCount": 0,
+      "medianThroughputPerSecond": 442.778,
+      "medianP50Ms": 8.001,
+      "medianP95Ms": 142.181,
+      "medianP99Ms": 170.847
+    },
+    "homeLoopbackFreshSequential": {
+      "requests": 200,
+      "concurrency": 1,
+      "totalErrorCount": 0,
+      "throughputPerSecond": 380.183,
+      "p50Ms": 2.244,
+      "p95Ms": 3.204,
+      "p99Ms": 3.501,
+      "maxMs": 30.166
+    }
+  },
+  "sameWindowIdle10SamplesAfter48CikAndHttpWarmup": {
+    "node": {
+      "memoryMedianMiB": 147.9,
+      "memoryMinMiB": 147.8,
+      "memoryMaxMiB": 147.9,
+      "cpuMedianPct": 0.69,
+      "cpuMeanPct": 0.676,
+      "cpuMaxPct": 0.75,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 222.9,
+      "memoryMinMiB": 222.5,
+      "memoryMaxMiB": 222.9,
+      "cpuMedianPct": 0.055,
+      "cpuMeanPct": 0.08,
+      "cpuMaxPct": 0.23,
+      "pidCountMedian": 32
+    },
+    "warning": "Node serves the full production workload while Spring still serves read-only shadow traffic, so this is not a final runtime comparison."
+  },
+  "springJvmFinal": {
+    "heapUsedBytes": 52722872,
+    "heapCommittedBytes": 105578496,
+    "tenuredUsedBytes": 40806344,
+    "nonHeapUsedBytes": 84360952,
+    "gcPauseCount": 12,
+    "gcPauseTotalSeconds": 0.11,
+    "gcPauseMaxSeconds": 0.008,
+    "liveJvmThreads": 18,
+    "peakJvmThreads": 32
+  },
+  "runtime": {
+    "springReadiness": "UP",
+    "springWarningCount": 0,
+    "springErrorOrExceptionCount": 0,
+    "springRestartCount": 0,
+    "nodeRestartCount": 0,
+    "clientRestartCount": 0,
+    "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+    "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+    "springContainerId": "0e20c1db3694f3469f6cbef5b953676da17b60167bcd6af0720e8fa47983473a",
+    "springImageId": "sha256:618231b9e26467e98852909cda8086a27e3457c843b802c535bd0cc98e6f9717",
+    "springContainerStartedAt": "2026-07-19T13:01:28.845386091Z"
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.921,
+    "applicationReadySeconds": 2.985,
+    "springProcessRunningSeconds": 3.493
+  },
+  "disk": {
+    "springImageBytes": 249268811,
+    "previousSpringImageBytes": 249249149,
+    "imageIncreaseBytes": 19662,
+    "imageIncreasePct": 0.0079,
+    "applicationIoComparisonDeferred": true
+  },
+  "rollback": {
+    "previousImageId": "sha256:beaec8da13647f7774c9404ba2a0fcce8aff3b3008bf978b4a388f6f4f66cacb",
+    "previousImageTag": "macrosquare-server-spring:rollback-company-fundamentals-streaming",
+    "previousImageStillPresent": true,
+    "nodeAndClientWereNotRecreated": true
+  }
+}

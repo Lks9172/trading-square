@@ -72,7 +72,8 @@ MacroSquare가 현재 실제로 사용하는 데이터 소스 명세서.
 | `WALCL` | 연준 총자산 | 주간 | QE/QT 방향 |
 | `WRESBAL` | 지급준비금 | 주간 | 은행 유동성 체력 |
 | `RRPONTSYD` | 역레포 | 일간 | 초과유동성 흡수 |
-| `WTREGEN` | TGA | 주간 | 재무부 유동성 흡수/공급 |
+| `WDTGAL` | TGA 수요일 잔액 | 주간 | WALCL과 동일 시점의 미국 순유동성 계산 |
+| `WTREGEN` | TGA 주간평균 | 주간 | 감사·비교용, point-in-time 산식 제외 |
 | `WRMFNS` | MMF 잔액 | 주간 | 대기 자금 / 위험자산 이동 |
 
 ---

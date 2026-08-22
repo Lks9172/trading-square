@@ -5,8 +5,8 @@
 > 근거 자료: 자산제곱 영상 5편 + STT 전사본 + Notion 자료 모음 + 자산제곱 대시보드  
 > 제품명(가칭): **MacroSquare**
 
-> 구현 상태: **PRD 기준 핵심 기능 대부분 구현 완료**  
-> 현재 남은 핵심 미구현: **KRX 외국인 수급 연동**
+> 구현 상태: **PRD 기준 핵심 기능 구현 완료**
+> KRX 외국인 수급: **Spring 운영 경로 적용 완료** — Naver Finance KRX 집계표를 제공처로 명시해 6페이지/60영업일 수집
 
 ---
 
@@ -193,7 +193,8 @@
 | 연준 총자산 | FRED `WALCL` | QE/QT 방향 | 증가=완화, 감소=긴축 |
 | 지급준비금 | FRED `WRESBAL` | 은행 유동성 체력 | 3조$ 이상 안전 |
 | RRP | FRED `RRPONTSYD` | 초과유동성 흡수 | 감소=시장 유입 |
-| TGA | FRED `WTREGEN` | 재무부 지출/흡수 | 감소=유동성 공급 |
+| TGA 수요일 잔액 | FRED `WDTGAL` | WALCL과 같은 시점의 재무부 일반계정 | 감소=현재 준비금 공급 |
+| TGA 주간평균 | FRED `WTREGEN` | 감사·비교용 | point-in-time 산식에서 제외 |
 | MMF 잔액 | FRED `WRMFNS` | 대기 자금 규모 | 감소=위험자산 이동 |
 | M2 | FRED `M2SL` | 광의 통화량 | YoY 방향 |
 | SOFR/IORB 스프레드 | 계산 | 자금시장 긴장도 | SOFR>IORB = 경고 |
@@ -1975,7 +1976,7 @@ signal 조건(예: "실업수당 < 300K") 이 결측으로 불발되는 문제�
    - 모든 실패 사유를 logger.warn 으로 기록 (silent drop 제거).
    - 모니터링: 서버 로그에서 `[FRED]` 필터로 누락 추적 가능.
 
-**효과**: 당일 ICSA/UNRATE/IORB/WTREGEN/M2SL/M3_EURO 등이 누락되더라도, 신호 계산은 과거 값으로 진행되어
+**효과**: 당일 ICSA/UNRATE/IORB/WDTGAL/M2SL/M3_EURO 등이 누락되더라도, 신호 계산은 과거 값으로 진행되어
 signal 조건이 완전히 불발되는 사태는 회피. 실패 지표를 명시적으로 추적하여 데이터 품질 문제 조기 발견 가능.
 
 #### 7.1.2 센티먼트 소스 3종 교체 (2026-04)
@@ -2211,7 +2212,8 @@ signal 조건이 완전히 불발되는 사태는 회피. 실패 지표를 명�
 | 연준 총자산 | FRED `WALCL` | 주간 | ✅ |
 | 지급준비금 | FRED `WRESBAL` | 주간 | ✅ |
 | RRP | FRED `RRPONTSYD` | 일간 | ✅ |
-| TGA | FRED `WTREGEN` | 주간 | ✅ |
+| TGA 시점값 | FRED `WDTGAL` | 주간 | ✅ |
+| TGA 주간평균(감사용) | FRED `WTREGEN` | 주간 | ✅ |
 | MMF | FRED `WRMFNS` | 주간 | ✅ |
 | M2 | FRED `M2SL` | 월간 | ✅ |
 | 실업률 | FRED `UNRATE` | 월간 | ✅ |
@@ -2257,11 +2259,11 @@ signal 조건이 완전히 불발되는 사태는 회피. 실패 지표를 명�
 | 6차 누적 | 이격 streak(OVERHEATED/OVERSOLD/CHASE_WARNING), 트랑셰 영속화 + 추격 경고 배지, 심리 서브스코어(F&G/PC/AAII/NAAIM 가중평균) |
 | 7차 TOP3 | 센티먼트 4지표 UI(AAII/NAAIM/PCR/PSYCH 카드 + 임계 라벨 + 결측 "데이터 없음"), FX_FOREIGN_COMBO_ALERT 이중 게이트(환율×외인 streak, HARD=2/SOFT=1/WATCH=-1; HARD 시 EMERGING 30% cut), 분할매수 default 30/30/40 표준(execution_plan.DEFAULT_TRANCHE_WEIGHTS + POST tranche 시 weightPct 영속화) |
 
-### 11.2 아직 미구현인 핵심 항목
+### 11.2 핵심 보완 완료 항목
 
-| 항목 | 이유 |
+| 항목 | 운영 상태 |
 |---|---|
-| 외국인 수급 | KRX Open API 인증키 필요 |
+| 외국인 수급 | 완료 — 공식 KRX Open API로 오인시키지 않고 `NAVER_FINANCE` 제공처를 명시한다. EUC-KR 원문 6페이지를 bounded parse하여 실제 60영업일 외국인·기관·개인·연기금 수급을 PostgreSQL에 멱등 저장한다. |
 
 ### 11.3 전략 반영률 요약
 
@@ -2270,47 +2272,47 @@ signal 조건이 완전히 불발되는 사태는 회피. 실패 지표를 명�
 | 5개 영상 핵심 전략 | 거의 전부 반영 |
 | 노션 링크 기반 데이터 | 주요 핵심 소스 대부분 반영 |
 | 미세 조정 | 지속 가능 |
-| 핵심 누락 | 외국인 수급 1개 |
+| 핵심 누락 | 없음 — 외국인 수급 Spring 네이티브 전환 완료 |
 
-## 12. Observability 스택 (2026-04 추가)
+## 12. Observability 스택 (2026-07 운영 전환 완료)
 
-Docker 로그가 container 재시작 시 휘발돼 5분 스냅샷·KST 07:00 append 사이클의 진단이
-어려웠던 문제를 해결하기 위해 OpenTelemetry + Jaeger 기반 분산 추적을 도입.
+Spring 서버 trace, JVM/HTTP metric, Next 브라우저 Web Vital, 컨테이너 로그를 서로 다른 신호로
+수집하되 애플리케이션의 도메인/유스케이스 계층에는 관측 벤더 타입을 노출하지 않는다.
 
 ### 12.1 구성
 
 | 레이어 | 구성 요소 | 역할 |
 |---|---|---|
-| 계측 | `@opentelemetry/sdk-node` + `auto-instrumentations-node` | axios / http / express 자동 span |
-| 수동 span | `server/src/observability/trace.ts` `withSpan` | 핵심 경로(수집/엔진/히스토리)에 span 부여 |
-| OTLP 전송 | `@opentelemetry/exporter-trace-otlp-http` | `http://jaeger:4318/v1/traces` |
-| 수집/저장 | Jaeger all-in-one 1.63 + Badger | `./jaeger-data` 바인드 마운트로 홈서버 재시작해도 영속 |
-| UI | Jaeger UI | `http://192.168.0.200:16686` (service = `macrosquare-server`) |
-| 로그 | docker-compose json-file driver | max-size 10m × max-file 5 로 휘발 완화 |
+| 서버 trace 계측 | Spring Boot OpenTelemetry starter | HTTP client/server와 Spring 경로 자동 span |
+| trace 라우팅 | OTel Collector contrib 0.156 | Spring OTLP HTTP를 수신·batch 후 Jaeger로 전달 |
+| trace 저장/UI | Jaeger all-in-one 1.76 + Badger | named volume 영속, UI `127.0.0.1:16687` |
+| 서버 metric | Micrometer Prometheus registry | `/actuator/prometheus`, JVM/HTTP/DB metric |
+| metric 저장 | Prometheus 3.13 | 15일 및 2GB 상한, `127.0.0.1:5902` |
+| 브라우저 RUM | Next `useReportWebVitals` + `/api/rum` | CLS/FCP/FID/INP/LCP/TTFB bounded 구조화 로그 |
+| 로그 수집 | Alloy 1.18 | Docker JSON 로그 디렉터리 read-only tail; 제어 소켓 미사용 |
+| 로그 저장 | Loki 3.7 | TSDB v13/filesystem, 7일 retention, `127.0.0.1:5903` |
 
-### 12.2 수동 span 네이밍 컨벤션
+### 12.2 RUM 개인정보 최소화
 
-`macrosquare.<module>.<operation>` 형식.
-
-- `macrosquare.snapshot.build` — buildSnapshot 전체
-- `macrosquare.collector.collectAll` — 4개 수집기 병렬 집계 루트
-- `macrosquare.collector.{fred,yahoo,cnn,sentiment,smartMoney,calendar}.*`
-- `macrosquare.engine.{derived,regime,signals,allocation,executionPlan}`
-- `macrosquare.history.refreshComputed` — 히스토리 재계산 루트
-
-부모 span 에는 실패한 소스(`collector.failed_sources`), regime 라벨/점수,
-히스토리 재계산 커버리지 등 진단 attribute 를 부여.
+- URL query, IP, user-agent, cookie, 세션/계정 식별자를 저장하지 않는다.
+- pathname은 256자 이하, metric id/navigation type은 bounded text만 허용한다.
+- 허용된 Web Vital 이름과 유한한 수치만 받으며 body는 2KiB로 제한한다.
+- 수집 실패는 투자 UI 동작을 중단시키지 않는다.
 
 ### 12.3 안전장치
 
-- telemetry 초기화 실패는 애플리케이션 로직을 중단시키지 않음 (try/catch + NoOp tracer).
-- `OTEL_EXPORTER_OTLP_ENDPOINT` 미설정 시 `http://localhost:4318` 기본.
-- SIGTERM/SIGINT 에서 SDK graceful shutdown.
+- 모든 관측 UI/API host port는 `127.0.0.1`에만 bind한다.
+- Alloy에는 Docker control socket을 주지 않고 로그 파일 디렉터리만 read-only mount한다.
+- Collector는 read-only root filesystem, `cap_drop: ALL`, memory limiter를 사용한다.
+- Prometheus/Loki는 용량·기간 retention을 함께 제한한다.
+- 배포 rollback 단위에 compose와 `observability/` 설정을 함께 포함한다.
+- cutover 중 Prometheus target UP, synthetic RUM의 Loki 도착을 통과해야 배포가 commit된다.
+- 운영 검증에서 sampled W3C trace의 Collector→Jaeger 전달까지 재확인한다.
 
-### 12.4 남은 TODO
+### 12.4 완료 상태
 
-- client(Next 16) 측 브라우저 RUM 계측 여부는 추후 판단 (우선순위 낮음, 서버 사이클 진단이 더 시급했음).
-- metrics / logs signal 확장(OTel Collector 분리, Loki 연동) — 현 단계는 traces only.
+브라우저 RUM, OTel Collector 분리, Prometheus metric, Alloy/Loki 로그 영속화는 모두 운영 배포
+검증 경로까지 구현됐다. 외부 SaaS나 별도 공개 관측 포트 없이 홈서버 내부/SSH 터널에서만 조회한다.
 
 ## 13. 성능 최적화 (2026-04 추가)
 

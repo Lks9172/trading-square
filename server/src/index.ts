@@ -17,10 +17,14 @@ import apiRouter from './routes/api';
 import backtestRouter from './routes/backtest';
 import { DEFAULT_PROFILE, getSnapshot } from './state/cache';
 import { ensureBackfill, refreshComputedHistories, appendDailyData } from './state/history-store';
-import { checkAndNotify, sendStartupSnapshot, sendWeeklyReportText, recordRefreshSuccess, recordRefreshFailure } from './services/telegram';
+import { buildCompanyResearchLite, getCoreCompanyResearchTickers } from './services/company-research';
+import { getCurrentTelegramBottomCandidates, refreshAndNotifyTelegramBottomCandidates } from './services/telegram-bottom-candidates';
+import { checkAndNotify, sendStartupNotice, sendStartupSnapshot, sendWeeklyReportText, recordRefreshSuccess, recordRefreshFailure } from './services/telegram';
+import { readLatestPersistedSnapshot } from './services/persisted-snapshot';
 import { buildWeeklyReport, detectRuleViolations, formatWeeklyReportText } from './services/weekly-report';
 import { startTelegramCommandPoller } from './services/telegram-commands';
 import { logger, serializeError } from './services/logger';
+import { getMarketBreadthGateSnapshot } from './services/market-breadth-gate';
 
 dotenv.config();
 
@@ -32,19 +36,37 @@ app.use(express.json());
 app.use('/api', apiRouter);
 app.use('/api/backtest', backtestRouter);
 
-// 서버 시작 후 Docker 네트워크·DNS 캐시가 안정될 시간 확보 (60s).
-// 그 후에 snapshot → startup telegram. telegram 실패는 내부 5회 재시도로 복구 시도.
+// 서버 시작 후 persisted snapshot/confirmed-bottom 기반으로 즉시 시작 알림 전송.
 setTimeout(async () => {
   try {
-    logger.info('starting initial snapshot');
-    const snapshot = await getSnapshot(DEFAULT_PROFILE, true);
-    logger.info('initial snapshot ready, sending startup telegram');
-    const ok = await sendStartupSnapshot(snapshot.signals, snapshot.regime, snapshot.allocation);
-    logger.info({ ok }, 'startup telegram result');
+    logger.info('sending startup notice');
+    const [persistedSnapshot, confirmedBottomCompanies] = await Promise.all([
+      readLatestPersistedSnapshot().catch((error) => {
+        logger.warn({ error: serializeError(error) }, 'read latest persisted snapshot failed');
+        return null;
+      }),
+      getCurrentTelegramBottomCandidates(8, { allowFullScan: false }).catch((error) => {
+        logger.warn({ error: serializeError(error) }, 'startup confirmed bottom summary failed');
+        return [];
+      }),
+    ]);
+    const marketBreadthGate = await getMarketBreadthGateSnapshot(false).catch((error) => {
+      logger.warn({ error: serializeError(error) }, 'startup market breadth gate summary failed');
+      return null;
+    });
+    const ok = persistedSnapshot
+      ? await sendStartupSnapshot(
+          persistedSnapshot.signals,
+          persistedSnapshot.regime,
+          persistedSnapshot.allocation,
+          { confirmedBottomCompanies, marketBreadthGate },
+        )
+      : await sendStartupNotice({ confirmedBottomCompanies, marketBreadthGate });
+    logger.info({ ok, hasPersistedSnapshot: Boolean(persistedSnapshot) }, 'startup notice result');
   } catch (error) {
-    logger.error({ error: serializeError(error) }, 'initial refresh failed');
+    logger.error({ error: serializeError(error) }, 'startup notice failed');
   }
-}, 60000);
+}, 10000);
 
 void ensureBackfill(process.env.FRED_API_KEY || '').catch((error) => {
   logger.error({ error: serializeError(error) }, 'initial backfill failed');
@@ -54,13 +76,34 @@ void refreshComputedHistories().catch((error) => {
   logger.error({ error: serializeError(error) }, 'initial computed history refresh failed');
 });
 
+async function prewarmCoreCompanyResearch(triggeredBy: string): Promise<void> {
+  const tickers = getCoreCompanyResearchTickers();
+  logger.info({ triggeredBy, tickers }, 'core company research prewarm started');
+  for (const ticker of tickers) {
+    try {
+      await buildCompanyResearchLite(ticker);
+    } catch (error) {
+      logger.warn({ triggeredBy, ticker, error: serializeError(error) }, 'core company research prewarm failed');
+    }
+  }
+  logger.info({ triggeredBy, tickerCount: tickers.length }, 'core company research prewarm completed');
+}
+
+setTimeout(() => {
+  void prewarmCoreCompanyResearch('startup-company-prewarm');
+}, 90000);
+
+setTimeout(() => {
+  void refreshAndNotifyTelegramBottomCandidates('startup-confirmed-bottom-baseline');
+}, 120000);
+
 // 21차 P1#6: cron 차등 — KR 장중 3분 / 미국 장중 5분 / 야간·장후 15분 / 주말 1시간.
 // market-hours 는 utils/market-hours.ts 의 isKoreaMarketOpen / isUSMarketOpen 활용.
 async function runScheduledRefresh(triggeredBy: string): Promise<void> {
   try {
     logger.info({ triggeredBy }, 'scheduled snapshot refresh started');
     const snapshot = await getSnapshot(DEFAULT_PROFILE, true);
-    await checkAndNotify(snapshot.signals, snapshot.regime, snapshot.allocation);
+    await checkAndNotify(snapshot.signals, snapshot.regime, snapshot.allocation, snapshot.meta.marketBreadthGate ?? null);
     recordRefreshSuccess(); // 22차 P2#13
     logger.info({
       triggeredBy,
@@ -85,6 +128,14 @@ cron.schedule('*/15 6-8 * * 1-5', () => void runScheduledRefresh('kr-pre-15min')
 cron.schedule('*/15 16-22 * * 1-5', () => void runScheduledRefresh('kr-post-15min'), { timezone: 'Asia/Seoul' });
 // 주말 1시간
 cron.schedule('0 * * * 0,6', () => void runScheduledRefresh('weekend-1h'), { timezone: 'Asia/Seoul' });
+
+// 핵심 company 리서치 prewarm — 회사 데이터 캐시 단축에 맞춰 1시간 간격.
+cron.schedule('5 * * * 1-5', () => void prewarmCoreCompanyResearch('weekday-company-prewarm-1h'), { timezone: 'Asia/Seoul' });
+cron.schedule('5 */4 * * 0,6', () => void prewarmCoreCompanyResearch('weekend-company-prewarm-4h'), { timezone: 'Asia/Seoul' });
+
+// 확신형 바닥 신규 편입 알림 — 전체 리서치 유니버스 기준, 평일 1시간 / 주말 4시간 점검.
+cron.schedule('20 * * * 1-5', () => void refreshAndNotifyTelegramBottomCandidates('weekday-confirmed-bottom-scan-1h'), { timezone: 'Asia/Seoul' });
+cron.schedule('20 */4 * * 0,6', () => void refreshAndNotifyTelegramBottomCandidates('weekend-confirmed-bottom-scan-4h'), { timezone: 'Asia/Seoul' });
 
 // KST 07:00 히스토리 append — 기존 `0 22 * * *` 는 UTC 22시 = KST 07시였으나
 // Asia/Seoul TZ 지정 후엔 `0 7 * * *` 표기가 의미와 동일. 가독성 개선 + TZ 명시.

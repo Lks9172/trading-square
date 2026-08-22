@@ -1,0 +1,7 @@
+flowchart TB
+    BOOT["bootstrap"] --> AD["adapters"]
+    AD --> APP["application"]
+    APP --> DOM["domain"]
+    ARCH["ArchUnit"] --> DOM
+    ARCH --> APP
+    ARCH --> AD

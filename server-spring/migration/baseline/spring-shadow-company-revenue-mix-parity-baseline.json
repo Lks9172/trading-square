@@ -1,0 +1,459 @@
+{
+  "capturedAt": "2026-07-20T11:38:35.666301+00:00",
+  "milestone": "spring-shadow-company-revenue-mix-parity",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "clientContainer": "macrosquare-client",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25 / Spring Boot 4.1.0 / Tomcat 11.0.22 / Apache PDFBox 3.0.8",
+    "nodePort": 5846,
+    "clientPort": 5847,
+    "springShadowPort": 5856,
+    "springMemoryLimit": "1GiB"
+  },
+  "scope": {
+    "implemented": "direct SEC Inline XBRL reportable-segment/product/end-market and geography revenue values with reconciled percentages",
+    "internalEndpoint": "/internal/v1/migration/company-revenue-mix-parity/{ticker}",
+    "architecture": {
+      "domain": "framework-free revenue fact, total, breakdown, entry, analysis models and additive reconciliation policy",
+      "application": "selects latest 10-Q plus latest 10-K/20-F/40-F, invokes the domain policy, and compares legacy coverage without using legacy values as calculation input",
+      "outboundAdapter": "bounded SEC submissions and archive reads plus secure streaming StAX Inline XBRL parsing and semantic-only cache",
+      "inboundAdapter": "additive internal parity DTO; raw filing markup and transport types are not returned",
+      "forbiddenOutsideAdapters": [
+        "Spring",
+        "HTTP client",
+        "Jackson",
+        "PDFBox",
+        "SEC response types",
+        "cache implementation"
+      ]
+    },
+    "forms": [
+      "10-Q",
+      "10-K",
+      "20-F",
+      "40-F"
+    ],
+    "revenueTaxonomies": [
+      "US GAAP revenue concepts",
+      "IFRS RevenueFromContractsWithCustomers/Revenue"
+    ],
+    "dimensions": [
+      "reportable segment",
+      "product or service",
+      "customer/end market",
+      "geography"
+    ],
+    "reconciliation": {
+      "coverageRangePercent": [
+        80,
+        120
+      ],
+      "outputPercentSum": 100.0,
+      "maxSubsetFactsPerGroup": 18,
+      "guards": [
+        "parent/child double-count removal",
+        "elimination/consolidated/reconciliation exclusion",
+        "same source/unit/period matching",
+        "latest-period and reportable-segment preference"
+      ]
+    },
+    "crossTabPolicy": "cross-tabs remain rejected except a two-axis segment/geography fact qualified by an explicit aggregate revenue product member such as SalesAndOtherOperatingRevenueMember",
+    "bounds": {
+      "recentSubmissionRows": 200,
+      "maxInlineXbrlBytes": 33554432,
+      "maxContextsPerDocument": 25000,
+      "maxRevenueFactsPerDocument": 4000,
+      "semanticCacheEntries": 512,
+      "freshTtl": "6h",
+      "staleTtl": "24h",
+      "maxConcurrentArchiveFetches": 1,
+      "interRequestDelay": "150ms"
+    },
+    "remainingInNode": [
+      "public company orchestration and route-cache ownership",
+      "representative fallback mapping when a filer does not disclose an actual dimension",
+      "production filing schedulers and persistence",
+      "production score integration and Telegram notifications"
+    ],
+    "productionTrafficCutover": false,
+    "comparableForFinalRuntimeDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 242,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "domain": 60,
+      "application": 49,
+      "adapters": 118,
+      "bootstrap": 11,
+      "architecture": 4
+    },
+    "localLiveRevenueMix": {
+      "tickers": 12,
+      "migrationReady": 12,
+      "directCoverageReady": 12,
+      "percentageValidationReady": 12,
+      "legacyCoveragePreserved": 12,
+      "segmentActual": 12,
+      "geographyActual": 11,
+      "dimensionalFacts": 829,
+      "durationMs": {
+        "total": 10181.001,
+        "median": 694.216,
+        "max": 2252.297
+      }
+    },
+    "homeLiveRevenueMix": {
+      "tickers": 12,
+      "migrationReady": 12,
+      "directCoverageReady": 12,
+      "percentageValidationReady": 12,
+      "legacyCoveragePreserved": 12,
+      "segmentActual": 12,
+      "geographyActual": 11,
+      "dimensionalFacts": 829,
+      "durationMs": {
+        "total": 7637.571,
+        "median": 564.535,
+        "max": 1151.183
+      },
+      "allMigrationReady": true
+    },
+    "actualValueProofs": {
+      "TSM": {
+        "segment": {
+          "dimension": "Markets Of Customers",
+          "periodEnd": "2025-12-31",
+          "coveragePercent": 100.0,
+          "percentSum": 100.0,
+          "entries": [
+            {
+              "label": "High Performance Computing",
+              "percentOfTotal": 57.5
+            },
+            {
+              "label": "Smartphone",
+              "percentOfTotal": 29.2
+            },
+            {
+              "label": "Internet Of Things",
+              "percentOfTotal": 5.0
+            },
+            {
+              "label": "Automotive",
+              "percentOfTotal": 4.9
+            },
+            {
+              "label": "Other",
+              "percentOfTotal": 2.1
+            },
+            {
+              "label": "Digital Consumer Electronics",
+              "percentOfTotal": 1.3
+            }
+          ]
+        },
+        "geography": {
+          "dimension": "Geographical Areas",
+          "periodEnd": "2025-12-31",
+          "coveragePercent": 100.0,
+          "percentSum": 100.0,
+          "entries": [
+            {
+              "label": "United States",
+              "percentOfTotal": 74.5
+            },
+            {
+              "label": "China",
+              "percentOfTotal": 8.6
+            },
+            {
+              "label": "Taiwan",
+              "percentOfTotal": 7.9
+            },
+            {
+              "label": "Japan",
+              "percentOfTotal": 3.9
+            },
+            {
+              "label": "Europe Middle East and Africa",
+              "percentOfTotal": 3.3
+            },
+            {
+              "label": "Other Countries",
+              "percentOfTotal": 1.8
+            }
+          ]
+        }
+      },
+      "ASML": {
+        "segment": {
+          "dimension": "Product Or Service",
+          "periodEnd": "2025-12-31",
+          "coveragePercent": 100.0,
+          "percentSum": 100.0,
+          "entries": [
+            {
+              "label": "NXE",
+              "percentOfTotal": 32.0
+            },
+            {
+              "label": "Arf Immersion",
+              "percentOfTotal": 31.6
+            },
+            {
+              "label": "Service and Field Options",
+              "percentOfTotal": 25.1
+            },
+            {
+              "label": "EXE",
+              "percentOfTotal": 3.5
+            },
+            {
+              "label": "Krf",
+              "percentOfTotal": 3.1
+            },
+            {
+              "label": "Metrology and Inspection",
+              "percentOfTotal": 2.5
+            },
+            {
+              "label": "Arf Dry",
+              "percentOfTotal": 1.3
+            },
+            {
+              "label": "Iline",
+              "percentOfTotal": 0.9
+            }
+          ]
+        },
+        "geography": {
+          "dimension": "Statement Geographical",
+          "periodEnd": "2025-12-31",
+          "coveragePercent": 100.0,
+          "percentSum": 100.0,
+          "entries": [
+            {
+              "label": "China",
+              "percentOfTotal": 29.2
+            },
+            {
+              "label": "Taiwan",
+              "percentOfTotal": 25.5
+            },
+            {
+              "label": "South Korea",
+              "percentOfTotal": 25.0
+            },
+            {
+              "label": "United States",
+              "percentOfTotal": 12.5
+            },
+            {
+              "label": "Japan",
+              "percentOfTotal": 4.3
+            },
+            {
+              "label": "Singapore",
+              "percentOfTotal": 1.9
+            },
+            {
+              "label": "Rest Of Europe and Middle East",
+              "percentOfTotal": 1.6
+            },
+            {
+              "label": "Netherlands",
+              "percentOfTotal": 0.0
+            },
+            {
+              "label": "Rest Of Asia",
+              "percentOfTotal": 0.0
+            }
+          ]
+        }
+      },
+      "XOM": {
+        "segment": {
+          "dimension": "Product Or Service",
+          "periodEnd": "2026-03-31",
+          "coveragePercent": 100.1,
+          "percentSum": 100.0,
+          "entries": [
+            {
+              "label": "Sales and Other Operating Revenue",
+              "percentOfTotal": 97.6
+            },
+            {
+              "label": "Income From Equity Affiliates",
+              "percentOfTotal": 1.7
+            },
+            {
+              "label": "Other Revenue",
+              "percentOfTotal": 0.7
+            }
+          ]
+        },
+        "geography": {
+          "dimension": "Statement Geographical",
+          "periodEnd": "2026-03-31",
+          "coveragePercent": 97.7,
+          "percentSum": 100.0,
+          "entries": [
+            {
+              "label": "Non-U.S.",
+              "percentOfTotal": 56.0
+            },
+            {
+              "label": "United States",
+              "percentOfTotal": 44.0
+            }
+          ]
+        }
+      }
+    },
+    "priceSignalRegression": {
+      "matched": 48,
+      "total": 48,
+      "allMatched": true
+    },
+    "publicEndpointRegression": {
+      "statusAndByteExactMatches": 8,
+      "total": 8,
+      "allMatched": true
+    },
+    "timeVaryingNonSliceRegressions": {
+      "companyResearch": {
+        "matched": 47,
+        "total": 48,
+        "affectedTickers": [
+          "MSFT"
+        ],
+        "cause": "live Yahoo consensus and independently persisted shadow-history refresh boundary",
+        "unchangedDecisionFields": {
+          "MSFT": {
+            "totalScore": 73,
+            "buyScore": 74
+          }
+        },
+        "revenueMixCodeRegression": false
+      },
+      "submissions": {
+        "matched": 45,
+        "total": 48,
+        "affectedTickers": [
+          "JPM",
+          "GS",
+          "MS"
+        ],
+        "cause": "Node cached snapshot versus newly observed SEC structured-product filings",
+        "revenueMixCodeRegression": false
+      }
+    },
+    "deploymentIsolation": {
+      "springOnlyRecreated": true,
+      "nodeAndClientWereNotRecreated": true,
+      "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+      "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+      "springContainerId": "7aaebbb5bdba89ecf9c94b509e38445bfea979baffc7374bc9384460f34da2a9",
+      "legacySourceCacheMountReadOnly": true,
+      "analystHistoryReadMode": "shadow-preferred"
+    }
+  },
+  "httpBenchmarks": {
+    "homeWarmRevenueMixConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "responseBytes": 2521,
+      "totalErrorCount": 0,
+      "medianThroughputPerSecond": 433.868,
+      "medianP50Ms": 17.68,
+      "medianP95Ms": 46.934,
+      "medianP99Ms": 52.983,
+      "medianMAXMs": 57.968
+    },
+    "interpretation": "the internal parity endpoint uses cached semantic evidence but intentionally reevaluates the pure domain selection policy on each request"
+  },
+  "resources": {
+    "springIdle10Samples": {
+      "samples": 10,
+      "memoryMedianMiB": 374.7,
+      "memoryMinMiB": 374.7,
+      "memoryMaxMiB": 374.7,
+      "cpuMedianPct": 0.065,
+      "cpuMaxPct": 0.13,
+      "pidsMedian": 36.0,
+      "pidsMax": 36
+    },
+    "nodeSameWindow10Samples": {
+      "samples": 10,
+      "memoryMedianMiB": 148.2,
+      "memoryMinMiB": 148.2,
+      "memoryMaxMiB": 149.2,
+      "cpuMedianPct": 0.685,
+      "cpuMaxPct": 1.46,
+      "pidsMedian": 11.0,
+      "pidsMax": 11
+    },
+    "warning": "Node serves production traffic and schedulers while Spring serves migration shadow requests only; these are not final language-runtime comparison numbers."
+  },
+  "springJvmFinal": {
+    "heapUsedBytes": 206562440.0,
+    "heapCommittedBytes": 213438464.0,
+    "gcPauseCount": 48.0,
+    "gcPauseTotalSeconds": 0.273,
+    "gcPauseMaxSeconds": 0.009
+  },
+  "runtime": {
+    "springReadiness": "UP",
+    "springLiveness": "UP",
+    "springDockerHealth": "healthy",
+    "nodeHealth": "ok",
+    "clientHttpStatus": 200,
+    "springBootReportedStartedSeconds": 3.012,
+    "springWarningCount": 0,
+    "springErrorCount": 0,
+    "springExceptionCount": 0,
+    "springRestartCount": 0,
+    "nodeRestartCount": 0,
+    "clientRestartCount": 0,
+    "springImageId": "sha256:8d9609e906f416579b3cfcdad99e3752ac949955e515a2df7c4f037b7d23525b"
+  },
+  "disk": {
+    "springImageBytes": 253435848,
+    "previousGuidanceMilestoneImageBytes": 253366834,
+    "imageIncreaseBytes": 69014,
+    "containerWritableLayerBytes": 32768,
+    "sourceCacheMountReadOnly": true
+  },
+  "rollback": {
+    "preRevenueMixImageTag": "macrosquare-server-spring:rollback-company-revenue-mix-pre",
+    "preRevenueMixImageId": "sha256:f3998bd6b95bcc3440c47b312ac0ac000da066f844aecf60a48f9ef28e350ade",
+    "nodeAndClientWereNotRecreated": true,
+    "configurationRollbackModes": [
+      "dual-compare",
+      "legacy"
+    ]
+  },
+  "evidenceArtifacts": [
+    "migration/benchmark-results/company-revenue-mix-parity/local-12-initial.json",
+    "migration/benchmark-results/company-revenue-mix-parity/local-12-final.json",
+    "migration/benchmark-results/company-revenue-mix-parity/home-12-final.json",
+    "migration/benchmark-results/company-revenue-mix-parity/home-price-48.json",
+    "migration/benchmark-results/company-revenue-mix-parity/home-research-48.json",
+    "migration/benchmark-results/company-revenue-mix-parity/home-submissions-48.json",
+    "migration/benchmark-results/company-revenue-mix-parity/home-public-regression-8.json",
+    "migration/benchmark-results/company-revenue-mix-parity/warm-concurrent-summary.json",
+    "migration/benchmark-results/company-revenue-mix-parity/home-resources-final-summary.json",
+    "migration/benchmark-results/company-revenue-mix-parity/runtime-home.txt"
+  ],
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "internalActualRevenueMixShadowAllowed": true,
+    "reason": "direct filing-derived actual values and percentages passed, but public fallback/orchestration, persistence, schedulers, score integration, and notification side effects still belong to Node."
+  }
+}

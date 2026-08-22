@@ -2,25 +2,37 @@
   "name": "client",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev --webpack -p 5847",
     "build": "next build --webpack",
     "start": "next start -p 5847",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "test:server-api": "node --experimental-strip-types --test tests/server-api.test.mjs",
+    "test:rum": "node --experimental-strip-types --test tests/rum.test.mjs"
   },
   "dependencies": {
-    "next": "16.2.3",
+    "next": "16.3.0",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
+    "@tailwindcss/postcss": "4.3.3",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.3",
-    "tailwindcss": "^4",
+    "eslint-config-next": "16.3.0",
+    "picomatch": "4.0.5",
+    "tailwindcss": "4.3.3",
     "typescript": "^5"
+  },
+  "optionalDependencies": {
+    "@tailwindcss/oxide-linux-x64-gnu": "4.2.2",
+    "lightningcss-linux-x64-gnu": "1.32.0"
+  },
+  "overrides": {
+    "postcss": "8.5.26"
   }
 }

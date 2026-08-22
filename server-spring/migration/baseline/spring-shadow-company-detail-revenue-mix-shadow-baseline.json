@@ -1,0 +1,310 @@
+{
+  "capturedAt": "2026-07-20T12:54:37.590906+00:00",
+  "milestone": "spring-shadow-company-detail-revenue-mix-shadow",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "clientContainer": "macrosquare-client",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25 / Spring Boot 4.1.0 / Tomcat 11.0.22 / Apache PDFBox 3.0.8",
+    "nodePort": 5846,
+    "clientPort": 5847,
+    "springShadowPort": 5856,
+    "springMemoryLimit": "1GiB"
+  },
+  "scope": {
+    "implemented": "actual-first, per-axis and snapshot-consistent company detail revenue-mix shadow composition without changing the public serving path",
+    "internalEndpoint": "/internal/v1/migration/company-detail-revenue-mix-shadow/{ticker}",
+    "publicEndpoint": "/api/company/{ticker}",
+    "publicEndpointMode": "legacy-unchanged",
+    "modifiedServingFields": [
+      "financials.segmentGeoMixNote",
+      "financials.segmentMix",
+      "financials.geoMix"
+    ],
+    "sourcePrecedence": [
+      "direct-sec-actual",
+      "legacy-fallback",
+      "unavailable"
+    ],
+    "rules": [
+      "direct actual values replace only the matching axis",
+      "a missing direct axis preserves legacy values, nulls and order exactly",
+      "an axis absent from both sources stays unavailable and empty; no representative value is invented",
+      "when no direct actual exists the immutable serving projection itself is reused",
+      "source metadata remains internal and never enters the public company contract",
+      "legacy fallback must equal the serving axis exactly; unavailable requires both serving and shadow axes to be empty",
+      "shadow cutover readiness fails closed when company detail and direct parity observed different legacy refresh snapshots"
+    ],
+    "semanticRegressionFix": {
+      "ticker": "WMT",
+      "problem": "branded business segments containing US/International were reclassified as geography by substring matching",
+      "fix": "label-based geography reclassification now requires a whole pure-geography label",
+      "verifiedSegment": [
+        "Walmart US",
+        "Walmart International",
+        "Sams Club US"
+      ],
+      "verifiedGeography": [
+        "United States",
+        "Non-U.S."
+      ]
+    },
+    "architecture": {
+      "domain": "framework-free actual revenue semantics and conservative pure-geography classification",
+      "application": "transport-neutral immutable composition and readiness policy",
+      "outboundAdapters": "existing bounded SEC/legacy read ports only",
+      "inboundAdapter": "internal shadow DTO with provenance; no full company document or raw filing markup",
+      "forbiddenOutsideAdapters": [
+        "Spring",
+        "HTTP client",
+        "Jackson",
+        "PDFBox",
+        "SEC response types",
+        "cache implementation"
+      ]
+    },
+    "productionTrafficCutover": false,
+    "productionSideEffectsAdded": false,
+    "comparableForFinalRuntimeDecision": false,
+    "remainingInNode": [
+      "public company detail serving and route-cache ownership",
+      "representative fallback mappings for non-disclosing filers",
+      "production company orchestration, score integration, schedulers and Telegram notifications"
+    ]
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 251,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "domain": 61,
+      "application": 56,
+      "adapters": 119,
+      "bootstrap": 11,
+      "architecture": 4
+    },
+    "localShadow": {
+      "tickers": 12,
+      "passed": 12,
+      "contractCompatible": 12,
+      "servingSnapshotMatched": 12,
+      "shadowServeReady": 12,
+      "directMigrationReady": 12,
+      "segmentActual": 12,
+      "geographyActual": 11,
+      "durationMs": {
+        "total": 9036.452,
+        "median": 624.201,
+        "max": 1788.072
+      },
+      "allPassed": true
+    },
+    "localFallbackProof": {
+      "tickers": [
+        {
+          "ticker": "WMT",
+          "segmentSource": "direct-sec-actual",
+          "geographySource": "direct-sec-actual",
+          "servingSnapshotMatched": true
+        },
+        {
+          "ticker": "UNH",
+          "segmentSource": "direct-sec-actual",
+          "geographySource": "legacy-fallback",
+          "servingSnapshotMatched": true
+        }
+      ],
+      "servingSnapshotMatched": 2,
+      "fallbackUsedCount": 1,
+      "allPassed": true
+    },
+    "homeShadow": {
+      "tickers": 12,
+      "passed": 12,
+      "contractCompatible": 12,
+      "servingSnapshotMatched": 12,
+      "shadowServeReady": 12,
+      "directMigrationReady": 12,
+      "segmentActual": 12,
+      "geographyActual": 11,
+      "durationMs": {
+        "total": 8182.852,
+        "median": 612.268,
+        "max": 1307.591
+      },
+      "allPassed": true
+    },
+    "homeFallbackProof": {
+      "tickers": [
+        {
+          "ticker": "WMT",
+          "segmentSource": "direct-sec-actual",
+          "geographySource": "direct-sec-actual",
+          "servingSnapshotMatched": true
+        },
+        {
+          "ticker": "UNH",
+          "segmentSource": "direct-sec-actual",
+          "geographySource": "legacy-fallback",
+          "servingSnapshotMatched": true
+        }
+      ],
+      "servingSnapshotMatched": 2,
+      "fallbackUsedCount": 1,
+      "allPassed": true
+    },
+    "publicCompanyByteParity": {
+      "local": {
+        "tickers": 8,
+        "byteExact": 8,
+        "allByteExact": true
+      },
+      "home": {
+        "tickers": 8,
+        "byteExact": 8,
+        "allByteExact": true
+      }
+    },
+    "homeRegressions": {
+      "directRevenueMix": {
+        "tickers": 12,
+        "migrationReady": 12,
+        "allMigrationReady": true
+      },
+      "companyResearch": {
+        "tickers": 48,
+        "matched": 48,
+        "allMatched": true
+      },
+      "priceSignal": {
+        "tickers": 48,
+        "matched": 48,
+        "allMatched": true
+      }
+    }
+  },
+  "performance": {
+    "localWarmNvda": {
+      "requests": 200,
+      "concurrency": 10,
+      "elapsedSeconds": 0.27,
+      "throughputPerSecond": 740.026,
+      "latencyMs": {
+        "min": 4.53,
+        "p50": 9.782,
+        "p95": 40.341,
+        "p99": 56.529,
+        "max": 62.337
+      },
+      "errorCount": 0,
+      "responseBytes": [
+        2097
+      ]
+    },
+    "homeIdleResources": {
+      "spring": {
+        "samples": 10,
+        "cpuPercentMedian": 0.05,
+        "memoryMiBMedian": 370.05,
+        "pidsMedian": 42.0
+      },
+      "node": {
+        "samples": 10,
+        "cpuPercentMedian": 0.655,
+        "memoryMiBMedian": 142.8,
+        "pidsMedian": 11.0
+      },
+      "jvmMemoryUsedBytes": 284125880.0,
+      "jvmMemoryCommittedBytes": 302624768.0,
+      "gcPause": {
+        "count": 62.0,
+        "totalSeconds": 0.293,
+        "maxSeconds": 0.016
+      }
+    },
+    "image": {
+      "previousBytes": 253435848,
+      "currentBytes": 253459076,
+      "deltaBytes": 23228
+    },
+    "homeLanWarmNvda": {
+      "requests": 200,
+      "concurrency": 10,
+      "elapsedSeconds": 0.349,
+      "throughputPerSecond": 573.759,
+      "latencyMs": {
+        "min": 9.546,
+        "p50": 15.016,
+        "p95": 23.865,
+        "p99": 50.344,
+        "max": 50.992
+      },
+      "errorCount": 0,
+      "responseBytes": [
+        2097
+      ]
+    }
+  },
+  "deployment": {
+    "strategy": "Spring shadow service only; --no-deps --force-recreate; no orphan removal",
+    "node": {
+      "beforeId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+      "afterId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+      "restartCount": 0
+    },
+    "client": {
+      "beforeId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+      "afterId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+      "restartCount": 0
+    },
+    "spring": {
+      "beforeId": "7aaebbb5bdba89ecf9c94b509e38445bfea979baffc7374bc9384460f34da2a9",
+      "intermediateId": "d537985b9b39d0211b2f42a1f2808e05b396f9816afa592c7c1ea4604b558a4a",
+      "afterId": "14ca9f7c947191b84faa36bc2412dfaa4442784fd9af56db3d038382454146ab",
+      "restartCount": 0,
+      "image": "sha256:f0120d787381fd38db42b9c0a289bbfffead3dc2f012165f906d4c11753fd872"
+    },
+    "rollback": {
+      "tag": "macrosquare-server-spring:rollback-company-detail-revenue-mix-shadow-pre",
+      "image": "sha256:8d9609e906f416579b3cfcdad99e3752ac949955e515a2df7c4f037b7d23525b"
+    },
+    "health": {
+      "readiness": "UP",
+      "liveness": "UP",
+      "clientHttpStatus": 200,
+      "nodeHttpStatus": 200,
+      "springHttpStatus": 200
+    },
+    "logs": {
+      "warn": 0,
+      "error": 0,
+      "exception": 0
+    },
+    "legacySourceCacheMountReadOnly": true,
+    "analystHistoryStartup": {
+      "attempted": 7,
+      "written": 7,
+      "seeded": 0
+    }
+  },
+  "artifacts": [
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/home-company-research-48-regression-final.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/home-direct-revenue-mix-regression-final.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/home-fallback-proof-final.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/home-live-final.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/home-price-signal-regression-final.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/home-public-byte-parity-final.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/home-resource-samples-final.csv",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/home-resource-summary-final.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/home-jvm-memory-used-final.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/home-jvm-memory-committed-final.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/home-jvm-gc-pause-final.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/home-warm-benchmark-final.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/local-fallback-proof-after-final-guard.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/local-live-after-final-guard.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/local-public-byte-parity-after-final-guard.json",
+    "migration/benchmark-results/company-detail-revenue-mix-shadow/local-warm-benchmark-after-final-guard.json"
+  ]
+}

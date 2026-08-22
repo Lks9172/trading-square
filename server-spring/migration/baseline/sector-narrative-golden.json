@@ -1,0 +1,50 @@
+{
+  "source": "server/src/__tests__/migration-sector-narrative-golden.test.ts",
+  "capturedAt": "2026-07-19",
+  "fixture": {
+    "macroRegime": "RISK_ON",
+    "liquidityDirection": 2,
+    "realYield": 1.2,
+    "yieldCurve10y2y": 0.6,
+    "wti": 68,
+    "dollarIndex": 100,
+    "externalSignal": {
+      "key": "YOUTUBE_30D",
+      "value": 600,
+      "score": 9
+    }
+  },
+  "expectedNarratives": {
+    "ai-power": "OVERHEATED:85",
+    "grid-capex": "OVERHEATED:80",
+    "defense-rearm": "OVERHEATED:76",
+    "finance-liquidity": "OVERHEATED:68",
+    "energy-supply": "OVERHEATED:70",
+    "digital-attention": "OVERHEATED:78",
+    "consumer-demand": "OVERHEATED:68",
+    "consumer-defensive": "OVERHEATED:68",
+    "materials-reflation": "MID:65",
+    "real-assets-rate": "OVERHEATED:73",
+    "safehaven-gold": "OVERHEATED:85"
+  },
+  "expectedRotation": {
+    "regime": "EARLY_CYCLICAL",
+    "confidence": 50,
+    "regimeScores": {
+      "EARLY_CYCLICAL": 100,
+      "MID_GROWTH": 75,
+      "LATE_INFLATION": 0,
+      "DEFENSIVE": 1,
+      "RE_ACCELERATION": 100
+    },
+    "rankedSectors": [
+      "SECTOR_XLK:80:LEADING:now",
+      "SECTOR_XLI:76:LEADING:1_3m",
+      "SECTOR_XLF:73:IMPROVING:1_3m",
+      "SECTOR_XLRE:66:IMPROVING:3_6m",
+      "SECTOR_XLE:65:WEAKENING:unclear",
+      "SECTOR_XLU:44:LAGGING:unclear"
+    ]
+  },
+  "compatibilityNote": "LEGACY_REFERENCE_ONLY: captured Node output used the incorrect oil-supply lookup; Spring production now uses energy-supply."
+}

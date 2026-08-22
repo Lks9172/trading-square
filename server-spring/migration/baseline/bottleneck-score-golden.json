@@ -1,0 +1,40 @@
+{
+  "source": "server/src/__tests__/bottleneck-score.test.ts evaluated by current Node build",
+  "input": {
+    "ticker": "TEST",
+    "company": "Test Co",
+    "role": "EDA 소프트웨어",
+    "theme": "EDA",
+    "tags": ["eda", "qualification"],
+    "priors": {
+      "concentration": 9,
+      "supplyTightness": 7,
+      "capexLinkage": 8,
+      "switchingCost": 9
+    },
+    "totalScore": 78,
+    "revenueGrowthYoY": 24,
+    "operatingMargin": 22,
+    "evToSales": 5,
+    "summary": "Supply constrained backlog improved with design win and installed base expansion. Long lead times and pricing power remain strong."
+  },
+  "expected": {
+    "score": 87,
+    "conviction": "CORE",
+    "componentScores": {
+      "textSignal": 10,
+      "quality": 8,
+      "concentration": 9,
+      "supplyTightness": 7,
+      "capexLinkage": 8,
+      "switchingCost": 10
+    },
+    "topTextMatchLabels": [
+      "lead-time",
+      "qualification-lockin",
+      "supply-constraint",
+      "backlog",
+      "pricing-power"
+    ]
+  }
+}

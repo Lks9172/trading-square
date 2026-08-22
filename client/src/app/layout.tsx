@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
 import "./globals.css";
+import { SmartLink } from "@/components/SmartLink";
+import { WebVitalsReporter } from "@/components/WebVitalsReporter";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,11 +30,12 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-[#0a0a0a] text-[#ededed]">
+        <WebVitalsReporter />
         <nav className="border-b border-slate-800 bg-slate-950/70 backdrop-blur sticky top-0 z-10">
           <div className="max-w-7xl mx-auto px-4 py-2 flex items-center gap-4 text-sm">
-            <Link href="/" className="font-semibold text-cyan-300 hover:text-cyan-200">📊 Dashboard</Link>
-            <Link href="/plan" className="text-slate-300 hover:text-slate-100">🧭 My Plan</Link>
-            <Link href="/research" className="text-slate-300 hover:text-slate-100">🔎 Research</Link>
+            <SmartLink href="/" className="font-semibold text-cyan-300 cursor-pointer hover:text-cyan-200">📊 Dashboard</SmartLink>
+            <SmartLink href="/plan" className="text-slate-300 hover:text-slate-100">🧭 My Plan</SmartLink>
+            <SmartLink href="/research" className="text-slate-300 hover:text-slate-100">🔎 Research</SmartLink>
           </div>
         </nav>
         {children}

@@ -1,0 +1,15 @@
+flowchart TD
+    CH["변경"] --> SC["scope 판별"]
+    SC -->|"docs/scripts"| LIGHT["검증·동기화"]
+    SC -->|"server/client"| STD["standard tier"]
+    SC -->|"DB/compose"| REL["release tier"]
+    STD --> B["production build"]
+    REL --> I["backup + PostgreSQL integration"]
+    I --> B
+    B --> C["server cutover"]
+    C --> R{"readiness"}
+    R -->|"UP"| V["43 smoke + full verify"]
+    R -->|"fail"| RB["rollback"]
+    V --> O{"all pass"}
+    O -->|"yes"| D["done"]
+    O -->|"no"| RB

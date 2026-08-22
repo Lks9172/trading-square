@@ -1,0 +1,275 @@
+{
+  "capturedAt": "2026-07-20T13:18:06.877462+00:00",
+  "milestone": "spring-shadow-java21-runtime",
+  "decision": {
+    "selectedRuntime": "Java 21 LTS + Spring Boot 4.1.0",
+    "reason": "enterprise-balanced LTS runtime while retaining the current Spring generation and all response information",
+    "springBootChanged": false,
+    "businessLogicChanged": false,
+    "publicContractChanged": false,
+    "productionTrafficCutover": false,
+    "comparableForFinalRuntimeDecision": false
+  },
+  "runtime": {
+    "builder": "Eclipse Temurin 21.0.9 / Maven 3.9.11",
+    "container": "Eclipse Temurin 21.0.11 LTS",
+    "springBoot": "4.1.0",
+    "tomcat": "11.0.22",
+    "bytecodeMajorVersion": 65,
+    "mavenRelease": 21,
+    "dockerBuilder": "maven:3.9.11-eclipse-temurin-21",
+    "dockerRunner": "eclipse-temurin:21-jre-alpine"
+  },
+  "architecture": {
+    "domain": "unchanged and framework-free",
+    "application": "unchanged and transport-neutral",
+    "adapters": "unchanged transport and persistence boundaries",
+    "bootstrap": "runtime metadata only",
+    "cleanArchitectureTestsPassed": true
+  },
+  "verification": {
+    "java21ContainerTests": {
+      "total": 251,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "domain": 61,
+      "application": 56,
+      "adapters": 119,
+      "bootstrap": 11,
+      "architecture": 4
+    },
+    "companyDetailRevenueMixShadow": {
+      "tickers": 12,
+      "passed": 12,
+      "servingSnapshotMatched": 12,
+      "shadowServeReady": 12,
+      "allPassed": true,
+      "durationMs": {
+        "total": 11687.753,
+        "median": 1022.909,
+        "max": 1643.415
+      }
+    },
+    "fallbackProof": {
+      "tickers": 2,
+      "passed": 2,
+      "fallbackUsed": 1,
+      "allPassed": true
+    },
+    "directRevenueMix": {
+      "tickers": 12,
+      "migrationReady": 12,
+      "allMigrationReady": true
+    },
+    "companyResearch": {
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true
+    },
+    "priceSignal": {
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true
+    },
+    "publicCompanyByteParity": {
+      "tickers": 8,
+      "byteExact": 8,
+      "allByteExact": true
+    }
+  },
+  "performance": {
+    "image": {
+      "java25Bytes": 253459076,
+      "java21Bytes": 235553993,
+      "deltaBytes": -17905083,
+      "changePercent": -7.06
+    },
+    "isolatedWarmResources": {
+      "java25": {
+        "samples": 10,
+        "cpuPercentMedian": 0.07,
+        "memoryMiBMedian": 376.9,
+        "pidsMedian": 42.0
+      },
+      "java21": {
+        "samples": 10,
+        "cpuPercentMedian": 0.14,
+        "memoryMiBMedian": 301.0,
+        "pidsMedian": 37.0
+      },
+      "memoryDeltaMiB": -75.9,
+      "memoryChangePercent": -20.14
+    },
+    "controlledLoopbackSideBySide": {
+      "method": "home-server loopback side-by-side; alternating order; 5 runs; 500 requests; concurrency 10",
+      "endpoints": {
+        "company-detail": {
+          "java25": {
+            "runs": 5,
+            "requestsPerRun": 500,
+            "concurrency": 10,
+            "throughputPerSecondMedian": 1187.714,
+            "latencyMsMedian": {
+              "p50": 5.27,
+              "p95": 9.44,
+              "p99": 152.351
+            },
+            "errorCount": 0,
+            "responseBytes": [
+              30664
+            ]
+          },
+          "java21": {
+            "runs": 5,
+            "requestsPerRun": 500,
+            "concurrency": 10,
+            "throughputPerSecondMedian": 1211.626,
+            "latencyMsMedian": {
+              "p50": 4.814,
+              "p95": 8.307,
+              "p99": 154.081
+            },
+            "errorCount": 0,
+            "responseBytes": [
+              30664
+            ]
+          },
+          "java21VsJava25": {
+            "throughputPercent": 2.01,
+            "latencyReductionPercent": {
+              "p50": 8.65,
+              "p95": 12.0,
+              "p99": -1.14
+            }
+          }
+        },
+        "revenue-mix-shadow": {
+          "java25": {
+            "runs": 5,
+            "requestsPerRun": 500,
+            "concurrency": 10,
+            "throughputPerSecondMedian": 1059.363,
+            "latencyMsMedian": {
+              "p50": 5.983,
+              "p95": 10.688,
+              "p99": 153.704
+            },
+            "errorCount": 0,
+            "responseBytes": [
+              2097
+            ]
+          },
+          "java21": {
+            "runs": 5,
+            "requestsPerRun": 500,
+            "concurrency": 10,
+            "throughputPerSecondMedian": 1158.607,
+            "latencyMsMedian": {
+              "p50": 5.374,
+              "p95": 9.564,
+              "p99": 149.089
+            },
+            "errorCount": 0,
+            "responseBytes": [
+              2097
+            ]
+          },
+          "java21VsJava25": {
+            "throughputPercent": 9.37,
+            "latencyReductionPercent": {
+              "p50": 10.18,
+              "p95": 10.52,
+              "p99": 3.0
+            }
+          }
+        }
+      }
+    },
+    "observedJvmAfterValidation": {
+      "java25": {
+        "usedBytes": 280118344.0,
+        "committedBytes": 308084736.0,
+        "gcPause": {
+          "count": 66.0,
+          "totalSeconds": 0.308,
+          "maxSeconds": 0.005
+        }
+      },
+      "java21": {
+        "usedBytes": 206124840.0,
+        "committedBytes": 246542336.0,
+        "gcPause": {
+          "count": 120.0,
+          "totalSeconds": 0.603,
+          "maxSeconds": 0.007
+        }
+      },
+      "strictlyComparable": false,
+      "reason": "runtime snapshots were collected after different cumulative validation windows; use controlled loopback and isolated RSS for the runtime comparison"
+    },
+    "interpretation": [
+      "Java 21 reduced image bytes by 7.06% and isolated warm RSS by 20.14%",
+      "controlled five-run loopback medians showed no throughput or p50/p95 regression",
+      "idle CPU absolute delta is 0.07 percentage point and is not used for runtime ranking",
+      "final Node-versus-Java decision remains deferred until full production workload cutover and a 24-hour sample"
+    ]
+  },
+  "deployment": {
+    "strategy": "Spring shadow only; --no-deps --force-recreate; no orphan removal",
+    "node": {
+      "beforeId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+      "afterId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+      "restartCount": 0
+    },
+    "client": {
+      "beforeId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+      "afterId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+      "restartCount": 0
+    },
+    "spring": {
+      "beforeId": "14ca9f7c947191b84faa36bc2412dfaa4442784fd9af56db3d038382454146ab",
+      "afterId": "6cc081303ed50b8da5d360d7987c59e1896d7ecfdfb2c95e0033b0ec49fbc941",
+      "beforeImage": "sha256:f0120d787381fd38db42b9c0a289bbfffead3dc2f012165f906d4c11753fd872",
+      "afterImage": "sha256:0808e4f430747f04508574030ca3c2a7b492998a7e27e5ea6719cf1e89496080",
+      "restartCount": 0
+    },
+    "rollback": {
+      "tag": "macrosquare-server-spring:rollback-java25-spring-boot-4.1-pre-java21",
+      "image": "sha256:f0120d787381fd38db42b9c0a289bbfffead3dc2f012165f906d4c11753fd872"
+    },
+    "health": {
+      "readiness": "UP",
+      "liveness": "UP",
+      "clientHttpStatus": 200,
+      "nodeHttpStatus": 200,
+      "springHttpStatus": 200
+    },
+    "logs": {
+      "warn": 0,
+      "error": 0,
+      "exception": 0
+    },
+    "legacySourceCacheMountReadOnly": true,
+    "temporaryJava25ComparisonContainerRemoved": true,
+    "analystHistoryStartup": {
+      "attempted": 7,
+      "written": 7,
+      "seeded": 0
+    }
+  },
+  "artifacts": [
+    "migration/benchmark-results/java21-runtime/comparison-summary.json",
+    "migration/benchmark-results/java21-runtime/loopback/comparison-summary.json",
+    "migration/benchmark-results/java21-runtime/java21-docker-clean-verify.log",
+    "migration/benchmark-results/java21-runtime/java21-company-detail-revenue-mix-live.json",
+    "migration/benchmark-results/java21-runtime/java21-company-detail-revenue-mix-fallback.json",
+    "migration/benchmark-results/java21-runtime/java21-direct-revenue-mix-regression.json",
+    "migration/benchmark-results/java21-runtime/java21-company-research-48-regression.json",
+    "migration/benchmark-results/java21-runtime/java21-price-signal-48-regression.json",
+    "migration/benchmark-results/java21-runtime/java21-public-company-byte-parity.json",
+    "migration/benchmark-results/java21-runtime/java25-resource-summary.json",
+    "migration/benchmark-results/java21-runtime/java21-resource-summary.json",
+    "migration/benchmark-results/java21-runtime/loopback/"
+  ]
+}

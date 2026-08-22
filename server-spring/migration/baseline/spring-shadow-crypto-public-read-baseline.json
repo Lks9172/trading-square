@@ -1,0 +1,301 @@
+{
+  "capturedAt": "2026-07-19T10:03:31Z",
+  "milestone": "spring-shadow-crypto-public-read",
+  "environment": {
+    "host": "home-server",
+    "lanClient": "Mac on same LAN",
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25.0.3 LTS / Spring Boot 4.1.0 / Tomcat 11.0.22",
+    "nodePort": 5846,
+    "springShadowPort": 5856
+  },
+  "scope": {
+    "implementedPublicReads": [
+      "GET /api/research/crypto",
+      "GET /api/research/crypto/{symbol}"
+    ],
+    "behavior": [
+      "Spring owns the public routes, explicit response DTOs, query use case, symbol normalization, and transport-neutral full crypto projection",
+      "a temporary read-only anti-corruption adapter obtains the legacy calculated projection for BTC, ETH, SOL, XRP, and BNB",
+      "market regime, profile, market, macro, narrative, bottom-up, moat, supply, on-chain, flows, trend charts, buy score, bottom signal, sizing, verdict, scenarios, and execution bridge fields are preserved",
+      "successful catalog and detail projections are fresh for five minutes; a bounded 30-minute stale value is returned immediately while one background refresh per key runs on a virtual thread",
+      "the first cold miss and values older than the 30-minute stale ceiling use a blocking single-flight refresh rather than serving stale indefinitely",
+      "404, malformed, and unavailable upstream responses are not cached; without a usable stale success, malformed or unavailable responses fail closed with HTTP 502",
+      "an inbound serialized-payload cache reuses JSON bytes only while the immutable application projection identity is unchanged",
+      "JSON responses of at least 1KB use gzip only when the client negotiates it; identity responses stay byte-exact and gzip responses decode to the same bytes",
+      "Spring introduces no local collector, persistence, scheduler, or Telegram side effect; the upstream Node GET can retain its existing route-cache refresh"
+    ],
+    "remainingInNode": [
+      "crypto market and macro input collection",
+      "crypto score, bottom, reversal, sizing, scenario, and market-regime calculation ownership",
+      "snapshot assembly and source-cache persistence",
+      "company and macro collectors, schedulers, notifications, and Telegram"
+    ],
+    "comparableForFinalDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 58,
+      "failures": 0,
+      "domain": 19,
+      "application": 9,
+      "adapters": 24,
+      "bootstrap": 2,
+      "architecture": 4
+    },
+    "liveContractParity": {
+      "cryptoCases": 8,
+      "cryptoStatusMatches": 8,
+      "cryptoObjectMatches": 8,
+      "cryptoByteMatches": 8,
+      "uppercaseDetailCases": 5,
+      "lowercaseNormalizationCases": 1,
+      "notFoundCases": 1,
+      "catalogResponseBytes": 134992,
+      "detailResponseBytes": {
+        "BTC": 25770,
+        "ETH": 26928,
+        "SOL": 27438,
+        "XRP": 26926,
+        "BNB": 26923
+      },
+      "unknownSymbolBody": {
+        "error": "crypto symbol not found: NOTREAL"
+      },
+      "existingResearchRegressionCases": 5,
+      "existingResearchRegressionMatches": 5,
+      "internalNarrativesMatched": "11/11",
+      "rotationMatched": true,
+      "springReadiness": "UP",
+      "springLogWarningCount": 0,
+      "springLogErrorOrExceptionCount": 0,
+      "springRestartCount": 0,
+      "nodeRestartCount": 0,
+      "clientRestartCount": 0,
+      "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+      "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+      "springContainerId": "1548b3eea15995056f60e76f59da7597a5db47c2022b8080c1e777b8bb3fd731",
+      "springContainerStartedAt": "2026-07-19T09:50:30.679558324Z"
+    }
+  },
+  "optimization": {
+    "initialFinding": {
+      "catalogPayloadBytes": 134966,
+      "symptom": "catalog throughput and p50 were equal to Node but repeated LAN p95 and p99 were worse",
+      "preOptimizationSixRunMedian": {
+        "node": {
+          "throughputPerSecond": 77.906,
+          "p50Ms": 123.745,
+          "p95Ms": 163.236,
+          "p99Ms": 234.224
+        },
+        "spring": {
+          "throughputPerSecond": 76.59,
+          "p50Ms": 120.113,
+          "p95Ms": 207.797,
+          "p99Ms": 303.982
+        }
+      },
+      "jvmObservation": {
+        "allocatedBytesAfterLoad": 233832448,
+        "gcPauseCount": 8,
+        "gcPauseTotalSeconds": 0.082,
+        "gcPauseMaxSeconds": 0.032
+      }
+    },
+    "changes": [
+      "reuse the encoded byte array while the five-minute application projection instance is unchanged",
+      "retain application/outbound cache ownership of freshness and replace encoded bytes on projection refresh",
+      "serve a previously successful projection for at most 30 minutes while a single virtual-thread refresh prevents the legacy collector cycle from blocking a user request",
+      "enable Spring Boot server compression for application/json responses of at least 1KB",
+      "extend the dependency-free benchmark tool with an explicit gzip Accept-Encoding option"
+    ],
+    "diagnosis": "After serialization reuse, home-server loopback became substantially faster than Node while identity LAN new-connection p95 remained network-bound. Actuator request time and loopback measurements separate server processing from LAN transfer. Gzip then reduced browser-path wire bytes and all latency percentiles without removing fields or calculations.",
+    "liveStaleWhileRevalidate": {
+      "coldAfterDeployment": {
+        "catalogMs": 344.808,
+        "btcDetailMs": 26688.003,
+        "note": "No previous successful Spring projection existed, so the first BTC detail waited for the legacy refresh. Deployment validation now runs the read-only warm-up tool."
+      },
+      "afterFreshTtlExpired": {
+        "catalogResponseMs": 46.211,
+        "btcDetailResponseMs": 26.519,
+        "legacyCatalogRefreshApproxMs": 27626,
+        "postRefreshCatalogByteExact": true,
+        "postRefreshBtcByteExact": true,
+        "backgroundRefreshWarnings": 0
+      },
+      "staleCeilingMinutes": 30
+    }
+  },
+  "httpBenchmarks": {
+    "common": {
+      "method": "GET",
+      "mode": "warm successful cache",
+      "runs": 3,
+      "requestsPerRun": 200,
+      "concurrency": 10,
+      "totalErrorCount": 0
+    },
+    "identityLanNewConnection": {
+      "note": "Python urllib opens a new connection per request; use with loopback and gzip results rather than as an isolated application verdict.",
+      "catalog": {
+        "responseBytes": 134978,
+        "node": {
+          "medianThroughputPerSecond": 75.547,
+          "medianP50Ms": 123.555,
+          "medianP95Ms": 158.394,
+          "medianP99Ms": 256.175
+        },
+        "spring": {
+          "medianThroughputPerSecond": 75.287,
+          "medianP50Ms": 122.002,
+          "medianP95Ms": 242.151,
+          "medianP99Ms": 380.297
+        }
+      },
+      "btcDetail": {
+        "responseBytes": 25759,
+        "node": {
+          "medianThroughputPerSecond": 320.156,
+          "medianP50Ms": 24.908,
+          "medianP95Ms": 48.304,
+          "medianP99Ms": 138.331
+        },
+        "spring": {
+          "medianThroughputPerSecond": 304.666,
+          "medianP50Ms": 28.534,
+          "medianP95Ms": 59.415,
+          "medianP99Ms": 137.722
+        }
+      }
+    },
+    "homeServerLoopbackIdentity": {
+      "catalog": {
+        "responseBytes": 134978,
+        "node": {
+          "medianThroughputPerSecond": 181.477,
+          "medianP50Ms": 46.713,
+          "medianP95Ms": 59.426,
+          "medianP99Ms": 200.434
+        },
+        "spring": {
+          "medianThroughputPerSecond": 732.688,
+          "medianP50Ms": 5.722,
+          "medianP95Ms": 12.364,
+          "medianP99Ms": 171.603
+        }
+      },
+      "btcDetail": {
+        "responseBytes": 25759,
+        "node": {
+          "medianThroughputPerSecond": 391.447,
+          "medianP50Ms": 18.825,
+          "medianP95Ms": 23.941,
+          "medianP99Ms": 176.311
+        },
+        "spring": {
+          "medianThroughputPerSecond": 813.423,
+          "medianP50Ms": 4.551,
+          "medianP95Ms": 10.74,
+          "medianP99Ms": 165.585
+        }
+      }
+    },
+    "browserGzipLan": {
+      "catalog": {
+        "nodeWireBytes": 134959,
+        "springWireBytes": 26241,
+        "springWireReductionPct": 80.56,
+        "node": {
+          "medianThroughputPerSecond": 76.553,
+          "medianP50Ms": 123.677,
+          "medianP95Ms": 184.252,
+          "medianP99Ms": 249.495
+        },
+        "spring": {
+          "medianThroughputPerSecond": 312.933,
+          "medianP50Ms": 27.582,
+          "medianP95Ms": 45.798,
+          "medianP99Ms": 102.891
+        }
+      },
+      "btcDetail": {
+        "nodeWireBytes": 25775,
+        "springWireBytes": 7034,
+        "springWireReductionPct": 72.71,
+        "node": {
+          "medianThroughputPerSecond": 346.419,
+          "medianP50Ms": 24.757,
+          "medianP95Ms": 38.418,
+          "medianP99Ms": 77.911
+        },
+        "spring": {
+          "medianThroughputPerSecond": 532.942,
+          "medianP50Ms": 16.218,
+          "medianP95Ms": 23.958,
+          "medianP99Ms": 50.719
+        }
+      },
+      "decodedCatalogByteExact": true,
+      "decodedDetailByteExact": true
+    }
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.814,
+    "springProcessRunningSeconds": 3.329
+  },
+  "disk": {
+    "nodeImageBytes": 266577284,
+    "springImageBytes": 249134676,
+    "springImageDifferencePct": -6.54,
+    "applicationIoComparisonDeferred": true
+  },
+  "sameWindowIdle10SamplesAfterHttpWarmup": {
+    "node": {
+      "memoryMedianMiB": 149.5,
+      "memoryMinMiB": 149.5,
+      "memoryMaxMiB": 149.6,
+      "cpuMedianPct": 0.68,
+      "cpuMeanPct": 0.806,
+      "cpuMaxPct": 2.09,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 183.5,
+      "memoryMinMiB": 183.5,
+      "memoryMaxMiB": 183.5,
+      "cpuMedianPct": 0.04,
+      "cpuMeanPct": 0.048,
+      "cpuMaxPct": 0.11,
+      "pidCountMedian": 23
+    },
+    "warning": "Node serves the full production workload while Spring only serves a shadow read slice; these values are not a final runtime comparison."
+  },
+  "springJvmAfterHttpWarmup": {
+    "heapUsedBytes": 41650080,
+    "heapCommittedBytes": 105578496,
+    "nonHeapUsedBytes": 70678848,
+    "gcPauseCount": 2,
+    "gcPauseTotalSeconds": 0.02,
+    "gcPauseMaxSeconds": 0.0,
+    "allocatedBytes": 58458112,
+    "gcOverheadRatio": 0.0,
+    "liveJvmThreads": 16,
+    "peakJvmThreads": 21
+  },
+  "artifacts": [
+    "migration/benchmark-results/crypto-optimized/summary.json",
+    "migration/benchmark-results/crypto-optimized-home-local/summary.json",
+    "migration/benchmark-results/crypto-compressed-lan/summary.json",
+    "migration/benchmark-results/crypto-compressed-lan/contract-parity.json",
+    "migration/benchmark-results/crypto-compressed-lan/final-runtime-summary.json",
+    "migration/benchmark-results/crypto-compressed-lan/stale-refresh-live.json",
+    "migration/tools/warm_crypto_reads.py"
+  ],
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "reason": "The public Crypto read contracts and performance gates pass, but crypto calculations, collectors, persistence, schedulers, and notifications still belong to Node. Node remains the rollback path and production route."
+  }
+}

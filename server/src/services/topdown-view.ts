@@ -9,6 +9,8 @@ import {
 } from '../types/indicators';
 import { SectorDefinition, listSectorDefinitions } from '../engines/sector-classification';
 import { computeSectorQuality } from './sector-quality';
+import { NarrativeThemeState } from '../types/narrative';
+import { buildSectorRotationView } from './sector-rotation';
 
 const ASSET_LABELS: Record<string, string> = {
   NASDAQ: '나스닥',
@@ -77,6 +79,173 @@ function compactReasons(items: string[], limit = 2): string[] {
 
 function mergeReasons(category: ReasonCategory, ...groups: Array<string[] | undefined>): string[] {
   return rankReasons(groups.flat(), category);
+}
+
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function sectorReturnValue(derived: Record<string, DerivedIndicator>, key: string, suffix: string): number | null {
+  return derivedValue(derived, `${suffix}_${key.replace('SECTOR_', '')}`);
+}
+
+function computeSectorCompositeStrength(key: string, derived: Record<string, DerivedIndicator>): { short: number | null; medium: number | null } {
+  const short = derivedValue(derived, key);
+  const ret3m = sectorReturnValue(derived, key, 'SECTOR_RET_3M');
+  const ret6m = sectorReturnValue(derived, key, 'SECTOR_RET_6M');
+  const ret12m = sectorReturnValue(derived, key, 'SECTOR_RET_12M');
+  const weightedPairs: Array<[number | null, number]> = [
+    [short, 0.15],
+    [ret3m, 0.35],
+    [ret6m, 0.35],
+    [ret12m, 0.15],
+  ];
+  const weightSum = weightedPairs.reduce((sum, [value, weight]) => (typeof value === 'number' ? sum + weight : sum), 0);
+  const medium = weightSum > 0
+    ? weightedPairs.reduce((sum, [value, weight]) => (typeof value === 'number' ? sum + value * weight : sum), 0) / weightSum
+    : short;
+  return { short, medium };
+}
+
+function computeSectorEarningsRevisionProxy(
+  key: string,
+  derived: Record<string, DerivedIndicator>,
+  raw: Record<string, MarketDataPoint>,
+): number {
+  const analyst = derivedValue(derived, 'ANALYST_CONSENSUS_NASDAQ_MEGACAP');
+  const upside = derivedValue(derived, 'ANALYST_TARGET_UPSIDE_PCT');
+  const policyLift = derivedValue(derived, 'POLICY_SECTOR_LIFT_PCT') ?? 0;
+  const liquidity = derivedValue(derived, 'LIQUIDITY_DIRECTION') ?? 0;
+  const hyOasBp = derivedValue(derived, 'CREDIT_HY_OAS_BP');
+  const realYield = derivedValue(derived, 'REAL_YIELD');
+  const curve = rawValue(raw, 'T10Y2Y');
+  const wti = rawValue(raw, 'WTI');
+  const copperGoldUpturn = derivedValue(derived, 'COPPER_GOLD_RATIO_UPTURN') ?? 0;
+
+  const analystScore = analyst === null ? 50 : clamp(50 + analyst * 18, 10, 90);
+  const upsideScore = upside === null ? 50 : clamp(50 + upside * 1.6, 10, 90);
+  const creditScore = hyOasBp === null ? 50 : clamp(100 - ((hyOasBp - 300) / 5), 5, 95);
+  const rateTailwind = realYield === null ? 50 : clamp(75 - ((realYield - 1.6) * 28), 5, 95);
+  const curveScore = curve === null ? 50 : clamp(50 + curve * 55, 5, 95);
+  const energyScore = wti === null ? 50 : clamp(25 + ((wti - 60) * 1.2), 5, 95);
+  const industrialScore = clamp(50 + copperGoldUpturn * 18 + liquidity * 6, 5, 95);
+  const policyScore = clamp(50 + policyLift * 2.5, 5, 95);
+
+  if (['SECTOR_XLK', 'SECTOR_SOXX', 'SECTOR_SMH', 'SECTOR_XLC', 'SECTOR_XLY'].includes(key)) {
+    return Math.round(clamp(analystScore * 0.45 + upsideScore * 0.2 + rateTailwind * 0.15 + creditScore * 0.1 + policyScore * 0.1, 0, 100));
+  }
+  if (key === 'SECTOR_XLF') {
+    return Math.round(clamp(curveScore * 0.35 + creditScore * 0.25 + policyScore * 0.2 + analystScore * 0.2, 0, 100));
+  }
+  if (key === 'SECTOR_XLE') {
+    return Math.round(clamp(energyScore * 0.5 + creditScore * 0.2 + policyScore * 0.15 + industrialScore * 0.15, 0, 100));
+  }
+  if (['SECTOR_XLI', 'SECTOR_XLB', 'SECTOR_IGF', 'SECTOR_GRID', 'SECTOR_ITA'].includes(key)) {
+    return Math.round(clamp(industrialScore * 0.35 + creditScore * 0.2 + policyScore * 0.25 + curveScore * 0.2, 0, 100));
+  }
+  if (['SECTOR_XLU', 'SECTOR_XLP', 'SECTOR_XLV', 'SECTOR_XLRE'].includes(key)) {
+    return Math.round(clamp(rateTailwind * 0.35 + creditScore * 0.2 + policyScore * 0.15 + (100 - Math.max(0, liquidity) * 8) * 0.3, 0, 100));
+  }
+  return Math.round(clamp(analystScore * 0.2 + creditScore * 0.25 + policyScore * 0.2 + curveScore * 0.15 + rateTailwind * 0.2, 0, 100));
+}
+
+function computeSectorValuationScore(
+  key: string,
+  classification: SectorDefinition['classification'],
+  derived: Record<string, DerivedIndicator>,
+): number | null {
+  const forwardPe = derivedValue(derived, `SECTOR_FORWARD_PE_${key.replace('SECTOR_', '')}`);
+  const premiumPct = derivedValue(derived, `SECTOR_FORWARD_PE_PREMIUM_${key.replace('SECTOR_', '')}`);
+  if (forwardPe === null && premiumPct === null) return null;
+  const absoluteScore = forwardPe === null
+    ? 50
+    : classification === 'structural'
+      ? clamp(88 - forwardPe * 1.6, 10, 90)
+      : classification === 'cyclical'
+        ? clamp(94 - forwardPe * 2.4, 8, 92)
+        : clamp(92 - forwardPe * 2.1, 8, 92);
+  const relativeScore = premiumPct === null
+    ? 50
+    : classification === 'structural'
+      ? clamp(64 - premiumPct * 0.45, 10, 90)
+      : clamp(72 - premiumPct * 0.6, 10, 92);
+  return Math.round(clamp(absoluteScore * 0.45 + relativeScore * 0.55, 0, 100));
+}
+
+function computeSectorBuyMetrics(
+  item: SectorDefinition,
+  score: number | null,
+  quality: ReturnType<typeof computeSectorQuality>,
+  derived: Record<string, DerivedIndicator>,
+  narratives: NarrativeThemeState[] = [],
+): Pick<TopDownSectorView, 'appealScore' | 'crowdingScore' | 'buyScore' | 'buyLabel'> {
+  const momentumScore = score === null ? 45 : clamp(50 + score * 4, 10, 90);
+  const valuationScore = computeSectorValuationScore(item.key, item.classification, derived);
+  const appealScore = Math.round(clamp(
+    quality.totalScore * 0.58
+      + momentumScore * 0.24
+      + ((valuationScore ?? 50) * 0.18),
+    0,
+    100,
+  ));
+
+  let crowdingBase = 18;
+  if (score !== null) crowdingBase += clamp((score - 4) * 4.5, 0, 28);
+  if ((derivedValue(derived, 'OVERHEATED') ?? 0) === 1) crowdingBase += 14;
+  const aiNarrative = narratives.find((item) => item.theme.id === 'ai-power');
+  const gridNarrative = narratives.find((item) => item.theme.id === 'grid-capex');
+  const defenseNarrative = narratives.find((item) => item.theme.id === 'defense-rearm');
+  const goldNarrative = narratives.find((item) => item.theme.id === 'safehaven-gold');
+
+  if (['SECTOR_XLK', 'SECTOR_SOXX', 'SECTOR_SMH'].includes(item.key) && aiNarrative) {
+    crowdingBase += clamp((aiNarrative.heatScore - 45) * 0.4, 0, 22);
+  }
+  if (['SECTOR_GRID', 'SECTOR_IGF', 'SECTOR_XLU'].includes(item.key) && gridNarrative) {
+    crowdingBase += clamp((gridNarrative.heatScore - 48) * 0.25, 0, 12);
+  }
+  if (item.key === 'SECTOR_ITA' && defenseNarrative) {
+    crowdingBase += clamp((defenseNarrative.heatScore - 50) * 0.22, 0, 10);
+  }
+  if (['SECTOR_XLP', 'SECTOR_XLU'].includes(item.key) && goldNarrative?.stage === 'OVERHEATED') {
+    crowdingBase += 6;
+  }
+
+  const crowdingScore = Math.round(clamp(crowdingBase, 0, 100));
+  const buyScore = Math.round(clamp(appealScore * 0.68 + (100 - crowdingScore) * 0.32, 0, 100));
+  const buyLabel: TopDownSectorView['buyLabel'] = buyScore >= 68 ? '매수 우호' : buyScore >= 52 ? '선별 접근' : '추격 주의';
+  return { appealScore, crowdingScore, buyScore, buyLabel };
+}
+
+function buildNarrativeSummary(narratives: NarrativeThemeState[] = []): string[] {
+  return narratives
+    .slice()
+    .sort((a, b) => b.heatScore - a.heatScore)
+    .slice(0, 3)
+    .map((item) => {
+      const delta = typeof item.heatDelta7d === 'number' ? ` ${item.heatDelta7d >= 0 ? '+' : ''}${item.heatDelta7d}p/7D` : '';
+      const trend = item.trend && item.trend !== 'STABLE' ? ` ${item.trend}` : '';
+      return `${item.theme.title} ${item.stage} ${item.heatScore}점${delta}${trend}`;
+    });
+}
+
+function buildBottleneckSummary(favoredSectors: TopDownSectorView[]): string[] {
+  const summaries: string[] = [];
+  const byKey = new Map(favoredSectors.map((item) => [item.key, item]));
+  const push = (key: string, text: string) => {
+    const sector = byKey.get(key);
+    if (!sector || typeof sector.buyScore !== 'number') return;
+    summaries.push(`${text} · ${sector.label} B${sector.buyScore}`);
+  };
+
+  push('SECTOR_SOXX', '반도체 장비/EDA 병목 감시');
+  push('SECTOR_SMH', '대형 반도체 공급망 병목 감시');
+  push('SECTOR_GRID', '전력망·변압기 병목 감시');
+  push('SECTOR_IGF', '인프라 CAPEX 병목 감시');
+  push('SECTOR_XLU', '전력 수요/유틸리티 병목 감시');
+  push('SECTOR_ITA', '방산 부품 병목 감시');
+
+  return summaries.slice(0, 3);
 }
 
 function sectorStance(score: number | null, qualityScore: number): TopDownSectorView['stance'] {
@@ -160,6 +329,7 @@ function macroView(raw: Record<string, MarketDataPoint>, derived: Record<string,
 function buildSectorReasons(
   item: SectorDefinition,
   score: number | null,
+  shortTermScore: number | null,
   macro: TopDownView['macroView'],
   qualityScore: ReturnType<typeof computeSectorQuality>,
 ): string[] {
@@ -170,8 +340,12 @@ function buildSectorReasons(
   const geoNegative = macro.find((m) => m.key === 'geopolitics')?.stance === 'negative';
 
   if (score !== null) {
-    pushIf(reasons, score > 0, `20일 모멘텀이 우상향 (${score.toFixed(1)}%)`);
-    pushIf(reasons, score < 0, `20일 모멘텀이 부진 (${score.toFixed(1)}%)`);
+    pushIf(reasons, score > 0, `중기 상대강도가 우상향 (${score.toFixed(1)}%)`);
+    pushIf(reasons, score < 0, `중기 상대강도가 부진 (${score.toFixed(1)}%)`);
+  }
+  if (shortTermScore !== null) {
+    pushIf(reasons, shortTermScore >= 4, `단기 탄력도도 강함 (${shortTermScore.toFixed(1)}%)`);
+    pushIf(reasons, shortTermScore <= -4, `단기 탄력은 아직 약함 (${shortTermScore.toFixed(1)}%)`);
   }
   pushIf(reasons, item.classification === 'structural' && liquidityPositive, '구조 수혜 + 유동성 개선 조합');
   pushIf(reasons, item.classification === 'cyclical' && dollarPositive, '달러 약세 시 경기민감 자산 우호');
@@ -280,19 +454,28 @@ export function buildTopDownView(
   derived: Record<string, DerivedIndicator>,
   regime: RegimeState,
   signals: AssetSignal[],
+  narratives: NarrativeThemeState[] = [],
 ): TopDownView {
   const macro = macroView(raw, derived, regime);
   const sectorViews: TopDownSectorView[] = listSectorDefinitions().map((item) => {
-    const score = derivedValue(derived, item.key);
+    const { short: shortTermScore, medium: score } = computeSectorCompositeStrength(item.key, derived);
     const quality = computeSectorQuality(item, raw, derived, regime);
     const stance = sectorStance(score, quality.totalScore);
+    const buyMetrics = computeSectorBuyMetrics(item, score, quality, derived, narratives);
+    const earningsRevisionScore = computeSectorEarningsRevisionProxy(item.key, derived, raw);
+    const valuationScore = computeSectorValuationScore(item.key, item.classification, derived);
 
     return {
       ...item,
       score,
+      shortTermScore,
+      longTermScore: score,
+      earningsRevisionScore,
+      valuationScore,
       quality,
       stance,
-      reasons: buildSectorReasons(item, score, macro, quality),
+      ...buyMetrics,
+      reasons: buildSectorReasons(item, score, shortTermScore, macro, quality),
     };
   });
 
@@ -305,6 +488,7 @@ export function buildTopDownView(
     .sort((a, b) => ((a.score ?? 999) - (b.score ?? 999)) || ((a.quality?.totalScore ?? 100) - (b.quality?.totalScore ?? 100)))
     .slice(0, 3);
 
+  const rotation = buildSectorRotationView(raw, derived, regime, sectorViews, narratives);
   const assets = ['NASDAQ', 'KOSPI', 'GOLD', 'SILVER', 'COPPER', 'EMERGING', 'LEVERAGE', 'CASH'];
   const assetRationale = assets.map((asset) =>
     buildAssetRationale(asset, raw, derived, macro, sectorViews, signals.find((s) => s.asset === asset)),
@@ -312,15 +496,20 @@ export function buildTopDownView(
 
   const positiveMacroLabels = macro.filter((m) => m.stance === 'positive').map((m) => m.label);
   const favoredLabels = favoredSectors.map((s) => s.label).slice(0, 1);
+  const narrativeSummary = buildNarrativeSummary(narratives);
+  const bottleneckSummary = buildBottleneckSummary(favoredSectors);
   const summary = positiveMacroLabels.length > 0 || favoredLabels.length > 0
     ? `거시는 ${positiveMacroLabels.slice(0, 2).join(', ') || '중립'} 쪽, 섹터는 ${favoredLabels.join(', ') || '뚜렷한 우위 없음'} 중심 해석입니다.`
     : '현재 거시와 섹터는 뚜렷한 한 방향보다는 혼조/중립으로 해석됩니다.';
 
   return {
     summary,
+    narrativeSummary,
+    bottleneckSummary,
     macroView: macro,
     favoredSectors,
     avoidedSectors,
+    rotation,
     assetRationale,
   };
 }

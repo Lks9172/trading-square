@@ -1,0 +1,502 @@
+spring:
+  application:
+    name: macrosquare-server-spring
+  datasource:
+    url: ${DATABASE_URL:jdbc:h2:mem:macrosquare;MODE=PostgreSQL;DB_CLOSE_DELAY=-1}
+    username: ${DATABASE_USERNAME:sa}
+    password: ${DATABASE_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DATABASE_POOL_MAX_SIZE:8}
+      minimum-idle: ${DATABASE_POOL_MIN_IDLE:1}
+      # Hikari exposes these values as millisecond longs rather than Duration.
+      connection-timeout: ${DATABASE_CONNECTION_TIMEOUT_MS:5000}
+      validation-timeout: ${DATABASE_VALIDATION_TIMEOUT_MS:2000}
+      max-lifetime: ${DATABASE_MAX_LIFETIME_MS:1800000}
+      keepalive-time: ${DATABASE_KEEPALIVE_TIME_MS:120000}
+      leak-detection-threshold: ${DATABASE_LEAK_DETECTION_THRESHOLD_MS:0}
+      # Production overrides this with one PostgreSQL set_config statement;
+      # SELECT 1 keeps the default compatible with local H2 tests.
+      connection-init-sql: ${DATABASE_CONNECTION_INIT_SQL:SELECT 1}
+  flyway:
+    enabled: ${FLYWAY_ENABLED:false}
+    connect-retries: 20
+    connect-retries-interval: 2s
+    validate-migration-naming: true
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+server:
+  port: ${PORT:5846}
+  shutdown: graceful
+  compression:
+    enabled: true
+    mime-types: application/json
+    min-response-size: 1KB
+
+# PDFBox emits one warning per unmapped glyph for some issuer-supplied fonts,
+# flooding production logs without identifying a recoverable application
+# failure. The SEC adapter applies its own extraction-quality gate and exposes
+# unreadable documents as bounded material failures instead.
+logging:
+  level:
+    org.apache.pdfbox.pdmodel.font: ERROR
+
+macrosquare:
+  persistence:
+    mode: ${STORAGE_MODE:legacy-file}
+    legacy-import-enabled: ${LEGACY_IMPORT_ENABLED:true}
+    exclusive-task-max-concurrency: ${EXCLUSIVE_TASK_MAX_CONCURRENCY:4}
+  object-storage:
+    endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:macrosquare}
+    secret-key: ${MINIO_SECRET_KEY:local-development-only}
+    bucket: ${MINIO_BUCKET:macrosquare-artifacts}
+    maximum-object-bytes: ${OBJECT_STORAGE_MAX_BYTES:67108864}
+    maximum-projection-bytes: ${OBJECT_STORAGE_MAX_PROJECTION_BYTES:33554432}
+    maximum-cached-documents: ${OBJECT_STORAGE_MAX_CACHED_DOCUMENTS:2048}
+    projection-cache-ttl: ${OBJECT_STORAGE_PROJECTION_CACHE_TTL:5m}
+  storage:
+    single-writer-guard-enabled: ${SINGLE_WRITER_GUARD_ENABLED:false}
+  snapshot:
+    cache-ttl-ms: 300000
+  market-data:
+    read-mode: ${MARKET_READ_MODE:spring-native}
+    snapshot-file: ${MARKET_SNAPSHOT_FILE:/app/spring-data/projections/latest-system-snapshot-default-v1.json}
+    seed-snapshot-file: ${MARKET_SEED_SNAPSHOT_FILE:/app/spring-projections/latest-system-snapshot-default-v1.json}
+    history-directory: ${MARKET_HISTORY_DIR:/app/spring-data/market-observations/history}
+    maximum-snapshot-bytes: ${MARKET_MAX_SNAPSHOT_BYTES:16777216}
+    maximum-history-file-bytes: ${MARKET_MAX_HISTORY_FILE_BYTES:16777216}
+    maximum-history-files: ${MARKET_MAX_HISTORY_FILES:2048}
+    cache-ttl: ${MARKET_SNAPSHOT_CACHE_TTL:5m}
+  company-read:
+    read-mode: ${COMPANY_READ_MODE:file-only}
+    source-cache-directory: ${COMPANY_READ_SOURCE_CACHE_DIR:/app/spring-projections}
+    maximum-file-bytes: ${COMPANY_READ_MAX_FILE_BYTES:8388608}
+    maximum-cached-files: ${COMPANY_READ_MAX_CACHED_FILES:1024}
+    cache-ttl: ${COMPANY_READ_CACHE_TTL:15m}
+  persisted-projections:
+    research-catalog-read-mode: ${RESEARCH_CATALOG_READ_MODE:file-only}
+    crypto-read-mode: ${CRYPTO_READ_MODE:file-only}
+    directory: ${PERSISTED_PROJECTION_DIR:/app/spring-projections}
+    maximum-file-bytes: ${PERSISTED_PROJECTION_MAX_FILE_BYTES:16777216}
+    maximum-cached-files: ${PERSISTED_PROJECTION_MAX_CACHED_FILES:256}
+  sector-market-evidence:
+    enabled: ${SECTOR_MARKET_EVIDENCE_ENABLED:false}
+    # State Street's former intermediary path currently returns a 301. Use the
+    # issuer's canonical workbook path and still allow bounded HTTPS redirects.
+    state-street-base-url: ${STATE_STREET_FUND_HISTORY_BASE_URL:https://www.ssga.com/library-content/products/fund-data/etfs/us/}
+    maximum-workbook-bytes: ${STATE_STREET_FUND_HISTORY_MAX_BYTES:2097152}
+    user-agent: ${SECTOR_MARKET_EVIDENCE_USER_AGENT:MacroSquare/1.0}
+    connect-timeout: ${SECTOR_MARKET_EVIDENCE_CONNECT_TIMEOUT:3s}
+    read-timeout: ${SECTOR_MARKET_EVIDENCE_READ_TIMEOUT:20s}
+    startup-delay: ${SECTOR_MARKET_EVIDENCE_STARTUP_DELAY:90s}
+    fixed-delay: ${SECTOR_MARKET_EVIDENCE_FIXED_DELAY:6h}
+  market-collection:
+    enabled: ${MARKET_COLLECTION_ENABLED:false}
+    history-seed-enabled: ${MARKET_HISTORY_SEED_ENABLED:false}
+    snapshot-refresh-enabled: ${MARKET_SNAPSHOT_REFRESH_ENABLED:false}
+    sector-total-return-enabled: ${SECTOR_TOTAL_RETURN_COLLECTION_ENABLED:true}
+    directory: ${MARKET_COLLECTION_DIR:/app/spring-data/market-observations}
+    legacy-history-directory: ${MARKET_LEGACY_HISTORY_DIR:/app/legacy-history}
+    maximum-history-points: ${MARKET_COLLECTION_MAX_HISTORY_POINTS:5000}
+    maximum-file-bytes: ${MARKET_COLLECTION_MAX_FILE_BYTES:8388608}
+    maximum-seed-file-bytes: ${MARKET_HISTORY_SEED_MAX_FILE_BYTES:16777216}
+    fred-base-url: ${FRED_BASE_URL:https://api.stlouisfed.org}
+    fred-api-key: ${FRED_API_KEY:}
+    yahoo-base-urls:
+      - ${YAHOO_QUERY1_BASE_URL:https://query1.finance.yahoo.com}
+      - ${YAHOO_QUERY2_BASE_URL:https://query2.finance.yahoo.com}
+    cnn-fear-greed-url: ${CNN_FEAR_GREED_URL:https://production.dataviz.cnn.io/index/fearandgreed/graphdata}
+    alternative-fear-greed-url: ${ALTERNATIVE_FEAR_GREED_URL:https://api.alternative.me/fng/?limit=1}
+    cboe-delayed-quotes-base-url: ${CBOE_DELAYED_QUOTES_BASE_URL:https://cdn.cboe.com/api/global/delayed_quotes/}
+    aaii-feed-url: ${AAII_FEED_URL:https://insights.aaii.com/feed}
+    # The public landing page now embeds the data and no longer contains table
+    # rows itself. Read NAAIM's official table directly. Since 2026-08-01 the
+    # public endpoint is intentionally delayed by three months; it therefore
+    # remains DEGRADED/fail-closed unless this URL points to a licensed current
+    # table with the same Date/NAAIM Number shape.
+    naaim-exposure-url: ${NAAIM_EXPOSURE_URL:https://index.naaim.org/embeddable/table}
+    stablecoin-url: ${STABLECOIN_URL:https://stablecoins.llama.fi/stablecoins}
+    krx-investor-flow-url: ${KRX_INVESTOR_FLOW_URL:https://finance.naver.com/sise/investorDealTrendDay.nhn}
+    user-agent: ${MARKET_COLLECTOR_USER_AGENT:MacroSquare/1.0}
+    connect-timeout: ${MARKET_COLLECTOR_CONNECT_TIMEOUT:3s}
+    fred-read-timeout: ${FRED_READ_TIMEOUT:10s}
+    yahoo-read-timeout: ${YAHOO_MARKET_READ_TIMEOUT:10s}
+    supplemental-read-timeout: ${MARKET_SUPPLEMENTAL_READ_TIMEOUT:20s}
+    startup-delay: ${MARKET_COLLECTION_STARTUP_DELAY:45s}
+    fred-fixed-delay: ${FRED_COLLECTION_FIXED_DELAY:6h}
+    yahoo-fixed-delay: ${YAHOO_COLLECTION_FIXED_DELAY:15m}
+    sector-total-return-fixed-delay: ${SECTOR_TOTAL_RETURN_COLLECTION_FIXED_DELAY:6h}
+    fear-greed-fixed-delay: ${FEAR_GREED_COLLECTION_FIXED_DELAY:1h}
+    sentiment-fixed-delay: ${SENTIMENT_COLLECTION_FIXED_DELAY:6h}
+    stablecoin-fixed-delay: ${STABLECOIN_COLLECTION_FIXED_DELAY:6h}
+    krx-fixed-delay: ${KRX_COLLECTION_FIXED_DELAY:30m}
+    snapshot-startup-delay: ${MARKET_SNAPSHOT_STARTUP_DELAY:75s}
+    snapshot-fixed-delay: ${MARKET_SNAPSHOT_FIXED_DELAY:5m}
+    fred-concurrency: ${FRED_COLLECTION_CONCURRENCY:2}
+    yahoo-concurrency: ${YAHOO_COLLECTION_CONCURRENCY:8}
+    supplemental-concurrency: ${MARKET_SUPPLEMENTAL_CONCURRENCY:4}
+  investment-execution:
+    data-directory: ${INVESTMENT_EXECUTION_DATA_DIR:/app/spring-data}
+    legacy-data-directory: ${LEGACY_DATA_DIR:/app/legacy-data}
+    import-legacy-on-first-read: ${INVESTMENT_EXECUTION_IMPORT_LEGACY:true}
+  sec-company-facts:
+    base-url: ${SEC_DATA_BASE_URL:https://data.sec.gov}
+    user-agent: ${SEC_USER_AGENT:MacroSquare research contact macrosquare@example.com}
+    connect-timeout: ${SEC_CONNECT_TIMEOUT:3s}
+    read-timeout: ${SEC_READ_TIMEOUT:20s}
+    cache-ttl: ${SEC_COMPANYFACTS_CACHE_TTL:4h}
+    # A 24-hour stale fallback could be stamped as a fresh company score after
+    # a material filing. Keep only a short SWR window, then quarantine scores.
+    stale-ttl: ${SEC_COMPANYFACTS_STALE_TTL:6h}
+    max-concurrent-fetches: ${SEC_COMPANYFACTS_MAX_CONCURRENT_FETCHES:2}
+  sec-company-identity:
+    base-url: ${SEC_TICKER_MAP_BASE_URL:https://www.sec.gov}
+    user-agent: ${SEC_USER_AGENT:MacroSquare research contact macrosquare@example.com}
+    connect-timeout: ${SEC_TICKER_MAP_CONNECT_TIMEOUT:3s}
+    read-timeout: ${SEC_TICKER_MAP_READ_TIMEOUT:15s}
+    cache-ttl: ${SEC_TICKER_MAP_CACHE_TTL:24h}
+    stale-ttl: ${SEC_TICKER_MAP_STALE_TTL:168h}
+  sec-company-submissions:
+    base-url: ${SEC_DATA_BASE_URL:https://data.sec.gov}
+    user-agent: ${SEC_USER_AGENT:MacroSquare research contact macrosquare@example.com}
+    connect-timeout: ${SEC_CONNECT_TIMEOUT:3s}
+    read-timeout: ${SEC_SUBMISSIONS_READ_TIMEOUT:20s}
+    cache-ttl: ${SEC_SUBMISSIONS_CACHE_TTL:4h}
+    stale-ttl: ${SEC_SUBMISSIONS_STALE_TTL:6h}
+    # Foreign issuers can file enough 6-Ks to push the latest 20-F beyond the
+    # first 100 rows (TSM's current 20-F is row 126). The SEC payload is still
+    # streamed and retained under the explicit 1,000-row configuration bound.
+    recent-filing-limit: ${SEC_SUBMISSIONS_RECENT_FILING_LIMIT:200}
+    parity-filing-limit: ${SEC_SUBMISSIONS_PARITY_FILING_LIMIT:10}
+    max-concurrent-fetches: ${SEC_SUBMISSIONS_MAX_CONCURRENT_FETCHES:2}
+  sec-company-filings:
+    base-url: ${SEC_ARCHIVE_BASE_URL:https://www.sec.gov}
+    user-agent: ${SEC_USER_AGENT:MacroSquare research contact macrosquare@example.com}
+    connect-timeout: ${SEC_CONNECT_TIMEOUT:3s}
+    read-timeout: ${SEC_FILING_DETAIL_READ_TIMEOUT:20s}
+    cache-ttl: ${SEC_FILING_DETAIL_CACHE_TTL:6h}
+    # Filing guidance/IR text participates in the company decision. Do not
+    # carry a failed 24-hour fallback into a fresh BUY action.
+    stale-ttl: ${SEC_FILING_DETAIL_STALE_TTL:6h}
+    inter-request-delay: ${SEC_FILING_DETAIL_INTER_REQUEST_DELAY:150ms}
+    max-index-bytes: ${SEC_FILING_DETAIL_MAX_INDEX_BYTES:2097152}
+    # Filing HTML is often the same Inline XBRL object read by the mix parser.
+    # A 5 MiB text-path limit rejected already-validated cached filings and then
+    # retried the SEC origin. Keep one bounded 32 MiB envelope for both paths.
+    max-document-bytes: ${SEC_FILING_DETAIL_MAX_DOCUMENT_BYTES:33554432}
+    # Large, valid annual Inline XBRL reports such as ASML's are ~25 MiB.
+    # Keep the adapter bounded at the property-level hard cap of 32 MiB.
+    max-inline-xbrl-bytes: ${SEC_INLINE_XBRL_MAX_DOCUMENT_BYTES:33554432}
+    max-text-characters: ${SEC_FILING_DETAIL_MAX_TEXT_CHARACTERS:30000}
+    max-pdf-pages: ${SEC_FILING_DETAIL_MAX_PDF_PAGES:120}
+    max-detail-entries: ${SEC_FILING_DETAIL_MAX_CACHE_ENTRIES:128}
+    max-text-entries: ${SEC_FILING_TEXT_MAX_CACHE_ENTRIES:512}
+    max-concurrent-fetches: ${SEC_FILING_DETAIL_MAX_CONCURRENT_FETCHES:1}
+    primary-filing-limit: ${SEC_FILING_PRIMARY_LIMIT:10}
+    attachment-filing-limit: ${SEC_FILING_ATTACHMENT_LIMIT:3}
+    material-limit: ${SEC_IR_MATERIAL_LIMIT:20}
+  yahoo-company-quote:
+    base-urls:
+      - ${YAHOO_QUERY1_BASE_URL:https://query1.finance.yahoo.com}
+      - ${YAHOO_QUERY2_BASE_URL:https://query2.finance.yahoo.com}
+    user-agent: ${YAHOO_USER_AGENT:Mozilla/5.0}
+    connect-timeout: ${YAHOO_CONNECT_TIMEOUT:3s}
+    read-timeout: ${YAHOO_QUOTE_READ_TIMEOUT:10s}
+    cache-ttl: ${YAHOO_QUOTE_CACHE_TTL:1m}
+    stale-ttl: ${YAHOO_QUOTE_STALE_TTL:15m}
+    max-concurrent-fetches: ${YAHOO_QUOTE_MAX_CONCURRENT_FETCHES:8}
+  yahoo-request-throttle:
+    # Shared across quote, market-cap, price-history, analyst and macro clients.
+    # This prevents independent worker pools from exceeding Yahoo's IP-wide burst limit.
+    minimum-interval: ${YAHOO_REQUEST_MINIMUM_INTERVAL:350ms}
+    rate-limit-backoff: ${YAHOO_RATE_LIMIT_BACKOFF:30s}
+  yahoo-company-price-history:
+    base-urls:
+      - ${YAHOO_QUERY1_BASE_URL:https://query1.finance.yahoo.com}
+      - ${YAHOO_QUERY2_BASE_URL:https://query2.finance.yahoo.com}
+    user-agent: ${YAHOO_USER_AGENT:Mozilla/5.0}
+    connect-timeout: ${YAHOO_CONNECT_TIMEOUT:3s}
+    read-timeout: ${YAHOO_PRICE_HISTORY_READ_TIMEOUT:15s}
+    # Five-plus calendar years supports causal 1/3/6-month walk-forward validation.
+    lookback-days: ${YAHOO_PRICE_HISTORY_LOOKBACK_DAYS:1900}
+    cache-ttl: ${YAHOO_PRICE_HISTORY_CACHE_TTL:15m}
+    stale-ttl: ${YAHOO_PRICE_HISTORY_STALE_TTL:2h}
+    max-concurrent-fetches: ${YAHOO_PRICE_HISTORY_MAX_CONCURRENT_FETCHES:8}
+  company-research-summary:
+    enabled: ${COMPANY_RESEARCH_SUMMARY_ENABLED:false}
+    # Persisted summaries remain readable during boot. Wait until the initial
+    # market/sector collectors have settled instead of competing for Yahoo and
+    # CPU while readiness and the startup Telegram message are running.
+    startup-delay: ${COMPANY_RESEARCH_SUMMARY_STARTUP_DELAY:3m}
+    fixed-delay: ${COMPANY_RESEARCH_SUMMARY_FIXED_DELAY:30m}
+    concurrency: ${COMPANY_RESEARCH_SUMMARY_CONCURRENCY:8}
+  integrity-monitor:
+    enabled: ${DATA_INTEGRITY_MONITOR_ENABLED:false}
+    expected-company-universe: ${DATA_INTEGRITY_EXPECTED_COMPANY_UNIVERSE:277}
+    calculation-version: ${DATA_INTEGRITY_CALCULATION_VERSION:6}
+    maximum-summary-age: ${DATA_INTEGRITY_MAXIMUM_SUMMARY_AGE:2h}
+    initial-delay: ${DATA_INTEGRITY_MONITOR_INITIAL_DELAY:30s}
+    fixed-delay: ${DATA_INTEGRITY_MONITOR_FIXED_DELAY:1m}
+  company-analyst:
+    source-cache-directory: ${COMPANY_ANALYST_SOURCE_CACHE_DIR:/app/legacy-source-cache}
+    cookie-url: ${YAHOO_COOKIE_URL:https://fc.yahoo.com}
+    crumb-url: ${YAHOO_CRUMB_URL:https://query2.finance.yahoo.com/v1/test/getcrumb}
+    quote-summary-base-url: ${YAHOO_QUERY2_BASE_URL:https://query2.finance.yahoo.com}
+    user-agent: ${YAHOO_USER_AGENT:Mozilla/5.0}
+    connect-timeout: ${YAHOO_CONNECT_TIMEOUT:3s}
+    read-timeout: ${YAHOO_ANALYST_READ_TIMEOUT:10s}
+    auth-cache-ttl: ${YAHOO_AUTH_CACHE_TTL:1h}
+    consensus-cache-ttl: ${COMPANY_ANALYST_CONSENSUS_CACHE_TTL:1h}
+    # Analyst targets/revisions are decision inputs refreshed hourly. A week-old
+    # fallback can look current after a successful company-summary refresh, so
+    # fail closed after a bounded six-hour provider outage instead.
+    consensus-stale-ttl: ${COMPANY_ANALYST_CONSENSUS_STALE_TTL:6h}
+    inter-ticker-delay: ${COMPANY_ANALYST_INTER_TICKER_DELAY:200ms}
+    minimum-successful-tickers: ${COMPANY_ANALYST_MIN_SUCCESSFUL_TICKERS:3}
+  company-analyst-history:
+    enabled: ${COMPANY_ANALYST_HISTORY_ENABLED:false}
+    read-mode: ${COMPANY_ANALYST_HISTORY_READ_MODE:store-preferred}
+    directory: ${COMPANY_ANALYST_HISTORY_DIR:/app/spring-data/company-analyst-history}
+    tickers: ${COMPANY_ANALYST_HISTORY_TICKERS:AAPL,MSFT,GOOGL,AMZN,NVDA,META,TSLA}
+    retention-points: ${COMPANY_ANALYST_HISTORY_RETENTION_POINTS:365}
+    # The company-summary refresh is the first provider-heavy company job.
+    # Analyst history follows it rather than creating a startup Yahoo stampede.
+    startup-delay: ${COMPANY_ANALYST_HISTORY_STARTUP_DELAY:15m}
+    weekday-cron: "${COMPANY_ANALYST_HISTORY_WEEKDAY_CRON:0 15 * * * 1-5}"
+    weekend-cron: "${COMPANY_ANALYST_HISTORY_WEEKEND_CRON:0 15 * * * 0,6}"
+    zone: ${COMPANY_ANALYST_HISTORY_ZONE:Asia/Seoul}
+  institutional-collection:
+    enabled: ${INSTITUTIONAL_COLLECTION_ENABLED:false}
+    data-base-url: ${SEC_DATA_BASE_URL:https://data.sec.gov}
+    archive-base-url: ${SEC_ARCHIVE_BASE_URL:https://www.sec.gov}
+    user-agent: ${SEC_USER_AGENT:MacroSquare research contact macrosquare@example.com}
+    connect-timeout: ${SEC_CONNECT_TIMEOUT:3s}
+    read-timeout: ${SEC_13F_READ_TIMEOUT:30s}
+    startup-delay: ${SEC_13F_STARTUP_DELAY:30s}
+    # Re-deploys must not reparse and rewrite the same ~90k holdings. The normal
+    # 24h scheduler remains unchanged; only the first invocation can reuse this
+    # short durable freshness window.
+    startup-freshness: ${SEC_13F_STARTUP_FRESHNESS:2h}
+    fixed-delay: ${SEC_13F_FIXED_DELAY:24h}
+    inter-request-delay: ${SEC_13F_INTER_REQUEST_DELAY:150ms}
+    identity-directory-cache-ttl: ${SEC_13F_IDENTITY_DIRECTORY_CACHE_TTL:12h}
+    maximum-index-bytes: ${SEC_13F_MAX_INDEX_BYTES:2097152}
+    maximum-information-table-bytes: ${SEC_13F_MAX_INFORMATION_TABLE_BYTES:8388608}
+    filing-limit: ${SEC_13F_FILING_LIMIT:2}
+    managers:
+      - id: berkshire
+        name: Berkshire Hathaway
+        cik: "0001067983"
+      - id: bridgewater
+        name: Bridgewater Associates
+        cik: "0001350694"
+      - id: renaissance
+        name: Renaissance Technologies
+        cik: "0001037389"
+      - id: soros
+        name: Soros Fund Management
+        cik: "0001029160"
+      - id: citadel
+        name: Citadel Advisors
+        cik: "0001423053"
+      - id: millennium
+        name: Millennium Management
+        cik: "0001273087"
+      - id: de-shaw
+        name: D. E. Shaw
+        cik: "0001009207"
+      - id: elliott
+        name: Elliott Investment Management
+        cik: "0001791786"
+      - id: pershing-square
+        name: Pershing Square Capital Management
+        cik: "0001336528"
+      - id: appaloosa
+        name: Appaloosa
+        cik: "0001656456"
+      - id: baupost
+        name: Baupost Group
+        cik: "0001061768"
+      - id: coatue
+        name: Coatue Management
+        cik: "0001135730"
+      - id: tiger-global
+        name: Tiger Global Management
+        cik: "0001167483"
+      - id: third-point
+        name: Third Point
+        cik: "0001040273"
+      - id: viking
+        name: Viking Global Investors
+        cik: "0001103804"
+      - id: lone-pine
+        name: Lone Pine Capital
+        cik: "0001061165"
+      - id: two-sigma
+        name: Two Sigma Investments
+        cik: "0001179392"
+      - id: tudor
+        name: Tudor Investment
+        cik: "0000923093"
+      - id: point72
+        name: Point72 Asset Management
+        cik: "0001603466"
+      - id: ark
+        name: ARK Investment Management
+        cik: "0001697748"
+  policy-collection:
+    enabled: ${POLICY_COLLECTION_ENABLED:false}
+    feed-url: ${FED_MONETARY_POLICY_FEED_URL:https://www.federalreserve.gov/feeds/press_monetary.xml}
+    calendar-url: ${FED_FOMC_CALENDAR_URL:https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm}
+    treasury-listing-url: ${TREASURY_PRESS_RELEASES_URL:https://home.treasury.gov/news/press-releases}
+    ustr-listing-url: ${USTR_PRESS_RELEASES_URL:https://ustr.gov/about-us/policy-offices/press-office/press-releases}
+    user-agent: ${POLICY_USER_AGENT:MacroSquare research contact macrosquare@example.com}
+    connect-timeout: ${POLICY_CONNECT_TIMEOUT:3s}
+    read-timeout: ${POLICY_READ_TIMEOUT:30s}
+    startup-delay: ${POLICY_STARTUP_DELAY:40s}
+    fixed-delay: ${POLICY_FIXED_DELAY:6h}
+    inter-request-delay: ${POLICY_INTER_REQUEST_DELAY:100ms}
+    maximum-feed-bytes: ${POLICY_MAX_FEED_BYTES:2097152}
+    maximum-document-bytes: ${POLICY_MAX_DOCUMENT_BYTES:4194304}
+    maximum-documents: ${POLICY_MAX_DOCUMENTS:80}
+    query-document-limit: ${POLICY_QUERY_DOCUMENT_LIMIT:30}
+    historical-statement-limit: ${POLICY_HISTORICAL_STATEMENT_LIMIT:60}
+    agency-document-limit: ${POLICY_AGENCY_DOCUMENT_LIMIT:8}
+  peer-discovery:
+    enabled: ${PEER_DISCOVERY_ENABLED:false}
+    sec-data-base-url: ${SEC_DATA_BASE_URL:https://data.sec.gov}
+    sec-archive-base-url: ${SEC_ARCHIVE_BASE_URL:https://www.sec.gov}
+    user-agent: ${SEC_USER_AGENT:MacroSquare research contact macrosquare@example.com}
+    connect-timeout: ${SEC_CONNECT_TIMEOUT:3s}
+    read-timeout: ${PEER_SEC_READ_TIMEOUT:20s}
+    startup-delay: ${PEER_DISCOVERY_STARTUP_DELAY:2m}
+    fixed-delay: ${PEER_DISCOVERY_FIXED_DELAY:6h}
+    inter-request-delay: ${PEER_DISCOVERY_INTER_REQUEST_DELAY:150ms}
+    universe-cache-ttl: ${PEER_UNIVERSE_CACHE_TTL:6h}
+    taxonomy-refresh-ttl: ${PEER_TAXONOMY_REFRESH_TTL:30d}
+    missing-grace: ${PEER_MISSING_GRACE:30d}
+    # Large multi-security issuers such as JPM currently exceed 4 MiB.
+    # Keep a bounded 8 MiB ceiling so primary issuers are not stuck in the retry queue.
+    maximum-submissions-bytes: ${PEER_MAX_SUBMISSIONS_BYTES:8388608}
+    batch-size: ${PEER_DISCOVERY_BATCH_SIZE:400}
+  narrative-sources:
+    enabled: ${NARRATIVE_SOURCE_COLLECTION_ENABLED:false}
+    google-news-base-url: ${GOOGLE_NEWS_BASE_URL:https://news.google.com}
+    wikimedia-base-url: ${WIKIMEDIA_BASE_URL:https://wikimedia.org}
+    youtube-base-url: ${YOUTUBE_API_BASE_URL:https://www.googleapis.com}
+    youtube-api-key: ${YOUTUBE_API_KEY:${GOOGLE_API_KEY:}}
+    user-agent: ${NARRATIVE_SOURCE_USER_AGENT:MacroSquare research contact macrosquare@example.com}
+    connect-timeout: ${NARRATIVE_SOURCE_CONNECT_TIMEOUT:3s}
+    read-timeout: ${NARRATIVE_SOURCE_READ_TIMEOUT:20s}
+    startup-delay: ${NARRATIVE_SOURCE_STARTUP_DELAY:90s}
+    fixed-delay: ${NARRATIVE_SOURCE_FIXED_DELAY:6h}
+    inter-request-delay: ${NARRATIVE_SOURCE_INTER_REQUEST_DELAY:100ms}
+    maximum-response-bytes: ${NARRATIVE_SOURCE_MAX_RESPONSE_BYTES:2097152}
+  dart:
+    enabled: ${DART_COLLECTION_ENABLED:false}
+    base-url: ${DART_BASE_URL:https://opendart.fss.or.kr}
+    api-key: ${DART_API_KEY:}
+    connect-timeout: ${DART_CONNECT_TIMEOUT:3s}
+    read-timeout: ${DART_READ_TIMEOUT:30s}
+    startup-delay: ${DART_STARTUP_DELAY:3m}
+    fixed-delay: ${DART_FIXED_DELAY:6h}
+    inter-request-delay: ${DART_INTER_REQUEST_DELAY:150ms}
+    directory-refresh-ttl: ${DART_DIRECTORY_REFRESH_TTL:24h}
+    maximum-compressed-bytes: ${DART_MAX_COMPRESSED_BYTES:16777216}
+    maximum-uncompressed-bytes: ${DART_MAX_UNCOMPRESSED_BYTES:67108864}
+    lookback-days: ${DART_LOOKBACK_DAYS:120}
+    stock-codes:
+      - "005930"
+      - "000660"
+      - "035420"
+      - "035720"
+      - "051910"
+      - "006400"
+      - "005380"
+      - "000270"
+      - "105560"
+      - "055550"
+  notifications:
+    enabled: ${TELEGRAM_NOTIFICATIONS_ENABLED:false}
+    telegram-bot-token: ${TELEGRAM_BOT_TOKEN:}
+    telegram-chat-id: ${TELEGRAM_CHAT_ID:}
+    data-directory: ${NOTIFICATION_DATA_DIR:/app/spring-data/notifications}
+    connect-timeout: ${TELEGRAM_CONNECT_TIMEOUT:5s}
+    read-timeout: ${TELEGRAM_READ_TIMEOUT:10s}
+    startup-delay: ${TELEGRAM_STARTUP_DELAY:5s}
+    # Startup delivery reads the durable snapshot and stays immediate. The
+    # expensive all-company recalculation waits for company refresh jobs.
+    post-startup-recalculation-delay: ${TELEGRAM_POST_STARTUP_RECALCULATION_DELAY:20m}
+    send-attempts: ${TELEGRAM_SEND_ATTEMPTS:5}
+    retry-delay: ${TELEGRAM_RETRY_DELAY:5s}
+    scan-concurrency: ${TELEGRAM_SCAN_CONCURRENCY:6}
+    outbox-batch-size: ${TELEGRAM_OUTBOX_BATCH_SIZE:20}
+    outbox-lease-duration: ${TELEGRAM_OUTBOX_LEASE_DURATION:5m}
+    outbox-retry-base-delay: ${TELEGRAM_OUTBOX_RETRY_BASE_DELAY:30s}
+    outbox-maximum-attempts: ${TELEGRAM_OUTBOX_MAXIMUM_ATTEMPTS:12}
+    outbox-retention: ${TELEGRAM_OUTBOX_RETENTION:30d}
+    outbox-dispatch-delay: ${TELEGRAM_OUTBOX_DISPATCH_DELAY:15s}
+    outbox-dispatch-initial-delay: ${TELEGRAM_OUTBOX_DISPATCH_INITIAL_DELAY:10s}
+    outbox-maintenance-cron: "${TELEGRAM_OUTBOX_MAINTENANCE_CRON:0 35 3 * * *}"
+    weekday-scan-cron: "${TELEGRAM_WEEKDAY_SCAN_CRON:0 20 * * * 1-5}"
+    weekend-scan-cron: "${TELEGRAM_WEEKEND_SCAN_CRON:0 20 */4 * * 0,6}"
+    market-check-delay: ${TELEGRAM_MARKET_CHECK_DELAY:5m}
+    market-check-initial-delay: ${TELEGRAM_MARKET_CHECK_INITIAL_DELAY:2m}
+    weekly-report-cron: "${TELEGRAM_WEEKLY_REPORT_CRON:0 0 8 * * 1}"
+  earnings-calendar:
+    base-url: ${NASDAQ_EARNINGS_BASE_URL:https://api.nasdaq.com}
+    connect-timeout: ${NASDAQ_EARNINGS_CONNECT_TIMEOUT:3s}
+    read-timeout: ${NASDAQ_EARNINGS_READ_TIMEOUT:12s}
+    cache-ttl: ${NASDAQ_EARNINGS_CACHE_TTL:1h}
+
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: ${TRACING_EXPORT_ENABLED:false}
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.10}
+  logging:
+    export:
+      otlp:
+        enabled: false
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+      group:
+        readiness:
+          include: readinessState,db,snapshotFreshness,objectStorage
+        liveness:
+          include: livenessState
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: MacroSquare Spring server
+    runtime: Java 21 LTS
+    spring-boot: 4.1.0
+    mode: production

@@ -1,7 +1,7 @@
 /**
  * OpenInsider collector — 29차 P2-E #35.
  *
- * URL: http://openinsider.com/insider-cluster-purchases (HTML scrape)
+ * URL: http://openinsider.com/screener?...grp=2... (HTML scrape)
  *
  * 기능:
  *  - cluster purchase (2+ insiders 동일 ticker 매수) 종목 수집
@@ -21,7 +21,7 @@ const CACHE_KEY = 'openinsider-cluster-purchases';
 const FRESH_MS = 24 * 60 * 60 * 1000;       // 24h fresh
 const STALE_MS = 7 * 24 * 60 * 60 * 1000;   // 7d stale fallback
 
-const URL = 'http://openinsider.com/insider-cluster-purchases';
+const URL = 'http://openinsider.com/screener?s=&o=&pl=&ph=&ll=&lh=&fd=30&fdr=&td=0&tdr=&fdlyl=&fdlyh=&daysago=&xp=1&vl=50&vh=&ocl=2&och=&sic1=-1&sicl=100&sich=9999&grp=2&nfl=&nfh=&nil=&nih=&nol=&noh=&v2l=&v2h=&oc2l=&oc2h=&sortcol=0&cnt=100&page=1';
 const MIN_TX_USD = 50_000;                  // $50K 컷오프
 
 export interface OpenInsiderClusterRecord {

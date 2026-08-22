@@ -53,18 +53,23 @@ function fmt(v: number | null | undefined, digits = 1): string {
 }
 
 export function OptionsVolatilityPanel({ raw, derived }: Props) {
-  const [corr, setCorr] = useState<CorrelationResult | null>(null);
+  const [corrState, setCorrState] = useState<{ lookback: number; data: CorrelationResult | null } | null>(null);
   const [lookback, setLookback] = useState<number>(60);
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    fetch(`/api/correlation?lookback=${lookback}`)
+    const controller = new AbortController();
+    fetch(`/api/correlation?lookback=${lookback}`, { signal: controller.signal })
       .then((r) => r.json())
-      .then((d) => setCorr(d))
-      .catch(() => setCorr(null))
-      .finally(() => setLoading(false));
+      .then((data) => setCorrState({ lookback, data }))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setCorrState({ lookback, data: null });
+      });
+    return () => controller.abort();
   }, [lookback]);
+
+  const corr = corrState?.lookback === lookback ? corrState.data : null;
+  const loading = corrState?.lookback !== lookback;
 
   const skew = raw?.SKEW?.value;
   const vvix = raw?.VVIX?.value;

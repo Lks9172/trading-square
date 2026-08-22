@@ -3,13 +3,22 @@
 interface CalendarEvent {
   date: string;
   name: string;
-  category: 'FOMC' | 'CPI' | 'NFP' | 'PCE' | 'GDP' | 'OTHER';
+  category: 'FOMC' | 'CPI' | 'NFP' | 'PCE' | 'GDP' | 'US_OPEX' | 'KRX_DERIVATIVES' | 'OTHER';
   daysUntil: number;
   importance: 'high' | 'medium';
+  source?: 'spring-rule' | 'persisted-source';
+  estimated?: boolean;
 }
 
 interface Props {
   events?: CalendarEvent[];
+  methodology?: {
+    calculatedAt?: string;
+    dayCountOwner?: string;
+    directionalSignal?: boolean;
+    summary?: string;
+    limitations?: string[];
+  };
 }
 
 const CATEGORY_LABEL: Record<CalendarEvent['category'], string> = {
@@ -18,6 +27,8 @@ const CATEGORY_LABEL: Record<CalendarEvent['category'], string> = {
   NFP: '고용보고서',
   PCE: 'PCE',
   GDP: 'GDP',
+  US_OPEX: '미국 OPEX',
+  KRX_DERIVATIVES: 'KRX 파생',
   OTHER: '기타',
 };
 
@@ -27,6 +38,8 @@ const CATEGORY_COLOR: Record<CalendarEvent['category'], string> = {
   NFP: 'text-yellow-400 border-yellow-400/40',
   PCE: 'text-amber-400 border-amber-400/40',
   GDP: 'text-blue-400 border-blue-400/40',
+  US_OPEX: 'text-fuchsia-300 border-fuchsia-400/40',
+  KRX_DERIVATIVES: 'text-cyan-300 border-cyan-400/40',
   OTHER: 'text-neutral-400 border-neutral-400/40',
 };
 
@@ -37,11 +50,11 @@ function formatDayDiff(days: number): string {
   return `D+${Math.abs(days)}`;
 }
 
-export function CalendarPanel({ events }: Props) {
+export function CalendarPanel({ events, methodology }: Props) {
   if (!events || events.length === 0) {
     return (
       <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
-        <h3 className="text-base sm:text-lg font-semibold mb-1">경제 캘린더</h3>
+        <h3 className="text-base sm:text-lg font-semibold mb-1">시장 이벤트 캘린더</h3>
         <p className="text-xs text-[var(--muted)]">이벤트 데이터 없음</p>
       </div>
     );
@@ -53,19 +66,26 @@ export function CalendarPanel({ events }: Props) {
 
   return (
     <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
-      <h3 className="text-base sm:text-lg font-semibold mb-1">경제 캘린더</h3>
+      <h3 className="text-base sm:text-lg font-semibold mb-1">시장 이벤트 캘린더</h3>
       <p className="text-[11px] sm:text-xs text-[var(--muted)] mb-3">
-        FOMC · CPI · 고용 · PCE · GDP 발표 일정 (영상4 §04 노란불 트리거)
+        FOMC · 물가 · 고용 · 미국 월간 옵션 만기 · KRX 파생 만기 참고 구간
       </p>
+
+      <div className="mb-3 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[10px] leading-4 text-amber-100/85">
+        일정은 <strong>변동성 경고</strong>이며 상승·하락 방향이나 매수 신호가 아닙니다.
+        {methodology?.summary ? ` ${methodology.summary}` : ''}
+      </div>
 
       {imminent.length > 0 && (
         <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30">
           <div className="text-xs text-red-300 font-semibold mb-2">⚠ 임박 (D-3 이내)</div>
           <div className="space-y-1">
-            {imminent.map((e, i) => (
-              <div key={i} className="flex items-center justify-between text-xs">
+            {imminent.map((e) => (
+              <div key={`${e.date}-${e.category}-${e.name}`} className="flex items-center justify-between text-xs">
                 <span className="font-mono text-red-200">{formatDayDiff(e.daysUntil)}</span>
-                <span className="flex-1 mx-3 truncate">{e.name}</span>
+                <span className="flex-1 mx-3 truncate" title={e.estimated ? '공식 휴장·변경 일정을 최종 확인하세요.' : undefined}>
+                  {e.name}{e.estimated ? ' (예정)' : ''}
+                </span>
                 <span className={`px-1.5 py-0.5 rounded border text-[10px] font-mono ${CATEGORY_COLOR[e.category]}`}>
                   {CATEGORY_LABEL[e.category]}
                 </span>
@@ -76,22 +96,29 @@ export function CalendarPanel({ events }: Props) {
       )}
 
       <div className="space-y-1.5">
-        {upcoming.map((e, i) => (
+        {upcoming.map((e) => (
           <div
-            key={i}
+            key={`${e.date}-${e.category}-${e.name}`}
             className="flex items-center justify-between rounded-lg bg-[var(--background)] border border-[var(--card-border)] px-3 py-2 text-xs"
           >
             <span className="font-mono text-[var(--muted)] w-16 shrink-0">{e.date.slice(5)}</span>
             <span className={`font-mono w-12 shrink-0 text-center ${e.daysUntil <= 3 ? 'text-red-400' : 'text-neutral-400'}`}>
               {formatDayDiff(e.daysUntil)}
             </span>
-            <span className="flex-1 mx-2 truncate">{e.name}</span>
+            <span className="flex-1 mx-2 truncate" title={e.estimated ? '공식 휴장·변경 일정을 최종 확인하세요.' : undefined}>
+              {e.name}{e.estimated ? ' (예정)' : ''}
+            </span>
             <span className={`px-1.5 py-0.5 rounded border text-[10px] font-mono ${CATEGORY_COLOR[e.category]}`}>
               {CATEGORY_LABEL[e.category]}
             </span>
           </div>
         ))}
       </div>
+      {methodology?.limitations && methodology.limitations.length > 0 && (
+        <ul className="mt-3 space-y-0.5 text-[9px] leading-4 text-[var(--muted)]">
+          {methodology.limitations.map((item) => <li key={item}>• {item}</li>)}
+        </ul>
+      )}
     </div>
   );
 }

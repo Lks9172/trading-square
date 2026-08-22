@@ -1,0 +1,239 @@
+{
+  "capturedAt": "2026-07-19T16:14:30Z",
+  "milestone": "spring-shadow-company-analyst-history-read-cutover",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "clientContainer": "macrosquare-client",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25 / Spring Boot 4.1.0 / Tomcat 11.0.22",
+    "nodePort": 5846,
+    "springShadowPort": 5856,
+    "springMemoryLimit": "1GiB"
+  },
+  "scope": {
+    "implementedReadCutover": "AAPL/MSFT/GOOGL/AMZN/NVDA/META/TSLA analyst history for the internal Spring company parity calculation",
+    "modes": {
+      "legacy": "select legacy without probing shadow; immediate configuration rollback",
+      "dual-compare": "select legacy and compare the complete eligible shadow history",
+      "shadow-preferred": "select eligible shadow, compare legacy, and fall back to legacy on missing or unreadable shadow"
+    },
+    "behavior": [
+      "read selection is an application service behind history load ports; filesystem and JSON types remain in outbound adapters",
+      "only the configured seven tickers probe shadow; the other 41 verified tickers remain legacy and report shadow NOT_EXPECTED",
+      "comparison checks point count and the complete immutable point list",
+      "missing and malformed shadow data return LEGACY_FALLBACK rather than failing the calculation request",
+      "source state and safe difference codes are observable without exposing paths or exception details",
+      "history drift contributes to the overall parity verdict even when the selected source can still calculate expectations",
+      "the legacy source-cache bind mount remains read-only and the Spring writer remains isolated in its named volume",
+      "public company APIs, the production history writer, and Telegram are unchanged"
+    ],
+    "remainingInNode": [
+      "production analyst-history source of truth and production scheduler",
+      "public company calculation and route-cache ownership",
+      "Yahoo price history used by bottom and reversal signals",
+      "SEC submissions, filings, IR, segment, and company enrichment",
+      "remaining company/research collectors and persistence",
+      "Telegram notifications"
+    ],
+    "legacyCalculationInputsStillUsed": [
+      "analyst history for the 41 non-eligible verified tickers",
+      "comparison and safe fallback history for the seven shadow-preferred tickers"
+    ],
+    "shadowStoreServesExpectations": true,
+    "shadowStoreServesPublicApis": false,
+    "productionWriterCutover": false,
+    "comparableForFinalDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 166,
+      "failures": 0,
+      "domain": 33,
+      "application": 36,
+      "adapters": 87,
+      "bootstrap": 6,
+      "architecture": 4
+    },
+    "localActualFileProof": {
+      "dualCompareMatched": "7/7",
+      "dualCompareSelectedSource": "LEGACY",
+      "shadowPreferredMatched": "8/8",
+      "shadowPreferredEligibleSource": "SHADOW 7/7",
+      "nonEligibleSource": "NEM LEGACY/NOT_EXPECTED",
+      "missingShadow": "HTTP 200, LEGACY_FALLBACK, MISSING, analystHistory.shadowMissing",
+      "malformedShadow": "HTTP 200, LEGACY_FALLBACK, UNAVAILABLE, analystHistory.shadowUnavailable",
+      "legacyTemporaryCopiesHashUnchanged": "7/7",
+      "shadowFiles": 7,
+      "temporaryFiles": 0,
+      "publicApiStatusAndByteExact": "8/8"
+    },
+    "homeStagedDualCompare": {
+      "containerId": "82e5e97e787c1235eb23fcf9a76054997e34902191ac25bcdfaab552064773fe",
+      "mode": "DUAL_COMPARE",
+      "matched": "8/8",
+      "eligibleSelectedSource": "LEGACY 7/7",
+      "eligibleShadowState": "AVAILABLE 7/7",
+      "eligibleComparisonPerformed": "7/7",
+      "nonEligible": "NEM LEGACY/NOT_EXPECTED",
+      "startupBatch": {"attempted": 7, "written": 7, "seeded": 0}
+    },
+    "homeFinalShadowPreferred": {
+      "containerId": "0ea767fc3463cd2e818acf279b8ffdda0ab77c65f6a33d507ffd4881fad9861f",
+      "mode": "SHADOW_PREFERRED",
+      "tickers": 48,
+      "matched": 48,
+      "identityMatched": 48,
+      "quoteMatched": 48,
+      "analystConsensusMatched": 48,
+      "analystHistoryMatched": 48,
+      "expectationsMatched": 48,
+      "fundamentalsMatched": 48,
+      "scoreMatched": 48,
+      "buyScoreMatched": 48,
+      "historySources": {"SHADOW": 7, "LEGACY": 41},
+      "shadowAvailable": 7,
+      "shadowNotExpected": 41,
+      "comparisonPerformed": 7,
+      "coldDurationMs": {"median": 911.038, "max": 28186.083, "total": 74668.128},
+      "warmDurationMs": {"median": 5.272, "max": 32.649, "total": 326.394}
+    },
+    "existingPublicEndpointRegression": {
+      "statusObjectAndByteExactMatches": 8,
+      "total": 8,
+      "paths": [
+        "/api/company/NVDA",
+        "/api/company/ZZZZZZ",
+        "/api/company-search?q=NVDA&limit=5",
+        "/api/company-summaries?tickers=NVDA,MSFT,NEM",
+        "/api/research/crypto",
+        "/api/research/crypto/BTC",
+        "/api/research/themes",
+        "/api/research/sectors"
+      ]
+    },
+    "persistenceAndIsolation": {
+      "startupBatch": {"attempted": 7, "written": 7, "seeded": 0},
+      "shadowValueHashesUnchangedAcrossModeRestart": "7/7",
+      "shadowFiles": 7,
+      "temporaryFiles": 0,
+      "fileMode": "0600",
+      "fileOwnerUid": 100,
+      "fileOwnerGid": 101,
+      "legacySourceCacheMountReadOnly": true,
+      "nodeAndClientWereNotRecreated": true
+    }
+  },
+  "httpBenchmarks": {
+    "homeLoopbackFreshConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "responseBytes": 4134,
+      "totalErrorCount": 0,
+      "medianThroughputPerSecond": 389.99,
+      "medianP50Ms": 9.083,
+      "medianP95Ms": 148.956,
+      "medianP99Ms": 181.149,
+      "medianMaxMs": 190.999
+    },
+    "homeLoopbackFreshSequential": {
+      "requests": 200,
+      "concurrency": 1,
+      "totalErrorCount": 0,
+      "throughputPerSecond": 384.379,
+      "p50Ms": 2.38,
+      "p95Ms": 2.897,
+      "p99Ms": 3.079,
+      "maxMs": 29.484,
+      "responseBytes": 4134
+    }
+  },
+  "sameWindowIdle10SamplesAfter48TickerAndHttpWarmup": {
+    "node": {
+      "memoryMedianMiB": 237.7,
+      "memoryMinMiB": 237.7,
+      "memoryMaxMiB": 239.0,
+      "cpuMedianPct": 0.685,
+      "cpuMeanPct": 0.766,
+      "cpuMaxPct": 1.58,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 234.3,
+      "memoryMinMiB": 234.3,
+      "memoryMaxMiB": 245.3,
+      "cpuMedianPct": 0.05,
+      "cpuMeanPct": 0.065,
+      "cpuMaxPct": 0.14,
+      "pidCountMedian": 43.5
+    },
+    "warning": "Node serves the full production workload while Spring serves shadow reads and only the isolated analyst-history writer; this is not a final runtime comparison."
+  },
+  "springJvmFinal": {
+    "memoryUsedBytes": 137273216,
+    "memoryCommittedBytes": 196804608,
+    "gcPauseCount": 15,
+    "gcPauseTotalSeconds": 0.11,
+    "gcPauseMaxSeconds": 0.006,
+    "liveJvmThreads": 22,
+    "peakJvmThreads": 36
+  },
+  "runtime": {
+    "springReadiness": "UP",
+    "springDockerHealth": "healthy",
+    "springWarningCount": 0,
+    "springErrorCount": 0,
+    "springExceptionCount": 0,
+    "springRestartCount": 0,
+    "nodeRestartCount": 0,
+    "clientRestartCount": 0,
+    "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+    "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+    "springContainerId": "0ea767fc3463cd2e818acf279b8ffdda0ab77c65f6a33d507ffd4881fad9861f",
+    "springImageId": "sha256:ee6f2bdd8000f6f29642f2a51c6b68955b484c06a4c35fb772f7d0c643432257"
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.862,
+    "actuatorApplicationStartedSeconds": 2.862,
+    "actuatorApplicationReadySeconds": 2.955,
+    "startupShadowBatchCompletedSecondsApprox": 36.817
+  },
+  "disk": {
+    "springImageBytes": 249371261,
+    "previousSpringImageBytes": 249358377,
+    "imageIncreaseBytes": 12884,
+    "containerWritableLayerBytes": 32768,
+    "shadowVolume": "macrosquare-spring-analyst-history",
+    "shadowVolumeBytesDisplay": "16.8kB",
+    "shadowFiles": 7,
+    "temporaryFilesAfterWrite": 0,
+    "sourceCacheMountReadOnly": true
+  },
+  "rollback": {
+    "previousImageId": "sha256:a5d84671eac076ec0c7535abf8a3b8d59a9a7004d2fdfcb5910c2b0ec676c17c",
+    "previousImageTag": "macrosquare-server-spring:rollback-company-analyst-history-writer",
+    "previousImageStillPresent": true,
+    "configurationRollbackModes": ["dual-compare", "legacy"],
+    "nodeAndClientWereNotRecreated": true,
+    "shadowVolumeCanRemainInertOnRollback": true
+  },
+  "evidenceArtifacts": [
+    "migration/benchmark-results/company-analyst-history-read-cutover/parity-cold.json",
+    "migration/benchmark-results/company-analyst-history-read-cutover/parity-warm.json",
+    "migration/benchmark-results/company-analyst-history-read-cutover/public-regression.json",
+    "migration/benchmark-results/company-analyst-history-read-cutover/concurrent-1.json",
+    "migration/benchmark-results/company-analyst-history-read-cutover/concurrent-2.json",
+    "migration/benchmark-results/company-analyst-history-read-cutover/concurrent-3.json",
+    "migration/benchmark-results/company-analyst-history-read-cutover/sequential.json",
+    "migration/benchmark-results/company-analyst-history-read-cutover/resources.csv",
+    "migration/benchmark-results/company-analyst-history-read-cutover/resource-summary.json",
+    "migration/benchmark-results/company-analyst-history-read-cutover/runtime-metrics.json",
+    "migration/benchmark-results/company-analyst-history-read-cutover/key-logs.txt"
+  ],
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "internalShadowHistoryReadAllowed": true,
+    "reason": "The isolated Spring history is proven as the internal expectations input for seven tickers with legacy comparison and fallback. Public company calculation, the production history writer, remaining collectors, and Telegram side effects still belong to Node."
+  }
+}

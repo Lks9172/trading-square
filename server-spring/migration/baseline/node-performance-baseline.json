@@ -1,0 +1,38 @@
+{
+  "capturedAt": "2026-07-19T06:03:22Z",
+  "client": "Mac on same LAN",
+  "server": "home-server Node production container",
+  "scenarios": {
+    "health": {
+      "requests": 300,
+      "concurrency": 15,
+      "throughputPerSecond": 607.652,
+      "latencyMs": {
+        "min": 11.606,
+        "p50": 18.567,
+        "p95": 35.518,
+        "p99": 103.046,
+        "max": 108.106
+      },
+      "errorCount": 0
+    },
+    "snapshotWarm": {
+      "requests": 30,
+      "concurrency": 3,
+      "responseBytes": 185717,
+      "throughputPerSecond": 49.703,
+      "latencyMs": {
+        "min": 44.994,
+        "p50": 56.809,
+        "p95": 90.725,
+        "p99": 95.189,
+        "max": 95.189
+      },
+      "errorCount": 0
+    }
+  },
+  "notes": [
+    "This is a warm-cache LAN baseline, not a cold-start or forced-refresh benchmark.",
+    "Spring must be measured from the same client against the same home server and concurrency."
+  ]
+}

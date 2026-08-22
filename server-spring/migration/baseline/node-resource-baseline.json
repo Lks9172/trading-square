@@ -1,0 +1,23 @@
+{
+  "capturedAt": "2026-07-19T05:54:00Z",
+  "environment": {
+    "host": "home-server",
+    "architecture": "x86_64",
+    "logicalCpuCount": 8,
+    "memoryBytes": 16631459840,
+    "container": "macrosquare-server"
+  },
+  "runtime": {
+    "stack": "Node.js 22 Alpine / Express 5",
+    "imageSizeBytes": 266577284,
+    "idleMemoryMiB": 116.7,
+    "idleCpuPercentSamples": [0.68, 0.65, 0.71, 0.62, 0.68],
+    "pidCount": 11,
+    "persistentDataBytes": 1060100910
+  },
+  "notes": [
+    "Production container was not restarted while capturing this baseline.",
+    "Startup/readiness and cold-cache metrics will be measured during the side-by-side shadow deployment.",
+    "Block and network I/O values from docker stats are cumulative and are not used as per-request metrics."
+  ]
+}

@@ -51,6 +51,15 @@ const YAHOO_SYMBOLS: Record<string, string> = {
 export { YAHOO_SYMBOLS };
 const log = childLogger({ module: 'collector.yahoo' });
 
+const YAHOO_COMPANY_SYMBOL_OVERRIDES: Record<string, string> = {
+  // 2026-06-17 기준 Yahoo chart API 는 MMC 를 404 반환하고 MRSH 로 응답한다.
+  MMC: 'MRSH',
+};
+
+function resolveYahooSymbol(symbol: string): string {
+  return YAHOO_COMPANY_SYMBOL_OVERRIDES[symbol.trim().toUpperCase()] ?? symbol;
+}
+
 interface ChartMeta {
   symbol: string;
   regularMarketPrice: number;
@@ -61,9 +70,10 @@ interface ChartMeta {
 }
 
 async function fetchChart(symbol: string): Promise<ChartMeta | null> {
+  const resolvedSymbol = resolveYahooSymbol(symbol);
   const urls = [
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=1d`,
-    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=1d`,
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(resolvedSymbol)}?range=5d&interval=1d`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(resolvedSymbol)}?range=5d&interval=1d`,
   ];
   let lastError: unknown = null;
   for (const url of urls) {
@@ -93,9 +103,10 @@ export async function fetchYahooQuote(symbol: string): Promise<{ symbol: string;
 }
 
 function chartUrls(symbol: string, query: string) {
+  const resolvedSymbol = resolveYahooSymbol(symbol);
   return [
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?${query}`,
-    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?${query}`,
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(resolvedSymbol)}?${query}`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(resolvedSymbol)}?${query}`,
   ];
 }
 

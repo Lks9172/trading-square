@@ -1,0 +1,242 @@
+{
+  "capturedAt": "2026-07-19T22:32:03Z",
+  "milestone": "spring-shadow-company-price-signal-parity",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "clientContainer": "macrosquare-client",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25 / Spring Boot 4.1.0 / Tomcat 11.0.22",
+    "nodePort": 5846,
+    "springShadowPort": 5856,
+    "springMemoryLimit": "1GiB"
+  },
+  "scope": {
+    "implemented": "direct Yahoo daily price and volume history plus bottom and reversal signal parity",
+    "directHistoryContract": {
+      "requestWindowCalendarDays": 380,
+      "normalizedTradingPoints": 260,
+      "interval": "1d",
+      "dateZone": "UTC",
+      "fallbackHosts": ["query1.finance.yahoo.com", "query2.finance.yahoo.com"],
+      "symbolRules": ["dot-to-hyphen", "MMC-to-MRSH"]
+    },
+    "domainPolicies": [
+      "price context and bottom markers",
+      "price reset, pattern, absorption, and volume confirmation scores",
+      "price bottom score, failure risk, and structure state",
+      "confirmed deep bottom",
+      "reversal confirmation"
+    ],
+    "cache": {
+      "maximumTickers": 512,
+      "freshTtlMinutes": 15,
+      "staleLimitHours": 2,
+      "tickerSingleFlight": true,
+      "maximumConcurrentExternalFetches": 8,
+      "failedRefreshDoesNotReplaceSuccess": true
+    },
+    "legacyNonPriceInputsIntentionallyReused": [
+      "crowding score",
+      "30-day estimate revision",
+      "guidance-lowered flag"
+    ],
+    "behavior": [
+      "legacy company output remains the serving baseline",
+      "the internal endpoint compares complete chart, marker, score, bottom, and reversal outputs",
+      "Yahoo, HTTP, JSON, cache, controller, and DTO types remain outside domain and application",
+      "the endpoint is request-driven and adds no Spring startup, writer, scheduler, or Telegram side effect",
+      "the upstream Node company GET can retain its existing source-cache behavior",
+      "public APIs and production bottom, reversal, and Telegram ownership are unchanged"
+    ],
+    "remainingInNode": [
+      "public company calculation and route-cache ownership",
+      "production bottom and reversal signal ownership",
+      "production analyst-history source of truth and scheduler",
+      "crowding, guidance, and remaining company enrichment inputs",
+      "SEC submissions, filings, IR, and segment enrichment",
+      "remaining company and research collectors and persistence",
+      "Telegram notifications"
+    ],
+    "productionTrafficCutover": false,
+    "comparableForFinalDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 176,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "domain": 35,
+      "application": 38,
+      "adapters": 93,
+      "bootstrap": 6,
+      "architecture": 4
+    },
+    "localLivePriceParity": {
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true,
+      "includesDotTicker": "BRK.B",
+      "canonicalYahooTicker": "BRK-B"
+    },
+    "homeLivePriceParity": {
+      "capturedAt": "2026-07-19T22:25:17.123047Z",
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true,
+      "pointCountMinimum": 260,
+      "pointCountMaximum": 260,
+      "priceHistoryMatched": 48,
+      "markersMatched": 48,
+      "priceSignalMatched": 48,
+      "confirmedBottomMatched": 48,
+      "reversalConfirmationMatched": 48,
+      "durationMs": {
+        "total": 9908.219,
+        "median": 196.606,
+        "max": 438.445
+      },
+      "observedStates": {
+        "confirmedBottom": {"UNMET": 33, "CANDIDATE": 9, "CONVICTION": 6},
+        "reversal": {"OFF": 28, "EARLY": 14, "ON": 1, "STRONG": 5}
+      }
+    },
+    "existingCompanyResearchRegression": {
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true,
+      "identityMatched": 48,
+      "quoteMatched": 48,
+      "analystConsensusMatched": 48,
+      "analystHistoryMatched": 48,
+      "expectationsMatched": 48,
+      "fundamentalsMatched": 48,
+      "scoreMatched": 48,
+      "buyScoreMatched": 48,
+      "historySources": {"SHADOW": 7, "LEGACY": 41},
+      "durationMs": {"total": 24218.188, "median": 551.222, "max": 1025.514}
+    },
+    "existingPublicEndpointRegression": {
+      "statusAndByteExactMatches": 8,
+      "total": 8,
+      "paths": [
+        "/api/company/NVDA",
+        "/api/company/THISDOESNOTEXIST",
+        "/api/company-search?q=nv&limit=5",
+        "/api/company-summaries?tickers=NVDA%2CMSFT%2CNEM",
+        "/api/research/crypto",
+        "/api/research/crypto/BTC",
+        "/api/research/themes",
+        "/api/research/sectors"
+      ]
+    },
+    "deploymentIsolation": {
+      "springOnlyRecreated": true,
+      "nodeAndClientWereNotRecreated": true,
+      "legacySourceCacheMountReadOnly": true,
+      "analystHistoryReadMode": "shadow-preferred",
+      "startupShadowBatch": {"attempted": 7, "written": 7, "seeded": 0},
+      "shadowFiles": 7,
+      "temporaryFiles": 0
+    }
+  },
+  "httpBenchmarks": {
+    "homeLoopbackFreshConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "responseBytes": 22111,
+      "totalErrorCount": 0,
+      "medianThroughputPerSecond": 401.182,
+      "medianP50Ms": 10.027,
+      "medianP95Ms": 159.861,
+      "medianP99Ms": 170.703,
+      "medianMaxMs": 181.862
+    },
+    "homeLoopbackFreshSequential": {
+      "requests": 200,
+      "concurrency": 1,
+      "responseBytes": 22111,
+      "totalErrorCount": 0,
+      "throughputPerSecond": 411.209,
+      "p50Ms": 2.026,
+      "p95Ms": 2.896,
+      "p99Ms": 4.845,
+      "maxMs": 32.356
+    }
+  },
+  "sameWindowIdle10SamplesAfterParityAndHttpWarmup": {
+    "node": {
+      "memoryMedianMiB": 172.4,
+      "cpuMedianPct": 0.655,
+      "cpuMaxPct": 0.83,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 236.4,
+      "cpuMedianPct": 0.065,
+      "cpuMaxPct": 4.79,
+      "pidCountMedian": 40
+    },
+    "warning": "Node serves the complete production workload while Spring serves only migrated shadow slices; this is not a final runtime comparison."
+  },
+  "springJvmFinal": {
+    "memoryUsedBytes": 149335256,
+    "memoryCommittedBytes": 196018176,
+    "gcPauseCount": 17,
+    "gcPauseTotalSeconds": 0.123,
+    "gcPauseMaxSeconds": 0.006,
+    "liveJvmThreads": 26,
+    "peakJvmThreads": 34
+  },
+  "runtime": {
+    "springReadiness": "UP",
+    "springDockerHealth": "healthy",
+    "springBootReportedStartedSeconds": 2.931,
+    "actuatorApplicationReadySeconds": 2.998,
+    "springWarningCount": 0,
+    "springErrorCount": 0,
+    "springExceptionCount": 0,
+    "springRestartCount": 0,
+    "nodeRestartCount": 0,
+    "clientRestartCount": 0,
+    "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+    "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+    "springContainerId": "f18f08cbf99082d50f4416ce2ac0be7f5b7151547697ac02e16eb4e85fca4826",
+    "springImageId": "sha256:422881c5757fef181a80657322e49a35871a89d5aa1eb478b5558594d1b9d78b"
+  },
+  "disk": {
+    "springImageBytes": 249444291,
+    "previousSpringImageBytes": 249371261,
+    "imageIncreaseBytes": 73030,
+    "nodeImageBytes": 266577284,
+    "containerWritableLayerBytes": 32768,
+    "shadowVolumeBytes": 16803,
+    "shadowFiles": 7,
+    "temporaryFiles": 0,
+    "sourceCacheMountReadOnly": true
+  },
+  "rollback": {
+    "previousImageId": "sha256:ee6f2bdd8000f6f29642f2a51c6b68955b484c06a4c35fb772f7d0c643432257",
+    "previousImageTag": "macrosquare-server-spring:rollback-company-analyst-history-read-cutover",
+    "previousImageStillPresent": true,
+    "nodeAndClientWereNotRecreated": true,
+    "configurationRollbackModes": ["dual-compare", "legacy"]
+  },
+  "evidenceArtifacts": [
+    "migration/benchmark-results/company-price-signal-parity/price-parity-48.json",
+    "migration/benchmark-results/company-price-signal-parity/company-research-regression-48.json",
+    "migration/benchmark-results/company-price-signal-parity/public-regression.json",
+    "migration/benchmark-results/company-price-signal-parity/concurrent-1.json",
+    "migration/benchmark-results/company-price-signal-parity/concurrent-2.json",
+    "migration/benchmark-results/company-price-signal-parity/concurrent-3.json",
+    "migration/benchmark-results/company-price-signal-parity/sequential.json",
+    "migration/benchmark-results/company-price-signal-parity/resources.txt"
+  ],
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "internalPriceSignalParityAllowed": true,
+    "reason": "Direct Yahoo history and all price-derived policies are proven against the legacy result for 48 tickers, but public company orchestration, three non-price enrichment inputs, production schedulers, persistence, and Telegram side effects still belong to Node."
+  }
+}

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { errorMessage } from '@/lib/server-api';
 
 const INTERNAL_API_URL = process.env.SSR_API_URL || 'http://macrosquare-server:5846';
 
@@ -14,9 +15,9 @@ export async function DELETE(
     );
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });
-  } catch (error: any) {
+  } catch (error) {
     return NextResponse.json(
-      { error: error?.message || 'Proxy request failed' },
+      { error: errorMessage(error, 'Proxy request failed') },
       { status: 500 }
     );
   }

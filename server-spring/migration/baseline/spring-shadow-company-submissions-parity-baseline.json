@@ -1,0 +1,292 @@
+{
+  "capturedAt": "2026-07-20T00:11:01.272441Z",
+  "milestone": "spring-shadow-company-submissions-parity",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "clientContainer": "macrosquare-client",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25 / Spring Boot 4.1.0 / Tomcat 11.0.22",
+    "nodePort": 5846,
+    "springShadowPort": 5856,
+    "springMemoryLimit": "1GiB"
+  },
+  "scope": {
+    "implemented": "direct SEC company submissions profile and recent filing metadata parity",
+    "directContract": {
+      "source": "https://data.sec.gov/submissions/CIK##########.json",
+      "requestedRecentColumns": [
+        "accessionNumber",
+        "filingDate",
+        "form",
+        "primaryDocument",
+        "primaryDocDescription"
+      ],
+      "fetchedRecentRows": 20,
+      "comparedRows": 10,
+      "cikWidth": 10,
+      "filingArchiveUrl": "https://www.sec.gov/Archives/edgar/data/{numericCik}/{accessionWithoutDashes}/{primaryDocument}",
+      "clientIdentityHeaderRequired": true
+    },
+    "domainPolicies": [
+      "earnings-related compatibility classification: exact 8-K form plus description matching Item 2.02, earnings, or results of operations",
+      "transport-free filing/submissions evidence models"
+    ],
+    "cache": {
+      "maximumCiks": 128,
+      "freshTtlHours": 4,
+      "staleLimitHours": 24,
+      "cikSingleFlight": true,
+      "maximumConcurrentExternalFetches": 2,
+      "failedRefreshDoesNotReplaceSuccess": true
+    },
+    "behavior": [
+      "legacy company output remains the serving baseline",
+      "streaming parser retains only configured recent filing columns and rows",
+      "registry CIK and submissions continuity candidates are separate",
+      "legacy serving CIK is prioritized only when it belongs to direct continuity candidates",
+      "public APIs, filing detail enrichment, schedulers, persistence, and Telegram ownership are unchanged"
+    ],
+    "remainingInNode": [
+      "public company orchestration and route-cache ownership",
+      "filing detail text and Exhibit 99.x/IR material retrieval",
+      "guidance numbers and segment/geography enrichment",
+      "production company collection schedulers and persistence",
+      "Telegram notifications"
+    ],
+    "productionTrafficCutover": false,
+    "comparableForFinalDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 192,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "domain": 37,
+      "application": 41,
+      "adapters": 101,
+      "bootstrap": 9,
+      "architecture": 4
+    },
+    "localLiveSubmissionsParity": {
+      "capturedAt": "2026-07-19T23:14:12.632100+00:00",
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true,
+      "profileMatched": 48,
+      "filingsMatched": 48,
+      "comparedFilingCountMin": 10,
+      "comparedFilingCountMax": 10,
+      "directAvailableFilingCountMin": 20,
+      "directAvailableFilingCountMax": 20,
+      "durationMs": {
+        "total": 39782.22,
+        "median": 790.375,
+        "max": 2129.455
+      }
+    },
+    "homeLiveSubmissionsParity": {
+      "capturedAt": "2026-07-20T00:13:48.174517+00:00",
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true,
+      "profileMatched": 48,
+      "filingsMatched": 48,
+      "comparedFilingCountMin": 10,
+      "comparedFilingCountMax": 10,
+      "directAvailableFilingCountMin": 20,
+      "directAvailableFilingCountMax": 20,
+      "durationMs": {
+        "total": 17912.793,
+        "median": 385.798,
+        "max": 695.914
+      },
+      "xomSuccessorContinuity": {
+        "registryCik": "0002115436",
+        "selectedServingCik": "0000034088",
+        "orderedCandidates": [
+          "0000034088",
+          "0002115436"
+        ]
+      }
+    },
+    "existingPriceSignalRegression": {
+      "capturedAt": "2026-07-19T23:17:31.732430+00:00",
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true,
+      "durationMs": {
+        "total": 10442.813,
+        "median": 195.648,
+        "max": 525.209
+      }
+    },
+    "existingCompanyResearchRegression": {
+      "capturedAt": "2026-07-20T00:06:39.606873+00:00",
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true,
+      "durationMs": {
+        "total": 37686.288,
+        "median": 868.721,
+        "max": 1189.798
+      },
+      "historySources": {
+        "SHADOW": 7,
+        "LEGACY": 41
+      }
+    },
+    "existingPublicEndpointRegression": {
+      "statusAndByteExactMatches": 8,
+      "total": 8,
+      "allMatched": true,
+      "paths": [
+        "/api/company/NVDA",
+        "/api/company/THISDOESNOTEXIST",
+        "/api/company-search?q=nv&limit=5",
+        "/api/company-summaries?tickers=NVDA%2CMSFT%2CNEM",
+        "/api/research/crypto",
+        "/api/research/crypto/BTC",
+        "/api/research/themes",
+        "/api/research/sectors"
+      ]
+    },
+    "dateBoundaryAudit": {
+      "observed": "verification crossed UTC midnight after Node wrote the new daily analyst-history point and before Spring minute-15 schedule",
+      "rootCause": "expected scheduler timing window, unrelated to SEC submissions code",
+      "recovery": "Spring-only restart invoked startup shadow seed for 2026-07-20",
+      "postRecoveryCoreHistoryMatched": "7/7",
+      "postRecoveryFullCompanyResearchMatched": "48/48"
+    },
+    "deploymentIsolation": {
+      "springOnlyRecreated": true,
+      "nodeAndClientWereNotRecreated": true,
+      "legacySourceCacheMountReadOnly": true,
+      "analystHistoryReadMode": "shadow-preferred",
+      "startupShadowBatch": {
+        "date": "2026-07-20",
+        "attempted": 7,
+        "written": 7,
+        "seeded": 0
+      },
+      "shadowFiles": 7,
+      "temporaryFiles": 0
+    }
+  },
+  "httpBenchmarks": {
+    "homeLoopbackFreshConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "responseBytes": 6597,
+      "totalErrorCount": 0,
+      "medianThroughputPerSecond": 392.738,
+      "medianP50Ms": 9.228,
+      "medianP95Ms": 153.613,
+      "medianP99Ms": 188.619,
+      "medianMaxMs": 195.663
+    },
+    "homeLoopbackFreshSequential": {
+      "requests": 200,
+      "concurrency": 1,
+      "responseBytes": 6597,
+      "totalErrorCount": 0,
+      "throughputPerSecond": 450.291,
+      "minMs": 1.406,
+      "p50Ms": 1.924,
+      "p95Ms": 2.479,
+      "p99Ms": 2.753,
+      "maxMs": 33.095
+    }
+  },
+  "sameWindowIdle10SamplesAfterParityAndHttpWarmup": {
+    "spring": {
+      "samples": 10,
+      "memoryMedianMiB": 235.2,
+      "memoryMinMiB": 234.8,
+      "memoryMaxMiB": 235.3,
+      "cpuMedianPct": 0.09,
+      "cpuMaxPct": 3.02,
+      "pidCountMedian": 43.0,
+      "pidCountMax": 43
+    },
+    "node": {
+      "samples": 10,
+      "memoryMedianMiB": 173.6,
+      "memoryMinMiB": 172.9,
+      "memoryMaxMiB": 174.5,
+      "cpuMedianPct": 0.66,
+      "cpuMaxPct": 0.73,
+      "pidCountMedian": 11.0,
+      "pidCountMax": 11
+    },
+    "warning": "Node serves the complete production workload while Spring serves only migrated shadow slices; this is not a final runtime comparison."
+  },
+  "springJvmFinal": {
+    "memoryUsedBytes": 137899496.0,
+    "memoryCommittedBytes": 195362816.0,
+    "gcPauseCount": 13.0,
+    "gcPauseTotalSeconds": 0.159,
+    "gcPauseMaxSeconds": 0.024,
+    "liveJvmThreads": 25.0,
+    "peakJvmThreads": 36.0
+  },
+  "runtime": {
+    "springReadiness": "UP",
+    "springDockerHealth": "healthy",
+    "springBootReportedStartedSeconds": 2.859,
+    "actuatorApplicationReadySeconds": 2.925,
+    "springWarningCount": 0,
+    "springErrorCount": 0,
+    "springExceptionCount": 0,
+    "springRestartCount": 0,
+    "nodeRestartCount": 0,
+    "clientRestartCount": 0,
+    "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+    "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+    "springContainerId": "a18ec7e7bf8df282f714a1c8ffe04a90a4854d6798bc23fdd36ed0cd2e9285a7",
+    "springImageId": "sha256:d8f53de0045c33d48bc60a05667f52f312908fdb642ef67fec173b09e5a80454"
+  },
+  "disk": {
+    "springImageBytes": 249490548,
+    "previousSpringImageBytes": 249444291,
+    "imageIncreaseBytes": 46257,
+    "nodeImageBytes": 266577284,
+    "containerWritableLayerBytes": 32768,
+    "shadowVolumeBytes": 17228,
+    "shadowFiles": 7,
+    "temporaryFiles": 0,
+    "sourceCacheMountReadOnly": true
+  },
+  "rollback": {
+    "previousImageId": "sha256:422881c5757fef181a80657322e49a35871a89d5aa1eb478b5558594d1b9d78b",
+    "previousImageTag": "macrosquare-server-spring:rollback-company-price-signal-parity",
+    "previousImageStillPresent": true,
+    "nodeAndClientWereNotRecreated": true,
+    "configurationRollbackModes": [
+      "dual-compare",
+      "legacy"
+    ]
+  },
+  "evidenceArtifacts": [
+    "migration/benchmark-results/company-submissions-parity/submissions-parity-local-48.json",
+    "migration/benchmark-results/company-submissions-parity/submissions-parity-home-48.json",
+    "migration/benchmark-results/company-submissions-parity/company-price-regression-48.json",
+    "migration/benchmark-results/company-submissions-parity/company-research-regression-48.json",
+    "migration/benchmark-results/company-submissions-parity/public-regression.json",
+    "migration/benchmark-results/company-submissions-parity/concurrent-1.json",
+    "migration/benchmark-results/company-submissions-parity/concurrent-2.json",
+    "migration/benchmark-results/company-submissions-parity/concurrent-3.json",
+    "migration/benchmark-results/company-submissions-parity/sequential.json",
+    "migration/benchmark-results/company-submissions-parity/resources.csv",
+    "migration/benchmark-results/company-submissions-parity/resource-summary.json",
+    "migration/benchmark-results/company-submissions-parity/runtime-metrics.json",
+    "migration/benchmark-results/company-submissions-parity/runtime-state.txt"
+  ],
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "internalSubmissionsParityAllowed": true,
+    "reason": "Direct SEC submissions profile and recent filing metadata are proven for 48 tickers, but filing detail/Exhibit/IR/guidance enrichment and production orchestration still belong to Node."
+  }
+}

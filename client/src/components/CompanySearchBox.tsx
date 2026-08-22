@@ -20,20 +20,23 @@ export function CompanySearchBox({ initialTicker = "" }: Props) {
 
   useEffect(() => {
     const q = ticker.trim();
-    if (q.length < 1) {
-      return;
-    }
+    if (q.length < 1) return;
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/company-search?q=${encodeURIComponent(q)}&limit=6`, { cache: "no-store" });
+        const res = await fetch(`/api/company-search?q=${encodeURIComponent(q)}&limit=6`, { cache: "no-store", signal: controller.signal });
         if (!res.ok) return;
         const data = await res.json() as { items?: Suggestion[] };
         setSuggestions(Array.isArray(data.items) ? data.items : []);
-      } catch {
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         setSuggestions([]);
       }
     }, 180);
-    return () => clearTimeout(timer);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
   }, [ticker]);
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
