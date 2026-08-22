@@ -1,0 +1,13 @@
+flowchart LR
+    SRC["외부 원천"] --> HTTP["Bounded HTTP adapter"]
+    HTTP --> DTO["Provider DTO / parser"]
+    DTO --> MODEL["Application model"]
+    MODEL --> POLICY["Domain validation / policy"]
+    POLICY --> PG[("PostgreSQL")]
+    POLICY --> MI[("MinIO + pointer")]
+    PG --> PROJ["Current projection"]
+    MI --> PROJ
+    PROJ --> API["REST DTO"]
+    API --> UI["Next.js UI"]
+    PROJ --> OUT["Candidate + Outbox"]
+    OUT --> TG["Telegram"]

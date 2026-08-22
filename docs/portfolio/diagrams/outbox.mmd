@@ -1,0 +1,8 @@
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> IN_FLIGHT: "lease"
+    IN_FLIGHT --> DELIVERED: "provider success + ack"
+    IN_FLIGHT --> RETRY: "temporary failure"
+    RETRY --> IN_FLIGHT: "backoff elapsed"
+    RETRY --> DEAD: "attempt limit"
+    IN_FLIGHT --> PENDING: "lease expired"

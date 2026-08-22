@@ -2,6 +2,14 @@
 
 거시경제, 시장 국면, 섹터 순환, 기업·코인 펀더멘털과 가격 신호를 한 화면에서 분석하고 실행 계획까지 관리하는 투자 리서치 시스템입니다.
 
+## Portfolio
+
+- [프로젝트 포트폴리오](PORTFOLIO.md)
+- [아키텍처 다이어그램](docs/portfolio/ARCHITECTURE-DIAGRAMS.md)
+- [엔지니어링 사례 연구](docs/portfolio/ENGINEERING-CASE-STUDIES.md)
+- [근거·측정 기준](docs/portfolio/EVIDENCE-AND-METRICS.md)
+- [면접 발표 가이드](docs/portfolio/INTERVIEW-GUIDE.md)
+
 ## 운영 상태
 
 **2026-07-21 기준 백엔드의 Java 전환이 완료됐습니다.**

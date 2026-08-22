@@ -1,0 +1,11 @@
+flowchart LR
+    B["Browser"] --> C["Next.js · React"]
+    C --> S["Spring Boot · Java 21"]
+    S --> PG[("PostgreSQL 18")]
+    S --> MI[("MinIO")]
+    S --> EX["SEC · Yahoo · FRED · DART"]
+    S --> TG["Telegram"]
+    S --> OT["OpenTelemetry Collector"]
+    OT --> J["Jaeger"]
+    S --> P["Prometheus"]
+    S --> A["Alloy → Loki"]
