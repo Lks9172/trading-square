@@ -49,8 +49,7 @@ logging:
 
 macrosquare:
   persistence:
-    mode: ${STORAGE_MODE:legacy-file}
-    legacy-import-enabled: ${LEGACY_IMPORT_ENABLED:true}
+    mode: ${STORAGE_MODE:file}
     exclusive-task-max-concurrency: ${EXCLUSIVE_TASK_MAX_CONCURRENCY:4}
   object-storage:
     endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
@@ -103,7 +102,6 @@ macrosquare:
     snapshot-refresh-enabled: ${MARKET_SNAPSHOT_REFRESH_ENABLED:false}
     sector-total-return-enabled: ${SECTOR_TOTAL_RETURN_COLLECTION_ENABLED:true}
     directory: ${MARKET_COLLECTION_DIR:/app/spring-data/market-observations}
-    legacy-history-directory: ${MARKET_LEGACY_HISTORY_DIR:/app/legacy-history}
     maximum-history-points: ${MARKET_COLLECTION_MAX_HISTORY_POINTS:5000}
     maximum-file-bytes: ${MARKET_COLLECTION_MAX_FILE_BYTES:8388608}
     maximum-seed-file-bytes: ${MARKET_HISTORY_SEED_MAX_FILE_BYTES:16777216}
@@ -144,8 +142,6 @@ macrosquare:
     supplemental-concurrency: ${MARKET_SUPPLEMENTAL_CONCURRENCY:4}
   investment-execution:
     data-directory: ${INVESTMENT_EXECUTION_DATA_DIR:/app/spring-data}
-    legacy-data-directory: ${LEGACY_DATA_DIR:/app/legacy-data}
-    import-legacy-on-first-read: ${INVESTMENT_EXECUTION_IMPORT_LEGACY:true}
   sec-company-facts:
     base-url: ${SEC_DATA_BASE_URL:https://data.sec.gov}
     user-agent: ${SEC_USER_AGENT:MacroSquare research contact macrosquare@example.com}
@@ -245,7 +241,6 @@ macrosquare:
     initial-delay: ${DATA_INTEGRITY_MONITOR_INITIAL_DELAY:30s}
     fixed-delay: ${DATA_INTEGRITY_MONITOR_FIXED_DELAY:1m}
   company-analyst:
-    source-cache-directory: ${COMPANY_ANALYST_SOURCE_CACHE_DIR:/app/legacy-source-cache}
     cookie-url: ${YAHOO_COOKIE_URL:https://fc.yahoo.com}
     crumb-url: ${YAHOO_CRUMB_URL:https://query2.finance.yahoo.com/v1/test/getcrumb}
     quote-summary-base-url: ${YAHOO_QUERY2_BASE_URL:https://query2.finance.yahoo.com}

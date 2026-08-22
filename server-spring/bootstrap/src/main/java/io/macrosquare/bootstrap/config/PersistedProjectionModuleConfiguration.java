@@ -10,7 +10,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(PersistedProjectionProperties.class)
-@ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode", havingValue = "legacy-file", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode", havingValue = "file", matchIfMissing = true)
 public class PersistedProjectionModuleConfiguration {
 
     @Bean

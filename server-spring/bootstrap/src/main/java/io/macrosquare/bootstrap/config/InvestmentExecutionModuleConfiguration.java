@@ -34,7 +34,7 @@ import java.time.Clock;
 public class InvestmentExecutionModuleConfiguration {
 
     @Bean
-    @ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode", havingValue = "legacy-file", matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode", havingValue = "file", matchIfMissing = true)
     FileInvestmentExecutionAdapter fileInvestmentExecutionAdapter(
             ObjectMapper objectMapper,
             Clock clock,
@@ -43,9 +43,7 @@ public class InvestmentExecutionModuleConfiguration {
         return new FileInvestmentExecutionAdapter(
                 objectMapper,
                 clock,
-                properties.dataDirectory(),
-                properties.legacyDataDirectory(),
-                properties.importLegacyOnFirstRead()
+                properties.dataDirectory()
         );
     }
 

@@ -1,7 +1,5 @@
 package io.macrosquare.bootstrap.config;
 
-import io.macrosquare.company.adapter.out.persistence.LegacySourceCacheCompanyAnalystConsensusAdapter;
-import io.macrosquare.company.adapter.out.persistence.LegacySourceCacheCompanyAnalystHistoryAdapter;
 import io.macrosquare.company.adapter.out.persistence.FileCompanyAnalystHistoryStoreAdapter;
 import io.macrosquare.company.adapter.out.persistence.ObjectCompanyAnalystConsensusAdapter;
 import io.macrosquare.company.adapter.out.persistence.ObjectCompanyAnalystHistorySeedAdapter;
@@ -27,6 +25,7 @@ import io.macrosquare.company.application.port.out.SaveCompanyAnalystHistoryPort
 import io.macrosquare.company.application.service.RecordCompanyAnalystHistoryService;
 import io.macrosquare.company.application.service.ResolveCompanyAnalystHistoryService;
 import io.macrosquare.company.domain.service.CompanyAnalystHistoryPolicy;
+import io.macrosquare.company.domain.model.CompanyAnalystConsensus;
 import io.macrosquare.research.application.port.out.LoadResearchCatalogPort;
 import io.macrosquare.shared.adapter.out.http.YahooRequestPacingInterceptor;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -43,6 +42,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.net.http.HttpClient;
 import java.time.Clock;
+import java.util.List;
 import java.util.concurrent.Executor;
 
 @Configuration(proxyBeanMethods = false)
@@ -189,12 +189,7 @@ public class CompanyYahooAdapterConfiguration {
             return new ObjectCompanyAnalystConsensusAdapter(
                     objectStorage.getObject(), objectMapper, clock, properties.consensusStaleTtl());
         }
-        return new LegacySourceCacheCompanyAnalystConsensusAdapter(
-                objectMapper,
-                properties.sourceCacheDirectory(),
-                clock,
-                properties.consensusStaleTtl()
-        );
+        return ticker -> new CompanyAnalystConsensus(null, null);
     }
 
     @Bean("directCompanyAnalystConsensusPort")
@@ -230,24 +225,16 @@ public class CompanyYahooAdapterConfiguration {
         if (persistenceProperties.mode() == PersistenceProperties.Mode.POSTGRES_MINIO) {
             return new ObjectCompanyAnalystHistorySeedAdapter(objectStorage.getObject(), objectMapper);
         }
-        return new LegacySourceCacheCompanyAnalystHistoryAdapter(
-                objectMapper,
-                properties.sourceCacheDirectory()
-        );
+        return ticker -> List.of();
     }
 
     @Bean
-    @ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode", havingValue = "legacy-file", matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode", havingValue = "file", matchIfMissing = true)
     FileCompanyAnalystHistoryStoreAdapter companyAnalystHistoryStoreAdapter(
             ObjectMapper objectMapper,
-            CompanyAnalystProperties analystProperties,
             CompanyAnalystHistoryProperties historyProperties
     ) {
-        var seed = analystProperties.sourceCacheDirectory().toAbsolutePath().normalize();
         var store = historyProperties.directory().toAbsolutePath().normalize();
-        if (store.equals(seed) || store.startsWith(seed) || seed.startsWith(store)) {
-            throw new IllegalArgumentException("Analyst history store must not overlap the cutover seed directory");
-        }
         return new FileCompanyAnalystHistoryStoreAdapter(objectMapper, store);
     }
 

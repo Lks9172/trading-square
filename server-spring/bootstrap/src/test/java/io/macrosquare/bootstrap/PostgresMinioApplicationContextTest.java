@@ -19,7 +19,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(properties = {
         "macrosquare.persistence.mode=postgres-minio",
-        "macrosquare.persistence.legacy-import-enabled=false",
         "macrosquare.notifications.enabled=false",
         "macrosquare.market-collection.enabled=false",
         "macrosquare.market-collection.history-seed-enabled=false",

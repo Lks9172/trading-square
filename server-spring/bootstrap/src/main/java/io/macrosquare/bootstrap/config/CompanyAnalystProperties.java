@@ -3,12 +3,10 @@ package io.macrosquare.bootstrap.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.net.URI;
-import java.nio.file.Path;
 import java.time.Duration;
 
 @ConfigurationProperties(prefix = "macrosquare.company-analyst")
 public record CompanyAnalystProperties(
-        Path sourceCacheDirectory,
         URI cookieUrl,
         URI crumbUrl,
         URI quoteSummaryBaseUrl,
@@ -22,9 +20,6 @@ public record CompanyAnalystProperties(
         int minimumSuccessfulTickers
 ) {
     public CompanyAnalystProperties {
-        if (sourceCacheDirectory == null || !sourceCacheDirectory.isAbsolute()) {
-            throw new IllegalArgumentException("sourceCacheDirectory must be an absolute path");
-        }
         requireAbsolute(cookieUrl, "cookieUrl");
         requireAbsolute(crumbUrl, "crumbUrl");
         requireAbsolute(quoteSummaryBaseUrl, "quoteSummaryBaseUrl");

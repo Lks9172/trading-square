@@ -75,23 +75,11 @@ for application_container in macrosquare-server macrosquare-client; do
   docker inspect "$application_container" --format '{{json .HostConfig.CapDrop}}' \
     | grep -q 'ALL'
 done
-legacy_runtime_mounts="$(docker inspect macrosquare-server --format \
-  '{{range .Mounts}}{{if or (eq .Destination "/app/legacy-data") (eq .Destination "/app/spring-data")}}{{.Destination}}{{"\n"}}{{end}}{{end}}')"
-[[ -z "$legacy_runtime_mounts" ]]
-[[ -d server/data ]]
-[[ -s .legacy-runtime-detached-v1 ]]
-legacy_preservation_dir="$(cat .legacy-runtime-detached-v1)"
-[[ -s "$legacy_preservation_dir/server-data.sha256" ]]
-[[ -s "$legacy_preservation_dir/macrosquare-spring-data.tar.gz" ]]
-(
-  cd "$(dirname "$legacy_preservation_dir/macrosquare-spring-data.tar.gz")"
-  sha256sum -c macrosquare-spring-data.tar.gz.sha256 >/dev/null
-)
-if docker volume inspect macrosquare-spring-data >/dev/null 2>&1; then
-  echo 'retired legacy runtime volume still exists after verified archival' >&2
-  exit 1
-fi
-printf 'legacyRuntimeMounts=detached archive=verified retiredVolume=absent\n'
+retired_runtime_mounts="$(docker inspect macrosquare-server --format \
+  '{{range .Mounts}}{{if or (eq .Destination "/app/legacy-data") (eq .Destination "/app/legacy-history") (eq .Destination "/app/legacy-source-cache")}}{{.Destination}}{{"\n"}}{{end}}{{end}}')"
+[[ -z "$retired_runtime_mounts" ]]
+[[ ! -d server ]]
+printf 'retiredNodeBackend=absent runtimeMounts=absent\n'
 if docker image ls --format '{{.Repository}}:{{.Tag}}' \
   | grep -E -q '^macrosquare-(server-spring|client):rollback-'; then
   echo 'historical application rollback image tag remains after successful cutover' >&2

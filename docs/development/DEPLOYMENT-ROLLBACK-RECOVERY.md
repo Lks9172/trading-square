@@ -12,7 +12,7 @@
 - 직전 compose, observability config, server/client image를 rollback unit으로 보존한다.
 - 새 server를 readiness 확인한 뒤 client를 교체한다.
 - 실패하면 자동으로 직전 compose/image를 강제 재생성한다.
-- 성공 후 임시 rollback tag만 제거하고 데이터·legacy archive는 보존한다.
+- 성공 후 임시 rollback tag만 제거하고 PostgreSQL·MinIO 데이터는 보존한다.
 
 ## 2. 표준 명령
 

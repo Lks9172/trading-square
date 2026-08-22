@@ -5,7 +5,6 @@ dist/
 .env.local
 *.log
 .DS_Store
-server/data/
 jaeger-data/
 server-logs/
 
@@ -16,8 +15,5 @@ tmp/
 tmp-screens/
 .codex-video-analysis/
 .omc/
-server/.tmp/
-server/.tmp_*.ts
-server/src/scripts/tmp_*.ts
 __pycache__/
 *.py[cod]

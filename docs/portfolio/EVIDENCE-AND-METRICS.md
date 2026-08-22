@@ -45,10 +45,10 @@
 |---|---:|---:|---:|---:|---:|
 | Domain | 240 | 21,290 | 54 | 6,377 | 265 |
 | Application | 289 | 18,679 | 47 | 7,647 | 162 |
-| Adapters | 198 | 29,297 | 90 | 11,278 | 291 |
-| Bootstrap | 59 | 5,257 | 16 | 766 | 26 |
+| Adapters | 195 | 28,986 | 87 | 11,038 | 280 |
+| Bootstrap | 58 | 5,015 | 16 | 765 | 26 |
 | Architecture tests | 0 | 0 | 1 | 126 | 6 |
-| **합계** | **786** | **74,523** | **208** | **26,194** | **750** |
+| **합계** | **782** | **73,970** | **205** | **25,953** | **739** |
 
 LOC는 품질 지표가 아니라 범위 설명용이다. 생성 코드·빈 줄·주석을 별도로 제거하지 않은 물리 줄 수다.
 
@@ -76,7 +76,7 @@ LOC는 품질 지표가 아니라 범위 설명용이다. 생성 코드·빈 줄
 |---|---:|
 | Next App Router page | 12 |
 | Next API proxy route 파일 | 33 |
-| TypeScript/TSX source | 세션 작업 트리 기준 388개 파일, 약 63K physical LOC |
+| TypeScript/TSX source | 현재 추적 기준 94개 파일, 약 15.2K physical LOC |
 
 TypeScript/TSX LOC에는 test·구형 source가 섞일 수 있으므로 공개 본문의 핵심 지표로 사용하지 않았다.
 
@@ -88,16 +88,16 @@ TypeScript/TSX LOC에는 test·구형 source가 섞일 수 있으므로 공개 �
 |---|---:|---:|---:|---:|
 | Domain | 265 | 0 | 0 | 0 |
 | Application | 162 | 0 | 0 | 0 |
-| Adapters | 291 | 0 | 0 | 18 |
+| Adapters | 280 | 0 | 0 | 18 |
 | Bootstrap | 26 | 0 | 0 | 0 |
 | Architecture | 6 | 0 | 0 | 0 |
-| **합계** | **750** | **0** | **0** | **18** |
+| **합계** | **739** | **0** | **0** | **18** |
 
 정확한 공개 표현은 다음과 같다.
 
-> “Surefire report 기준 750 tests, failure 0, error 0. 표준 Maven 실행에서 외부 PostgreSQL 통합 18개는 skip하며 별도 disposable PostgreSQL 18 스크립트로 실행한다.”
+> “Surefire report 기준 739 tests, failure 0, error 0. 표준 Maven 실행에서 외부 PostgreSQL 통합 18개는 skip하며 별도 disposable PostgreSQL 18 스크립트로 실행한다.”
 
-“750개 전부 실행 통과”라고 단순 표현하면 18 skip을 숨기므로 사용하지 않는다. 세션 최종 응답 중 “750건 통과” 표현보다 로컬 report 재집계를 우선한다.
+“739개 전부 실행 통과”라고 단순 표현하면 18 skip을 숨기므로 사용하지 않는다. 과거 세션 표현보다 현재 로컬 report 재집계를 우선한다.
 
 ### 품질 gate 계약
 

@@ -30,7 +30,7 @@ public class CompanyResearchSummaryConfiguration {
 
     @Bean
     @ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode",
-            havingValue = "legacy-file", matchIfMissing = true)
+            havingValue = "file", matchIfMissing = true)
     InMemoryCompanyResearchSummaryRepository inMemoryCompanyResearchSummaryRepository() {
         return new InMemoryCompanyResearchSummaryRepository();
     }

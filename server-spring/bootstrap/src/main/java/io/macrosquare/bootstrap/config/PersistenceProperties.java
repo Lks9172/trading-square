@@ -5,7 +5,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "macrosquare.persistence")
 public record PersistenceProperties(
         Mode mode,
-        boolean legacyImportEnabled,
         int exclusiveTaskMaxConcurrency
 ) {
 
@@ -17,7 +16,7 @@ public record PersistenceProperties(
     }
 
     public enum Mode {
-        LEGACY_FILE,
+        FILE,
         POSTGRES_MINIO
     }
 }

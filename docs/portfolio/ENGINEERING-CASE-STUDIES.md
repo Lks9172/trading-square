@@ -41,7 +41,7 @@
 
 - 공개 API 45개 소유권 자동 검사
 - 운영 smoke 43개
-- Java Surefire 750 tests, failure/error 0
+- Java Surefire 739 tests, failure/error 0
 - ArchUnit 6개 규칙
 - PostgreSQL 18 멀티 인스턴스 테스트 별도 실행
 - 운영 컨테이너 backend process가 `java -jar` 하나임을 검증

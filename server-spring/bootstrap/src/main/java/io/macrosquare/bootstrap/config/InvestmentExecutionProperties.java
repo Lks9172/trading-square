@@ -6,16 +6,10 @@ import java.nio.file.Path;
 
 @ConfigurationProperties(prefix = "macrosquare.investment-execution")
 public record InvestmentExecutionProperties(
-        Path dataDirectory,
-        Path legacyDataDirectory,
-        boolean importLegacyOnFirstRead
+        Path dataDirectory
 ) {
     public InvestmentExecutionProperties {
         requireAbsolute(dataDirectory, "dataDirectory");
-        requireAbsolute(legacyDataDirectory, "legacyDataDirectory");
-        if (dataDirectory.normalize().equals(legacyDataDirectory.normalize())) {
-            throw new IllegalArgumentException("Spring and legacy execution data directories must be different");
-        }
     }
 
     private static void requireAbsolute(Path value, String field) {

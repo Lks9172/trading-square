@@ -23,7 +23,7 @@ class MarketCollectionPropertiesTest {
 
     private static MarketCollectionProperties properties(Path path, int fredConcurrency, int yahooConcurrency) {
         return new MarketCollectionProperties(
-                true, true, true, path, Path.of("/app/legacy-history"), 5000, 8_388_608, 16_777_216,
+                true, true, true, path, 5000, 8_388_608, 16_777_216,
                 URI.create("https://api.stlouisfed.org"), "key",
                 List.of(URI.create("https://query1.finance.yahoo.com")),
                 URI.create("https://production.dataviz.cnn.io/index/fearandgreed/graphdata"),

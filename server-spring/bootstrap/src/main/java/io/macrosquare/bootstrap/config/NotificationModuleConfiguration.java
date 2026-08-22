@@ -88,7 +88,7 @@ public class NotificationModuleConfiguration {
     }
 
     @Bean
-    @ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode", havingValue = "legacy-file", matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode", havingValue = "file", matchIfMissing = true)
     FileNotificationStateRepository notificationStateRepository(
             ObjectMapper objectMapper,
             NotificationProperties properties

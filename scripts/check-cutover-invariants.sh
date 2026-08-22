@@ -58,20 +58,19 @@ grep -q '<artifactId>micrometer-registry-prometheus</artifactId>' server-spring/
   || fail "Spring runtime must publish Prometheus metrics"
 grep -q 'include: health,info,metrics,prometheus' server-spring/bootstrap/src/main/resources/application.yml \
   || fail "the Prometheus actuator endpoint must be exposed"
-grep -q 'LEGACY_IMPORT_ENABLED=false' docker-compose.yml \
-  || fail "production legacy relational import must remain disabled"
-grep -q 'INVESTMENT_EXECUTION_IMPORT_LEGACY=false' docker-compose.yml \
-  || fail "execution must not read legacy command files"
+[[ ! -d server ]] || fail "retired Node backend directory must not exist"
+if git ls-files 'server/**' | grep -q .; then
+  fail "retired Node backend files remain tracked"
+fi
 server_compose_block="$(sed -n '/^  server:/,/^  client:/p' docker-compose.yml)"
-if grep -E -q '^[[:space:]]+- (\./server/data|macrosquare-spring-data):' <<<"$server_compose_block"; then
-  fail "production server still mounts a legacy runtime filesystem"
+if grep -E -q '/app/(legacy-data|legacy-history|legacy-source-cache)|\./server/data|macrosquare-spring-data' \
+  <<<"$server_compose_block"; then
+  fail "production server still references a retired Node filesystem"
 fi
-minio_init_block="$(sed -n '/^  minio-init:/,/^  minio-seed-import:/p' docker-compose.yml)"
-if grep -E -q '/seed|/source-cache|/legacy-history|server/data' <<<"$minio_init_block"; then
-  fail "default MinIO initializer still mounts legacy seed files"
+if grep -E -q 'minio-seed-import|legacy-seed|LEGACY_IMPORT_ENABLED|INVESTMENT_EXECUTION_IMPORT_LEGACY|server/data' \
+  docker-compose.yml server-spring/bootstrap/src/main/resources/application.yml; then
+  fail "retired Node import or seed configuration remains"
 fi
-grep -q 'profiles: \["legacy-seed"\]' docker-compose.yml \
-  || fail "preserved seed import must require an explicit compose profile"
 grep -q 'MINIO_SECRET_KEY=\${MINIO_APP_SECRET_KEY}' docker-compose.yml \
   || fail "production application must not use the MinIO root credential"
 grep -q 'COMPANY_ANALYST_HISTORY_READ_MODE=store-preferred' docker-compose.yml \

@@ -115,7 +115,6 @@ Domain과 application은 프레임워크 독립적입니다. REST DTO, Jackson d
 - 투자 계획
 - 1·2·3차 tranche
 - 거래 로그
-- startup cutover에서 legacy 파일을 빈 PostgreSQL table에만 안전하게 import
 - 계획·tranche·거래 로그를 명시적 SQL과 ACID transaction으로 영속화
 - 투자계획 partial PATCH를 aggregate advisory lock + row lock으로 직렬화해 동시 요청의 필드 유실 방지
 
@@ -138,7 +137,6 @@ Domain과 application은 프레임워크 독립적입니다. REST DTO, Jackson d
 ```text
 PostgreSQL  market/company/execution/notification 정형 상태와 object pointer
 MinIO       projection, SEC/IR 원문, immutable seed/source/history
-server/data 및 macrosquare-spring-data  보존된 역사 원본(운영 서비스에는 미마운트)
 ```
 
 MinIO seed projection은 런타임 서비스가 아니라 정적 last-valid 자료입니다. mutable projection은

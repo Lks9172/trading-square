@@ -212,7 +212,6 @@ docker run -d --name "$server_container" --network "$network" --memory 1g \
   -e FLYWAY_ENABLED=true \
   -e "OBJECT_STORAGE_ENDPOINT=http://$minio_container:9000" \
   -e "MINIO_ACCESS_KEY=$minio_user" -e "MINIO_SECRET_KEY=$minio_password" -e "MINIO_BUCKET=$bucket" \
-  -e LEGACY_IMPORT_ENABLED=false -e INVESTMENT_EXECUTION_IMPORT_LEGACY=false \
   -e TELEGRAM_NOTIFICATIONS_ENABLED=false \
   -e MARKET_COLLECTION_ENABLED=false -e MARKET_HISTORY_SEED_ENABLED=false \
   -e MARKET_SNAPSHOT_REFRESH_ENABLED=false -e COMPANY_ANALYST_HISTORY_ENABLED=false \
