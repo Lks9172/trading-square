@@ -7,7 +7,6 @@ import io.macrosquare.market.adapter.in.scheduling.SectorTotalReturnHistorySched
 import io.macrosquare.market.adapter.out.fred.FredMarketObservationAdapter;
 import io.macrosquare.market.adapter.out.execution.ExecutionPlanBridgeAdapter;
 import io.macrosquare.market.adapter.out.krx.NaverKrxInvestorFlowAdapter;
-import io.macrosquare.market.adapter.out.persistence.LegacyMarketHistorySeedAdapter;
 import io.macrosquare.market.adapter.out.persistence.ObjectMarketHistorySeedAdapter;
 import io.macrosquare.market.adapter.out.persistence.FileMarketSnapshotProjectionAdapter;
 import io.macrosquare.market.adapter.out.persistence.FileMarketObservationRepository;
@@ -116,7 +115,7 @@ public class MarketCollectionModuleConfiguration {
     }
 
     @Bean
-    @ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode", havingValue = "legacy-file", matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode", havingValue = "file", matchIfMissing = true)
     FileMarketObservationRepository marketObservationRepository(
             ObjectMapper objectMapper,
             Clock clock,
@@ -135,7 +134,7 @@ public class MarketCollectionModuleConfiguration {
     @ConditionalOnProperty(
             prefix = "macrosquare.persistence",
             name = "mode",
-            havingValue = "legacy-file",
+            havingValue = "file",
             matchIfMissing = true
     )
     InMemoryMarketCollectionStatusRepository inMemoryMarketCollectionStatusRepository() {
@@ -265,13 +264,7 @@ public class MarketCollectionModuleConfiguration {
                     objectStorage.getObject(), objectMapper, properties.maximumSeedFileBytes(),
                     properties.maximumHistoryPoints(), providerCodes);
         }
-        return new LegacyMarketHistorySeedAdapter(
-                objectMapper,
-                properties.legacyHistoryDirectory(),
-                properties.maximumSeedFileBytes(),
-                properties.maximumHistoryPoints(),
-                providerCodes
-        );
+        throw new IllegalStateException("Market history seed requires postgres-minio persistence");
     }
 
     @Bean

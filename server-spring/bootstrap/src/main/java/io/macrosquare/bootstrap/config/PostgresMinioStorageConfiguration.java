@@ -14,7 +14,6 @@ import io.macrosquare.shared.adapter.out.storage.ObjectStorage;
 import io.macrosquare.shared.adapter.out.storage.WritableJsonEnvelopeStore;
 import io.macrosquare.shared.adapter.out.persistence.PostgresAdvisoryTaskExecution;
 import io.macrosquare.shared.application.port.out.ExclusiveTaskExecution;
-import io.macrosquare.bootstrap.migration.LegacyRelationalStateImportRunner;
 import io.minio.MinioClient;
 import org.springframework.boot.jdbc.autoconfigure.DataSourceProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -161,25 +160,4 @@ public class PostgresMinioStorageConfiguration {
         return new JdbcNotificationStateRepository(jdbc, transactions, objectMapper);
     }
 
-    @Bean
-    @ConditionalOnProperty(prefix = "macrosquare.persistence", name = "legacy-import-enabled", havingValue = "true")
-    LegacyRelationalStateImportRunner legacyRelationalStateImportRunner(
-            ObjectMapper objectMapper,
-            Clock clock,
-            InvestmentExecutionProperties executionProperties,
-            NotificationProperties notificationProperties,
-            MarketDataProperties marketDataProperties,
-            CompanyAnalystHistoryProperties analystHistoryProperties,
-            JdbcInvestmentExecutionAdapter executionTarget,
-            JdbcNotificationStateRepository notificationTarget,
-            JdbcCompanyAnalystHistoryStoreAdapter analystHistoryTarget,
-            NamedParameterJdbcTemplate jdbc,
-            TransactionOperations transactions,
-            ObjectStorage objectStorage
-    ) {
-        return new LegacyRelationalStateImportRunner(
-                objectMapper, clock, executionProperties, notificationProperties, marketDataProperties,
-                analystHistoryProperties, executionTarget, notificationTarget, analystHistoryTarget,
-                jdbc, transactions, objectStorage);
-    }
 }

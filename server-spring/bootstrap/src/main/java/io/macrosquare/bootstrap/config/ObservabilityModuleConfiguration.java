@@ -19,7 +19,7 @@ public class ObservabilityModuleConfiguration {
 
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-            prefix = "macrosquare.persistence", name = "mode", havingValue = "legacy-file", matchIfMissing = true)
+            prefix = "macrosquare.persistence", name = "mode", havingValue = "file", matchIfMissing = true)
     ExclusiveTaskExecution localExclusiveTaskExecution() {
         return ExclusiveTaskExecution.local();
     }
@@ -51,9 +51,9 @@ public class ObservabilityModuleConfiguration {
 
     @Bean(name = "objectStorageHealthIndicator")
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-            prefix = "macrosquare.persistence", name = "mode", havingValue = "legacy-file", matchIfMissing = true)
+            prefix = "macrosquare.persistence", name = "mode", havingValue = "file", matchIfMissing = true)
     HealthIndicator legacyObjectStorageHealthIndicator() {
-        return () -> Health.up().withDetail("mode", "legacy-file").build();
+        return () -> Health.up().withDetail("mode", "file").build();
     }
 
     @Bean(destroyMethod = "close")

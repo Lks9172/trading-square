@@ -133,34 +133,6 @@ ensure_env_value MINIO_ACCESS_KEY macrosquare
 ensure_env_value MINIO_APP_ACCESS_KEY macrosquare-app
 ensure_env_value MINIO_BUCKET macrosquare-artifacts
 
-# Preserve the detached inputs without mounting them into the new runtime.
-# The large source tree remains untouched; a checksum inventory proves it.
-# The small historical named volume is also archived as a standalone tarball.
-legacy_preservation_dir=""
-if [[ ! -f .legacy-runtime-detached-v1 ]]; then
-  legacy_preservation_dir="$remote_backup_dir/legacy-runtime-$stamp"
-  mkdir -p "$legacy_preservation_dir"
-  if [[ -d server/data ]]; then
-    (
-      cd server/data
-      find . -type f -print0 | sort -z | xargs -0 sha256sum
-    ) >"$legacy_preservation_dir/server-data.sha256"
-    du -sb server/data >"$legacy_preservation_dir/server-data.size"
-  fi
-  if docker volume inspect macrosquare-spring-data >/dev/null 2>&1; then
-    docker run --rm \
-      -v macrosquare-spring-data:/source:ro \
-      -v "$legacy_preservation_dir:/archive" \
-      -e "ARCHIVE_UID=$(id -u)" -e "ARCHIVE_GID=$(id -g)" \
-      alpine:3.22 sh -ec \
-      'tar -czf /archive/macrosquare-spring-data.tar.gz -C /source . &&
-       chown "$ARCHIVE_UID:$ARCHIVE_GID" /archive/macrosquare-spring-data.tar.gz'
-    sha256sum "$legacy_preservation_dir/macrosquare-spring-data.tar.gz" \
-      >"$legacy_preservation_dir/macrosquare-spring-data.tar.gz.sha256"
-  fi
-  chmod -R go-rwx "$legacy_preservation_dir"
-fi
-
 previous_server="$(docker inspect macrosquare-server --format '{{.Image}}' 2>/dev/null || true)"
 previous_client="$(docker inspect macrosquare-client --format '{{.Image}}' 2>/dev/null || true)"
 previous_server_ref="$(docker inspect macrosquare-server --format '{{.Config.Image}}' 2>/dev/null || true)"
@@ -288,17 +260,16 @@ wait_url http://127.0.0.1:13133/ 60
 wait_url http://127.0.0.1:5902/-/ready 60
 wait_url http://127.0.0.1:5904/-/ready 60
 
-# Start stateful dependencies first. The idempotent initializer now creates
-# only the private bucket and least-privilege app account; preserved legacy
-# seed files are available solely through the explicit legacy-seed profile.
+# Start stateful dependencies first. The idempotent initializer creates only
+# the private bucket and least-privilege app account.
 docker compose up -d postgres minio
 wait_healthy macrosquare-postgres 60
 # `docker compose run` inherits SSH stdin by default. Without this redirect it
 # can consume the remainder of this here-doc and silently skip the cutover.
 docker compose run --rm --no-deps minio-init </dev/null
 
-# Exercise the exact production image, PostgreSQL migration and one-way legacy
-# importer before interrupting the healthy container. The preflight uses a
+# Exercise the exact production image and PostgreSQL migration before
+# interrupting the healthy container. The preflight uses a
 # private port and disables all schedulers/notifications, while retaining the
 # real backing-store contract.
 preflight_name="macrosquare-server-preflight-$stamp"
@@ -486,10 +457,6 @@ while IFS= read -r rollback_ref; do
       ;;
   esac
 done < <(docker image ls --format '{{.Repository}}:{{.Tag}}')
-if [[ -n "$legacy_preservation_dir" ]]; then
-  printf '%s\n' "$legacy_preservation_dir" >.legacy-runtime-detached-v1
-  chmod 600 .legacy-runtime-detached-v1
-fi
 printf 'deployed server=%s client=%s\n' \
   "$(docker inspect macrosquare-server --format '{{.Image}}')" \
   "$(docker inspect macrosquare-client --format '{{.Image}}')"

@@ -19,7 +19,7 @@
 - Runtime: Docker Compose, PostgreSQL 18, MinIO, Actuator/Prometheus, OTel Collector/Jaeger, Alloy/Loki
 - 운영 API: Compose 내부 `http://macrosquare-server:5846` (호스트에서는 `127.0.0.1:5846`, SSH 터널로만 접근)
 - 운영 UI: `http://192.168.0.200:5847`
-- 기존 `server/`의 Node/Express 코드는 감사·역사적 비교용 소스로만 남아 있으며 실행 이미지와 컨테이너는 폐기됐습니다.
+- 백엔드는 `server-spring/`의 Java/Spring 구현만 유지하며, 기존 Node/Express 소스와 실행 경로는 저장소에서 제거했습니다.
 
 최종 컷오버 증빙은 [`server-spring/migration/CUTOVER-2026-07-21.md`](server-spring/migration/CUTOVER-2026-07-21.md)에 있습니다.
 
@@ -71,7 +71,6 @@ trading-square/
 │  ├─ bootstrap/
 │  ├─ architecture-tests/
 │  └─ migration/                   # 계약·성능·컷오버 증빙
-├─ server/                         # Node 역사적 참조(비실행)
 └─ docker-compose.yml              # Spring 운영 구성
 ```
 
@@ -171,8 +170,7 @@ Next→Alloy→Loki 전달까지 실제로 확인합니다.
 
 정형 상태와 시계열은 `macrosquare-postgres`, PDF/HTML/JSON object는 private·versioned
 `macrosquare-minio` volume에 저장됩니다. PostgreSQL에는 MinIO object metadata와 active version pointer만
-두며 BLOB은 넣지 않습니다. 기존 `macrosquare-spring-data`와 `server/data` 원본은 checksum/archive와
-함께 보존하지만 운영 컨테이너에는 더 이상 mount하지 않습니다. 런타임 Node 호출이나 Node subprocess는 없습니다.
+두며 BLOB은 넣지 않습니다. 런타임 Node 호출, Node subprocess, Node 백엔드 소스 의존성은 없습니다.
 
 OpenDART는 공식 API 키가 없는 환경에서도 서버와 UI가 정상 기동하며 `collecting` 상태를 명시합니다.
 키를 주입하고 `DART_COLLECTION_ENABLED=true`로 설정하면 같은 PostgreSQL/MinIO 경계에서 자동 수집합니다.

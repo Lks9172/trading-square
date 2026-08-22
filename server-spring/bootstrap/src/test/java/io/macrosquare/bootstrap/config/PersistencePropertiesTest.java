@@ -10,7 +10,7 @@ class PersistencePropertiesTest {
     @Test
     void acceptsBoundedExclusiveTaskConcurrency() {
         var properties = new PersistenceProperties(
-                PersistenceProperties.Mode.POSTGRES_MINIO, false, 4);
+                PersistenceProperties.Mode.POSTGRES_MINIO, 4);
 
         assertEquals(4, properties.exclusiveTaskMaxConcurrency());
     }
@@ -18,10 +18,10 @@ class PersistencePropertiesTest {
     @Test
     void rejectsMissingModeAndUnsafeConcurrency() {
         assertThrows(IllegalArgumentException.class,
-                () -> new PersistenceProperties(null, false, 4));
+                () -> new PersistenceProperties(null, 4));
         assertThrows(IllegalArgumentException.class,
-                () -> new PersistenceProperties(PersistenceProperties.Mode.POSTGRES_MINIO, false, 0));
+                () -> new PersistenceProperties(PersistenceProperties.Mode.POSTGRES_MINIO, 0));
         assertThrows(IllegalArgumentException.class,
-                () -> new PersistenceProperties(PersistenceProperties.Mode.POSTGRES_MINIO, false, 33));
+                () -> new PersistenceProperties(PersistenceProperties.Mode.POSTGRES_MINIO, 33));
     }
 }

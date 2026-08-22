@@ -39,8 +39,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.UnaryOperator;
 
 /**
- * Spring-owned file persistence with bounded legacy import and crash-safe replacement.
- * The legacy tree is never written and can be mounted read-only during cutover.
+ * Spring-owned file persistence with crash-safe replacement.
  */
 public final class FileInvestmentExecutionAdapter
         implements InvestmentPlanRepository, TradeLogRepository, TrancheRepository {
@@ -53,8 +52,6 @@ public final class FileInvestmentExecutionAdapter
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final Path dataDirectory;
-    private final Path legacyDataDirectory;
-    private final boolean importLegacyOnFirstRead;
     private final Lock planLock = new ReentrantLock();
     private final Lock trancheLock = new ReentrantLock();
     private final Lock tradeLogLock = new ReentrantLock();
@@ -62,22 +59,17 @@ public final class FileInvestmentExecutionAdapter
     public FileInvestmentExecutionAdapter(
             ObjectMapper objectMapper,
             Clock clock,
-            Path dataDirectory,
-            Path legacyDataDirectory,
-            boolean importLegacyOnFirstRead
+            Path dataDirectory
     ) {
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.clock = Objects.requireNonNull(clock);
         this.dataDirectory = absolute(dataDirectory, "dataDirectory");
-        this.legacyDataDirectory = absolute(legacyDataDirectory, "legacyDataDirectory");
-        this.importLegacyOnFirstRead = importLegacyOnFirstRead;
     }
 
     @Override
     public Optional<InvestmentPlan> load() {
         planLock.lock();
         try {
-            importIfNecessary(planPath(), legacyPlanPath(), MAX_PLAN_BYTES);
             if (!Files.exists(planPath())) return Optional.empty();
             return Optional.of(readPlan(planPath()));
         } finally {
@@ -106,7 +98,6 @@ public final class FileInvestmentExecutionAdapter
         Objects.requireNonNull(mutation, "mutation");
         planLock.lock();
         try {
-            importIfNecessary(planPath(), legacyPlanPath(), MAX_PLAN_BYTES);
             var before = Files.exists(planPath()) ? readPlan(planPath()) : initialPlan;
             var after = Objects.requireNonNull(mutation.apply(before), "mutation result");
             writeJsonAtomically(planPath(), planDocument(after), MAX_PLAN_BYTES);
@@ -121,7 +112,6 @@ public final class FileInvestmentExecutionAdapter
         Objects.requireNonNull(entry, "entry");
         tradeLogLock.lock();
         try {
-            importIfNecessary(tradeLogPath(), legacyTradeLogPath(), MAX_TRADE_LOG_BYTES);
             Files.createDirectories(tradeLogPath().getParent());
             var serialized = objectMapper.writeValueAsBytes(tradeLogDocument(entry));
             if (serialized.length > MAX_TRADE_LOG_LINE_BYTES) {
@@ -157,7 +147,6 @@ public final class FileInvestmentExecutionAdapter
         if (limit <= 0) return List.of();
         tradeLogLock.lock();
         try {
-            importIfNecessary(tradeLogPath(), legacyTradeLogPath(), MAX_TRADE_LOG_BYTES);
             if (!Files.exists(tradeLogPath())) return List.of();
             requireBoundedFile(tradeLogPath(), MAX_TRADE_LOG_BYTES);
             var lines = Files.readAllLines(tradeLogPath(), StandardCharsets.UTF_8);
@@ -220,7 +209,6 @@ public final class FileInvestmentExecutionAdapter
 
     private List<TrancheEntry> readTranchesLocked() {
         try {
-            importIfNecessary(tranchePath(), legacyTranchePath(), MAX_TRANCHE_BYTES);
             if (!Files.exists(tranchePath())) return List.of();
             requireBoundedFile(tranchePath(), MAX_TRANCHE_BYTES);
             JsonNode root;
@@ -272,35 +260,6 @@ public final class FileInvestmentExecutionAdapter
             throw error;
         } catch (Exception error) {
             throw persistenceFailure("Unable to read the investment plan", error);
-        }
-    }
-
-    private void importIfNecessary(Path target, Path legacy, long maximumBytes) {
-        if (!importLegacyOnFirstRead || Files.exists(target) || !Files.exists(legacy)) return;
-        try {
-            requireBoundedFile(legacy, maximumBytes);
-            Files.createDirectories(target.getParent());
-            var temporary = Files.createTempFile(target.getParent(), target.getFileName() + ".import-", ".tmp");
-            try {
-                try (var source = FileChannel.open(legacy, StandardOpenOption.READ);
-                     var destination = FileChannel.open(temporary, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
-                    var position = 0L;
-                    while (position < source.size()) {
-                        var transferred = source.transferTo(position, source.size() - position, destination);
-                        if (transferred <= 0) {
-                            throw new IOException("Legacy execution data copy made no progress");
-                        }
-                        position += transferred;
-                    }
-                    destination.force(true);
-                }
-                moveAtomically(temporary, target);
-                forceDirectory(target.getParent());
-            } finally {
-                Files.deleteIfExists(temporary);
-            }
-        } catch (Exception error) {
-            throw persistenceFailure("Unable to import legacy execution data", error);
         }
     }
 
@@ -563,18 +522,6 @@ public final class FileInvestmentExecutionAdapter
 
     private Path tranchePath() {
         return dataDirectory.resolve("execution/tranche-state.json");
-    }
-
-    private Path legacyPlanPath() {
-        return legacyDataDirectory.resolve("investment/plan.json");
-    }
-
-    private Path legacyTradeLogPath() {
-        return legacyDataDirectory.resolve("investment/trade-log.jsonl");
-    }
-
-    private Path legacyTranchePath() {
-        return legacyDataDirectory.resolve("execution/tranche-state.json");
     }
 
     private static Path absolute(Path value, String field) {

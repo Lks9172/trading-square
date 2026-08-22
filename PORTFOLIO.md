@@ -18,7 +18,7 @@
 | Observability | Spring Actuator, Micrometer, OpenTelemetry, Prometheus, Loki, Alloy, Jaeger |
 | Delivery | Docker Compose, 변경 범위 기반 테스트·배포, 자동 롤백, 백업·복원 리허설 |
 | 핵심 규모 | 기업 277개, 표준 섹터 11개, 전략 테마 6개, 주요 13F 관리자 20곳, 공개 API 45개 |
-| 품질 기준선 | Java Surefire 750 tests / failures 0 / errors 0, ArchUnit 6 rules, 운영 smoke 43 checks |
+| 품질 기준선 | Java Surefire 739 tests / failures 0 / errors 0, ArchUnit 6 rules, 운영 smoke 43 checks |
 
 > **수치 해석:** 테스트·운영 수치는 지정 세션 `019fe11e-396d-7373-91eb-d21a348c69cd`와 해당 작업 트리의 2026-08-22 상태를 기준으로 정리했다. 외부 포트폴리오에 게시하기 전 [근거와 측정 기준](docs/portfolio/EVIDENCE-AND-METRICS.md)을 함께 확인한다.
 
@@ -285,16 +285,16 @@ Telegram 기업 후보는 총점 70+, B점수 70+, 바닥 후보 이상, 반전 
 
 - Domain 265
 - Application 162
-- Adapters 291 — 외부 통합 18개는 표준 실행에서 skip하고 별도 PostgreSQL 스크립트로 실행
+- Adapters 280 — 외부 통합 18개는 표준 실행에서 skip하고 별도 PostgreSQL 스크립트로 실행
 - Bootstrap 26
 - Architecture 6
-- **총 750, failure 0, error 0**
+- **총 739, failure 0, error 0**
 
 ## 10. 정량 성과
 
 | 구분 | 결과 | 해석 |
 |---|---:|---|
-| Java 테스트 | 750 | Surefire 등록 수, failure/error 0 |
+| Java 테스트 | 739 | Surefire 등록 수, failure/error 0 |
 | 아키텍처 규칙 | 6 | DDD/Clean 경계를 빌드에서 강제 |
 | 공개 API | 45 | route ownership test로 누락 차단 |
 | 운영 smoke | 43/43 | 읽기 API와 안전한 snapshot 재계산 |

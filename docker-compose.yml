@@ -96,33 +96,6 @@ services:
         mc admin policy attach local macrosquare-app --user "$$MINIO_APP_ACCESS_KEY"
     restart: "no"
 
-  # Explicit rollback/bootstrap tool only. It is excluded from the default
-  # production graph, so legacy files can remain preserved on disk without
-  # being mounted into any running service.
-  minio-seed-import:
-    profiles: ["legacy-seed"]
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-macrosquare}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set}
-      MINIO_BUCKET: ${MINIO_BUCKET:-macrosquare-artifacts}
-    volumes:
-      - ./server/data/spring-projections:/seed:ro
-      - ./server/data/source-cache:/source-cache:ro
-      - ./server/data/history:/legacy-history:ro
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
-        mc mirror --quiet --overwrite /seed "local/$$MINIO_BUCKET/seed-projections"
-        mc mirror --quiet --overwrite --exclude "*.tmp-*" /source-cache "local/$$MINIO_BUCKET/source-cache"
-        mc mirror --quiet --overwrite /legacy-history "local/$$MINIO_BUCKET/legacy-history"
-    restart: "no"
-
   # MacroSquare 전용 Jaeger (기존 호스트 jaeger 컨테이너와 완전 분리).
   # 포트: UI 16687 / OTLP HTTP 4328 — 기존 jaeger :16686/:4318 과 완전 분리.
   # Badger 영속 스토리지 → ./jaeger-data (홈서버 재부팅 후에도 trace 복구).
@@ -285,8 +258,6 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_APP_ACCESS_KEY:-macrosquare-app}
       - MINIO_SECRET_KEY=${MINIO_APP_SECRET_KEY}
       - MINIO_BUCKET=${MINIO_BUCKET:-macrosquare-artifacts}
-      - LEGACY_IMPORT_ENABLED=false
-      - INVESTMENT_EXECUTION_IMPORT_LEGACY=false
       - SINGLE_WRITER_GUARD_ENABLED=false
       - FRED_API_KEY=${FRED_API_KEY}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
@@ -297,7 +268,6 @@ services:
       - MARKET_SNAPSHOT_FILE=/app/spring-data/projections/latest-system-snapshot-default-v1.json
       - MARKET_SEED_SNAPSHOT_FILE=/app/spring-projections/latest-system-snapshot-default-v1.json
       - MARKET_HISTORY_DIR=/app/spring-data/market-observations/history
-      - MARKET_LEGACY_HISTORY_DIR=/app/legacy-history
       - MARKET_COLLECTION_ENABLED=true
       - MARKET_HISTORY_SEED_ENABLED=false
       - MARKET_SNAPSHOT_REFRESH_ENABLED=true
@@ -307,7 +277,6 @@ services:
       - KRX_COLLECTION_FIXED_DELAY=30m
       - COMPANY_READ_MODE=file-only
       - COMPANY_READ_SOURCE_CACHE_DIR=/app/spring-projections
-      - COMPANY_ANALYST_SOURCE_CACHE_DIR=/app/legacy-source-cache
       - COMPANY_ANALYST_HISTORY_ENABLED=true
       - COMPANY_ANALYST_HISTORY_STARTUP_DELAY=15m
       - COMPANY_RESEARCH_SUMMARY_ENABLED=true
@@ -345,7 +314,6 @@ services:
       - CRYPTO_READ_MODE=file-only
       - PERSISTED_PROJECTION_DIR=/app/spring-projections
       - INVESTMENT_EXECUTION_DATA_DIR=/app/spring-data
-      - LEGACY_DATA_DIR=/app/legacy-data
       - NOTIFICATION_DATA_DIR=/app/spring-data/notifications
       - JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true
       - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces

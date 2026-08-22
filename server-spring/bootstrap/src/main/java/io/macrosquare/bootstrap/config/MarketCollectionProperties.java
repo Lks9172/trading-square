@@ -13,7 +13,6 @@ public record MarketCollectionProperties(
         boolean historySeedEnabled,
         boolean snapshotRefreshEnabled,
         Path directory,
-        Path legacyHistoryDirectory,
         int maximumHistoryPoints,
         long maximumFileBytes,
         long maximumSeedFileBytes,
@@ -48,10 +47,6 @@ public record MarketCollectionProperties(
     public MarketCollectionProperties {
         if (directory == null || !directory.isAbsolute()) throw new IllegalArgumentException("directory must be absolute");
         directory = directory.normalize();
-        if (legacyHistoryDirectory == null || !legacyHistoryDirectory.isAbsolute()) {
-            throw new IllegalArgumentException("legacyHistoryDirectory must be absolute");
-        }
-        legacyHistoryDirectory = legacyHistoryDirectory.normalize();
         if (maximumHistoryPoints <= 0 || maximumHistoryPoints > 20_000) {
             throw new IllegalArgumentException("maximumHistoryPoints must be between 1 and 20000");
         }

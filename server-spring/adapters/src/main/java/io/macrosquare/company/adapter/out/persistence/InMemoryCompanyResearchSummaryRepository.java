@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Non-production fallback used by the legacy-file profile and isolated tests. */
+/** Non-production fallback used by the file profile and isolated tests. */
 public final class InMemoryCompanyResearchSummaryRepository implements CompanyResearchSummaryRepository {
 
     private final ConcurrentHashMap<String, CompanyResearchSummarySnapshot> values = new ConcurrentHashMap<>();

@@ -25,7 +25,7 @@ import java.time.Clock;
 public class MarketReadModuleConfiguration {
 
     @Bean
-    @ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode", havingValue = "legacy-file", matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "macrosquare.persistence", name = "mode", havingValue = "file", matchIfMissing = true)
     FileMarketSnapshotProjectionAdapter fileMarketSnapshotProjectionAdapter(
             ObjectMapper objectMapper,
             Clock clock,

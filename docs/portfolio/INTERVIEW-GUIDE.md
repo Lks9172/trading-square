@@ -33,7 +33,7 @@
 
 ### 2:10–2:40 — 검증
 
-- Surefire 750 tests, failure/error 0, 외부 통합 18 skip은 별도 PG18에서 실행
+- Surefire 739 tests, failure/error 0, 외부 통합 18 skip은 별도 PG18에서 실행
 - ArchUnit 6 rules, public route 45, smoke 43
 - company 277/277, dangling pointer 0, restart 0 세션 검증
 - CPU 10.55%→2.82%, 약 73% 감소
@@ -147,7 +147,7 @@ Virtual thread는 대기 비용을 줄이지만 외부 provider의 허용 QPS, �
 - 장애 재현 + 운영 fingerprint
 - 배포 후 실제 data drift·outbox·pointer 검사
 
-또한 750 Surefire tests 중 외부 integration 18 skip을 숨기지 않고 별도 실행한다고 설명한다.
+또한 739 Surefire tests 중 외부 integration 18 skip을 숨기지 않고 별도 실행한다고 설명한다.
 
 ### Q13. 왜 공급자 실패에 빈 200 응답을 주지 않나요?
 
