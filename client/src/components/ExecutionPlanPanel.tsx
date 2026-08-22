@@ -51,6 +51,11 @@ interface Props {
       timingNotes?: string[];
     }>;
   };
+  freshness?: {
+    source: string;
+    eligibleForExecution: boolean;
+    reason: string;
+  };
 }
 
 interface TrancheSummary {
@@ -128,7 +133,7 @@ function stageStatusInfo(s: string): StageStatusInfo {
   return { icon: '⏳', text: '대기', color: 'text-neutral-500' };
 }
 
-export function ExecutionPlanPanel({ plans, currentRegime, topdown }: Props) {
+export function ExecutionPlanPanel({ plans, currentRegime, topdown, freshness }: Props) {
   const [summaries, setSummaries] = useState<Record<string, TrancheSummary>>({});
   const [pendingAsset, setPendingAsset] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState<string | null>(null);
@@ -194,6 +199,7 @@ export function ExecutionPlanPanel({ plans, currentRegime, topdown }: Props) {
   );
 
   if (!plans || plans.length === 0) return null;
+  const executionEnabled = freshness?.eligibleForExecution === true;
 
   return (
     <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
@@ -201,6 +207,19 @@ export function ExecutionPlanPanel({ plans, currentRegime, topdown }: Props) {
       <p className="text-[11px] sm:text-xs text-[var(--muted)] mb-2">
         자산별 진입 단계·손절·익절·유효기간 (영상 공통 &quot;진단은 지표, 실행은 규칙&quot;)
       </p>
+
+      {!executionEnabled && (
+        <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+          <div className="font-semibold">과거 호환 플레이북 · 자동 집행 비활성</div>
+          <div className="mt-1 text-amber-100/75">{freshness?.reason ?? '현재 산출시점을 검증할 수 없어 참고용으로만 보존합니다.'}</div>
+        </div>
+      )}
+      {executionEnabled && (
+        <div className="mb-3 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100">
+          <div className="font-semibold">현재 신호 기반 수동 체크리스트</div>
+          <div className="mt-1 text-emerald-100/75">{freshness?.reason ?? '주문을 전송하지 않으며, 버튼은 사용자의 집행 기록만 저장합니다.'}</div>
+        </div>
+      )}
 
       {/* 범례 */}
       <div className="flex flex-wrap gap-x-3 gap-y-1 mb-4 text-[10px] text-[var(--muted)]">
@@ -213,7 +232,9 @@ export function ExecutionPlanPanel({ plans, currentRegime, topdown }: Props) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {plans.map((p) => {
-          const style = ACTION_STYLE[p.action];
+          const style = executionEnabled
+            ? ACTION_STYLE[p.action]
+            : { bg: 'bg-neutral-900/40', border: 'border-neutral-700', text: 'text-neutral-400' };
           const summary = summaries[p.asset];
           const rationale = rationaleMap.get(p.asset);
           const executedSet = new Set(summary?.executedStages ?? []);
@@ -244,7 +265,9 @@ export function ExecutionPlanPanel({ plans, currentRegime, topdown }: Props) {
                       </span>
                     )}
                   </div>
-                  <div className={`text-sm font-semibold ${style.text} mt-0.5`}>{p.actionLabel}</div>
+                  <div className={`text-sm font-semibold ${style.text} mt-0.5`}>
+                    {executionEnabled ? p.actionLabel : `과거 계산 · ${p.actionLabel}`}
+                  </div>
                 </div>
                 <div className="text-right">
                   {p.currentPrice !== null && (
@@ -322,8 +345,13 @@ export function ExecutionPlanPanel({ plans, currentRegime, topdown }: Props) {
               {p.stages.length > 0 && (
                 <div className="space-y-1 mb-2">
                   {p.stages.map((s) => {
-                    const si = stageStatusInfo(s.status);
-                    const executed = executedSet.has(s.stage);
+                    const actuallyExecuted = executedSet.has(s.stage);
+                    const si = actuallyExecuted
+                      ? stageStatusInfo('filled')
+                      : executionEnabled
+                        ? stageStatusInfo(s.status)
+                      : { icon: '◷', text: '과거 기준', color: 'text-neutral-500' };
+                    const executed = actuallyExecuted;
                     const pendingKey = `${p.asset}-${s.stage}`;
                     const isPending = pendingAsset === pendingKey;
                     return (
@@ -354,13 +382,14 @@ export function ExecutionPlanPanel({ plans, currentRegime, topdown }: Props) {
                         {!executed && (
                           <button
                             type="button"
-                            disabled={isPending}
+                            disabled={isPending || !executionEnabled}
                             onClick={() =>
                               executeStage(p.asset, s.stage, p.currentPrice ?? null)
                             }
-                            className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20 disabled:opacity-40"
+                            className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                            title={executionEnabled ? undefined : '현재 계산이 아닌 호환 데이터라 집행할 수 없습니다.'}
                           >
-                            {isPending ? '…' : `${s.stage}차 집행`}
+                            {isPending ? '…' : executionEnabled ? `${s.stage}차 집행` : '집행 잠금'}
                           </button>
                         )}
                       </div>

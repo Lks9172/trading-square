@@ -42,11 +42,15 @@ function naaimLabel(v: number): Badge {
   return         { text: "공격적 🟢",        cls: "bg-green-500/20 text-green-300 border-green-500/40" };
 }
 
-function pcrLabel(v: number): Badge {
-  if (v >= 1.2) return { text: "공포 🟢",    cls: "bg-green-500/20 text-green-300 border-green-500/40" };
-  if (v > 0.9)  return { text: "중립",       cls: "bg-neutral-500/20 text-neutral-300 border-neutral-500/40" };
-  if (v > 0.7)  return { text: "낙관",       cls: "bg-yellow-500/20 text-yellow-300 border-yellow-500/40" };
-  return          { text: "탐욕 🔴",         cls: "bg-red-500/20 text-red-300 border-red-500/40" };
+function pcrLabel(v: number, percentile: number | null): Badge {
+  if (percentile !== null) {
+    if (percentile >= 90) return { text: "풋 우위 극단", cls: "bg-green-500/20 text-green-300 border-green-500/40" };
+    if (percentile <= 10) return { text: "콜 우위 극단", cls: "bg-red-500/20 text-red-300 border-red-500/40" };
+    return { text: "역사 범위 중립", cls: "bg-neutral-500/20 text-neutral-300 border-neutral-500/40" };
+  }
+  if (v >= 1.2) return { text: "풋 우위", cls: "bg-green-500/20 text-green-300 border-green-500/40" };
+  if (v <= 0.7) return { text: "콜 우위", cls: "bg-red-500/20 text-red-300 border-red-500/40" };
+  return { text: "중립", cls: "bg-neutral-500/20 text-neutral-300 border-neutral-500/40" };
 }
 
 function psychLabel(v: number): Badge {
@@ -116,18 +120,22 @@ export function SentimentPanel({ raw, derived }: Props) {
   const naaimDer = derived["NAAIM_EXPOSURE"];
   const naaim = naaimRaw?.value ?? naaimDer?.value ?? null;
 
-  const pcrRaw = raw["PC_RATIO_10D"];
+  const pcrRaw = raw["PC_RATIO"];
   const pcrDer = derived["PC_RATIO_10D"];
-  const pcr = pcrRaw?.value ?? pcrDer?.value ?? null;
+  const pcr = pcrDer?.value ?? pcrRaw?.value ?? null;
+  const pcrIsTenDay = pcrDer?.value !== undefined;
+  const pcrPercentile = derived["PC_RATIO_10D_PERCENTILE"]?.value ?? null;
+  const pcrHistoryCount = derived["PC_RATIO_HISTORY_COUNT"]?.value ?? null;
 
   const psych = derived["PSYCH_SUBSCORE"]?.value ?? null;
+  const psychCoverage = derived["PSYCH_SUBSCORE_COVERAGE"]?.value ?? null;
 
   return (
     <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
       <div className="mb-3">
         <h3 className="text-base sm:text-lg font-semibold">투자자 심리 지표</h3>
         <p className="text-[11px] sm:text-xs text-[var(--muted)]">
-          AAII·NAAIM·P/C Ratio·PSYCH 서브스코어. 극단 구간은 역발상 트리거.
+          AAII·NAAIM·P/C Ratio·PSYCH 조건 합치도. 극단 구간은 보조 경고이며 단독 매수 트리거가 아닙니다.
         </p>
       </div>
 
@@ -140,7 +148,7 @@ export function SentimentPanel({ raw, derived }: Props) {
           badge={aaii !== null ? aaiiLabel(aaii) : null}
           desc="AAII 개인투자자 설문 Bullish% - Bearish%. ≤-20 극공포(역발상), ≥20 탐욕."
           source={aaiiRaw?.source || (aaiiDer ? "자체 계산" : "AAII")}
-          missingReason="무료 소스 차단됨 (AAII xls 403 · stooq 유료화)"
+          missingReason="AAII 공개 설문 feed 수집 실패 또는 발표 주기상 최신 관측 없음"
         />
         <SentimentCard
           title="NAAIM Exposure"
@@ -152,14 +160,17 @@ export function SentimentPanel({ raw, derived }: Props) {
           source={naaimRaw?.source || (naaimDer ? "자체 계산" : "NAAIM")}
         />
         <SentimentCard
-          title="P/C Ratio 10D"
+          title={pcrIsTenDay ? "SPX·SPY·QQQ P/C 10D" : "SPX·SPY·QQQ P/C 1D"}
           value={pcr}
           formatted={pcr !== null ? pcr.toFixed(2) : "-"}
           unit=""
-          badge={pcr !== null ? pcrLabel(pcr) : null}
-          desc="CBOE Put/Call Ratio 10일 이동평균. ≥1.2 공포(역발상), ≤0.7 탐욕."
-          source={pcrRaw?.source || (pcrDer ? "자체 계산" : "CBOE")}
-          missingReason="무료 소스 차단됨 (CBOE CSV 403 · Yahoo ^CPC 404)"
+          badge={pcr !== null ? pcrLabel(pcr, pcrPercentile) : null}
+          desc={pcrIsTenDay
+            ? "CBOE 옵션 체인의 SPX·SPY·QQQ 일별 풋/콜 거래량 비율 최근 10개 관측 평균. 높은 값은 풋 우위지만 반등을 확정하지 않습니다."
+            : "CBOE 옵션 체인의 SPX·SPY·QQQ 당일 풋/콜 거래량 비율. 10개 관측이 쌓이기 전에는 10D로 표시하지 않습니다."}
+          source={pcrIsTenDay ? "CBOE 체인 기반 자체 10D" : (pcrRaw?.source || "CBOE 옵션 체인")}
+          footer={`${pcrPercentile !== null ? `최대 252개 10D 관측 중 ${pcrPercentile.toFixed(0)}백분위 · ` : ''}일별 이력 ${pcrHistoryCount?.toFixed(0) ?? 0}개`}
+          missingReason="CBOE SPX·SPY·QQQ 옵션 체인 수집 실패 또는 최신 관측 없음"
         />
         <SentimentCard
           title="PSYCH Subscore"
@@ -167,10 +178,14 @@ export function SentimentPanel({ raw, derived }: Props) {
           formatted={psych !== null ? psych.toFixed(3) : "-"}
           unit=""
           badge={psych !== null ? psychLabel(psych) : null}
-          desc="F&G·P/C 10D·AAII·NAAIM 가중평균 (각 0.25). 0=극공포, 1=극탐욕. 결측 컴포넌트는 재정규화."
+          desc="F&G·P/C 10D·AAII·NAAIM 중 최소 2개가 있을 때만 계산. 0=공포, 1=탐욕의 조건 합치도이며 수익 확률이 아닙니다."
           source="자체 계산"
-          footer="구성: F&G · PCR · AAII · NAAIM"
+          footer={`구성: F&G · PCR · AAII · NAAIM · 커버리지 ${psychCoverage?.toFixed(0) ?? 0}%`}
         />
+      </div>
+      <div className="mt-3 rounded-lg border border-slate-700/70 bg-slate-950/30 px-3 py-2 text-[10px] leading-4 text-[var(--muted)]">
+        종목별 공매도 잔고는 신뢰할 직접 소스가 아직 연결되지 않아 점수에 넣지 않습니다. 13F PUT/CALL이나 일일 short volume을
+        공매도 잔고로 대체하지 않으며, 높은 공매도는 단독 하락 신호가 아니라 촉매 발생 시 숏커버 변동성을 키울 수 있는 조건입니다.
       </div>
     </div>
   );

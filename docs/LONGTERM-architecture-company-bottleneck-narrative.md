@@ -1,5 +1,13 @@
 # Long-term Architecture: Company Fundamentals / Bottleneck / Narrative
 
+- 문서 상태: **ARCHIVED**
+- 현재 운영 계약 아님: Node 시기 설계 이력이다.
+
+> **구현 상태 — 2026-07-21**
+> 이 문서의 설계 목표는 company fundamentals, bottleneck, narrative bounded context와 API/UI로 구현됐다.
+> 아래 `server/src` TypeScript 경로는 역사적 초안이다. Spring 구현 근거와 실제 잔여 고도화는
+> [`TODO-STATUS-2026-07-21.md`](TODO-STATUS-2026-07-21.md)를 기준으로 한다.
+
 ## 목적
 
 MacroSquare의 기존 강점인:
@@ -465,4 +473,3 @@ TODO:
 2. 기업 점수 엔진
 3. 내러티브 heat score
 4. 병목 후보 랭킹
-

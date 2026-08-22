@@ -1,0 +1,535 @@
+{
+  "generatedAt": "2026-07-20T16:22:15.073170+00:00",
+  "sourceRevision": "working-tree",
+  "metrics": {
+    "typescriptFiles": 153,
+    "typescriptLines": 44515,
+    "largestFiles": [
+      {
+        "path": "server/src/engines/derived.ts",
+        "lines": 10912
+      },
+      {
+        "path": "server/src/engines/signals.ts",
+        "lines": 3144
+      },
+      {
+        "path": "server/src/services/company-research.ts",
+        "lines": 2369
+      },
+      {
+        "path": "server/src/routes/api.ts",
+        "lines": 1640
+      },
+      {
+        "path": "server/src/state/history-store.ts",
+        "lines": 1436
+      },
+      {
+        "path": "server/src/services/crypto-research.ts",
+        "lines": 1369
+      },
+      {
+        "path": "server/src/services/interpretations.ts",
+        "lines": 796
+      },
+      {
+        "path": "server/src/scripts/portfolio-sweep.ts",
+        "lines": 699
+      },
+      {
+        "path": "server/src/engines/allocation.ts",
+        "lines": 644
+      },
+      {
+        "path": "server/src/engines/execution_plan.ts",
+        "lines": 630
+      },
+      {
+        "path": "server/src/collectors/smart-money.ts",
+        "lines": 601
+      },
+      {
+        "path": "server/src/services/topdown-view.ts",
+        "lines": 539
+      },
+      {
+        "path": "server/src/collectors/institutional-13f.ts",
+        "lines": 536
+      },
+      {
+        "path": "server/src/services/sector-rotation.ts",
+        "lines": 531
+      },
+      {
+        "path": "server/src/services/telegram.ts",
+        "lines": 499
+      },
+      {
+        "path": "server/src/collectors/sec/filing-detail.ts",
+        "lines": 472
+      },
+      {
+        "path": "server/src/types/indicators.ts",
+        "lines": 469
+      },
+      {
+        "path": "server/src/routes/backtest.ts",
+        "lines": 462
+      },
+      {
+        "path": "server/src/collectors/fred.ts",
+        "lines": 439
+      },
+      {
+        "path": "server/src/state/cache.ts",
+        "lines": 408
+      }
+    ]
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/snapshot",
+      "source": "server/src/routes/api.ts",
+      "line": 729
+    },
+    {
+      "method": "POST",
+      "path": "/api/snapshot",
+      "source": "server/src/routes/api.ts",
+      "line": 738
+    },
+    {
+      "method": "POST",
+      "path": "/api/refresh",
+      "source": "server/src/routes/api.ts",
+      "line": 757
+    },
+    {
+      "method": "GET",
+      "path": "/api/history/coverage",
+      "source": "server/src/routes/api.ts",
+      "line": 767
+    },
+    {
+      "method": "GET",
+      "path": "/api/history/:source/:key",
+      "source": "server/src/routes/api.ts",
+      "line": 775
+    },
+    {
+      "method": "GET",
+      "path": "/api/history-series",
+      "source": "server/src/routes/api.ts",
+      "line": 786
+    },
+    {
+      "method": "GET",
+      "path": "/api/smart-money",
+      "source": "server/src/routes/api.ts",
+      "line": 799
+    },
+    {
+      "method": "GET",
+      "path": "/api/company/:ticker",
+      "source": "server/src/routes/api.ts",
+      "line": 808
+    },
+    {
+      "method": "GET",
+      "path": "/api/company-summaries",
+      "source": "server/src/routes/api.ts",
+      "line": 828
+    },
+    {
+      "method": "GET",
+      "path": "/api/company-search",
+      "source": "server/src/routes/api.ts",
+      "line": 873
+    },
+    {
+      "method": "GET",
+      "path": "/api/research/themes",
+      "source": "server/src/routes/api.ts",
+      "line": 892
+    },
+    {
+      "method": "GET",
+      "path": "/api/research/sectors/backtest",
+      "source": "server/src/routes/api.ts",
+      "line": 915
+    },
+    {
+      "method": "GET",
+      "path": "/api/research/sectors",
+      "source": "server/src/routes/api.ts",
+      "line": 929
+    },
+    {
+      "method": "GET",
+      "path": "/api/research/themes/:id",
+      "source": "server/src/routes/api.ts",
+      "line": 988
+    },
+    {
+      "method": "GET",
+      "path": "/api/research/sectors/:id",
+      "source": "server/src/routes/api.ts",
+      "line": 1071
+    },
+    {
+      "method": "GET",
+      "path": "/api/bottleneck/themes",
+      "source": "server/src/routes/api.ts",
+      "line": 1180
+    },
+    {
+      "method": "GET",
+      "path": "/api/bottleneck/themes/:id",
+      "source": "server/src/routes/api.ts",
+      "line": 1184
+    },
+    {
+      "method": "GET",
+      "path": "/api/narrative/themes",
+      "source": "server/src/routes/api.ts",
+      "line": 1196
+    },
+    {
+      "method": "GET",
+      "path": "/api/narrative/themes/:id",
+      "source": "server/src/routes/api.ts",
+      "line": 1200
+    },
+    {
+      "method": "GET",
+      "path": "/api/narrative/overview",
+      "source": "server/src/routes/api.ts",
+      "line": 1212
+    },
+    {
+      "method": "GET",
+      "path": "/api/research/crypto",
+      "source": "server/src/routes/api.ts",
+      "line": 1221
+    },
+    {
+      "method": "GET",
+      "path": "/api/research/crypto/:symbol",
+      "source": "server/src/routes/api.ts",
+      "line": 1246
+    },
+    {
+      "method": "GET",
+      "path": "/api/research/companies",
+      "source": "server/src/routes/api.ts",
+      "line": 1264
+    },
+    {
+      "method": "GET",
+      "path": "/api/research/highlights",
+      "source": "server/src/routes/api.ts",
+      "line": 1321
+    },
+    {
+      "method": "GET",
+      "path": "/api/earnings",
+      "source": "server/src/routes/api.ts",
+      "line": 1409
+    },
+    {
+      "method": "GET",
+      "path": "/api/correlation",
+      "source": "server/src/routes/api.ts",
+      "line": 1418
+    },
+    {
+      "method": "POST",
+      "path": "/api/execution-plan/tranche",
+      "source": "server/src/routes/api.ts",
+      "line": 1439
+    },
+    {
+      "method": "GET",
+      "path": "/api/execution-plan/tranche",
+      "source": "server/src/routes/api.ts",
+      "line": 1510
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/execution-plan/tranche/:asset",
+      "source": "server/src/routes/api.ts",
+      "line": 1520
+    },
+    {
+      "method": "GET",
+      "path": "/api/plan",
+      "source": "server/src/routes/api.ts",
+      "line": 1531
+    },
+    {
+      "method": "POST",
+      "path": "/api/plan",
+      "source": "server/src/routes/api.ts",
+      "line": 1536
+    },
+    {
+      "method": "GET",
+      "path": "/api/trade-log",
+      "source": "server/src/routes/api.ts",
+      "line": 1553
+    },
+    {
+      "method": "POST",
+      "path": "/api/trade-log",
+      "source": "server/src/routes/api.ts",
+      "line": 1559
+    },
+    {
+      "method": "GET",
+      "path": "/api/domestic-reports",
+      "source": "server/src/routes/api.ts",
+      "line": 1603
+    },
+    {
+      "method": "GET",
+      "path": "/api/weekly-report",
+      "source": "server/src/routes/api.ts",
+      "line": 1613
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "source": "server/src/routes/api.ts",
+      "line": 1630
+    },
+    {
+      "method": "GET",
+      "path": "/api/backtest/summary",
+      "source": "server/src/routes/backtest.ts",
+      "line": 31
+    },
+    {
+      "method": "GET",
+      "path": "/api/backtest/portfolio",
+      "source": "server/src/routes/backtest.ts",
+      "line": 128
+    },
+    {
+      "method": "GET",
+      "path": "/api/backtest/user-plan",
+      "source": "server/src/routes/backtest.ts",
+      "line": 354
+    }
+  ],
+  "cronSchedules": [
+    {
+      "expression": "*/3 9-14 * * 1-5",
+      "timezone": "Asia/Seoul",
+      "triggerHint": "kr-daytime-3min",
+      "source": "server/src/index.ts",
+      "line": 121
+    },
+    {
+      "expression": "0,3,6,9,12,15,18,21,24,27,30 15 * * 1-5",
+      "timezone": "Asia/Seoul",
+      "triggerHint": "kr-close-3min",
+      "source": "server/src/index.ts",
+      "line": 122
+    },
+    {
+      "expression": "*/5 22-23 * * 1-5",
+      "timezone": "Asia/Seoul",
+      "triggerHint": "us-evening-5min",
+      "source": "server/src/index.ts",
+      "line": 124
+    },
+    {
+      "expression": "*/5 0-5 * * 2-6",
+      "timezone": "Asia/Seoul",
+      "triggerHint": "us-overnight-5min",
+      "source": "server/src/index.ts",
+      "line": 125
+    },
+    {
+      "expression": "*/15 6-8 * * 1-5",
+      "timezone": "Asia/Seoul",
+      "triggerHint": "kr-pre-15min",
+      "source": "server/src/index.ts",
+      "line": 127
+    },
+    {
+      "expression": "*/15 16-22 * * 1-5",
+      "timezone": "Asia/Seoul",
+      "triggerHint": "kr-post-15min",
+      "source": "server/src/index.ts",
+      "line": 128
+    },
+    {
+      "expression": "0 * * * 0,6",
+      "timezone": "Asia/Seoul",
+      "triggerHint": "weekday-confirmed-bottom-scan-1h",
+      "source": "server/src/index.ts",
+      "line": 130
+    },
+    {
+      "expression": "5 * * * 1-5",
+      "timezone": "Asia/Seoul",
+      "triggerHint": "weekday-confirmed-bottom-scan-1h",
+      "source": "server/src/index.ts",
+      "line": 133
+    },
+    {
+      "expression": "5 */4 * * 0,6",
+      "timezone": "Asia/Seoul",
+      "triggerHint": "weekday-confirmed-bottom-scan-1h",
+      "source": "server/src/index.ts",
+      "line": 134
+    },
+    {
+      "expression": "20 * * * 1-5",
+      "timezone": "Asia/Seoul",
+      "triggerHint": "weekday-confirmed-bottom-scan-1h",
+      "source": "server/src/index.ts",
+      "line": 137
+    },
+    {
+      "expression": "20 */4 * * 0,6",
+      "timezone": "Asia/Seoul",
+      "triggerHint": "weekend-confirmed-bottom-scan-4h",
+      "source": "server/src/index.ts",
+      "line": 138
+    },
+    {
+      "expression": "0 7 * * *",
+      "timezone": "Asia/Seoul",
+      "triggerHint": null,
+      "source": "server/src/index.ts",
+      "line": 142
+    },
+    {
+      "expression": "0 8 * * 1",
+      "timezone": "Asia/Seoul",
+      "triggerHint": null,
+      "source": "server/src/index.ts",
+      "line": 154
+    },
+    {
+      "expression": "0 7 * * *",
+      "timezone": null,
+      "triggerHint": null,
+      "source": "server/src/index.ts",
+      "line": 168
+    }
+  ],
+  "collectors": [
+    "analyst-consensus",
+    "auto-manual",
+    "calendar",
+    "cme-fedwatch",
+    "cnn",
+    "crypto-etf",
+    "crypto-fundamentals",
+    "crypto-market",
+    "dart-major",
+    "domestic-reports",
+    "earnings",
+    "fred",
+    "institutional-13f",
+    "kcif-topic",
+    "kif",
+    "kr-news",
+    "krx-flow",
+    "openinsider",
+    "sec-8k",
+    "sec/companyfacts",
+    "sec/filing-detail",
+    "sec/filings",
+    "sec/submissions",
+    "sec/ticker-map",
+    "sentiment",
+    "smart-money",
+    "stablecoin",
+    "te-stream",
+    "trends/external-proxies",
+    "yahoo"
+  ],
+  "persistenceReferences": [
+    {
+      "source": "server/src/engines/signals.ts",
+      "line": 9,
+      "expression": "const LEVERAGE_ENTRY_FILE = path.resolve(process.cwd(), 'data', 'leverage-entry.json');"
+    },
+    {
+      "source": "server/src/services/flagPersistence.ts",
+      "line": 20,
+      "expression": "const DATA_DIR = path.resolve(process.cwd(), 'data', 'runtime');"
+    },
+    {
+      "source": "server/src/services/flagPersistence.ts",
+      "line": 21,
+      "expression": "const STATE_FILE = path.join(DATA_DIR, 'flag-state.json');"
+    },
+    {
+      "source": "server/src/services/investment-plan.ts",
+      "line": 19,
+      "expression": "const DATA_DIR = process.env.INVESTMENT_DATA_DIR || '/app/data/investment';"
+    },
+    {
+      "source": "server/src/services/investment-plan.ts",
+      "line": 97,
+      "expression": "const PLAN_FILE = () => path.join(DATA_DIR, 'plan.json');"
+    },
+    {
+      "source": "server/src/services/investment-plan.ts",
+      "line": 98,
+      "expression": "const LOG_FILE = () => path.join(DATA_DIR, 'trade-log.jsonl');"
+    },
+    {
+      "source": "server/src/services/logger.ts",
+      "line": 7,
+      "expression": "? path.join(process.cwd(), '.logs')"
+    },
+    {
+      "source": "server/src/services/source-cache.ts",
+      "line": 4,
+      "expression": "const DATA_DIR = path.resolve(process.cwd(), 'data');"
+    },
+    {
+      "source": "server/src/services/source-cache.ts",
+      "line": 5,
+      "expression": "const CACHE_DIR = path.join(DATA_DIR, 'source-cache');"
+    },
+    {
+      "source": "server/src/services/source-cache.ts",
+      "line": 26,
+      "expression": "return path.join(CACHE_DIR, `${sanitizeKey(key)}.json`);"
+    },
+    {
+      "source": "server/src/services/trancheStore.ts",
+      "line": 14,
+      "expression": "const DATA_DIR = path.resolve(process.cwd(), 'data', 'execution');"
+    },
+    {
+      "source": "server/src/services/trancheStore.ts",
+      "line": 15,
+      "expression": "const STATE_FILE = path.join(DATA_DIR, 'tranche-state.json');"
+    },
+    {
+      "source": "server/src/state/history-store.ts",
+      "line": 18,
+      "expression": "const DATA_DIR = path.resolve(process.cwd(), 'data');"
+    },
+    {
+      "source": "server/src/state/history-store.ts",
+      "line": 19,
+      "expression": "const HISTORY_DIR = path.join(DATA_DIR, 'history');"
+    },
+    {
+      "source": "server/src/state/history-store.ts",
+      "line": 39,
+      "expression": "return path.join(HISTORY_DIR, `${source.toLowerCase()}-${key.toLowerCase()}.json`);"
+    }
+  ]
+}

@@ -1,0 +1,208 @@
+{
+  "capturedAt": "2026-07-19T13:41:11Z",
+  "milestone": "spring-shadow-company-quote-direct-yahoo-parity",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25.0.3 LTS / Spring Boot 4.1.0 / Tomcat 11.0.22",
+    "nodePort": 5846,
+    "springShadowPort": 5856,
+    "springMemoryLimit": "1GiB"
+  },
+  "scope": {
+    "implementedInternalRead": "GET /internal/v1/migration/company-research-parity/{ticker}",
+    "behavior": [
+      "Spring loads the current company quote directly from Yahoo chart metadata instead of using the legacy company projection as its normalization input",
+      "query1 then query2 fallback, range=5d, interval=1d, UTC market date, and the MMC-to-MRSH compatibility symbol preserve the Node collector contract",
+      "Yahoo JSON, HTTP, retry, and cache types remain in the outbound adapter; application receives only a framework-free quote projection and domain receives only the numeric price",
+      "the response exposes quoteMatched and legacy/Spring quote values before comparing fundamentals, Company Score, and Buy Score",
+      "successful quotes are bounded to 128 tickers, fresh for one minute, stale for at most fifteen minutes, and protected by per-ticker single-flight",
+      "different external quote fetches are limited to eight concurrent operations and malformed or failed responses never replace the last successful quote",
+      "the endpoint remains demand-driven and adds no startup fetch, persistence write, scheduler, notification, or Telegram side effect"
+    ],
+    "remainingInNode": [
+      "analyst consensus collection and history persistence used by market expectations",
+      "Yahoo price history used by bottom and reversal signals",
+      "SEC submissions, filings, IR, segment, and company enrichment",
+      "public company detail calculation and route-cache ownership",
+      "company research schedulers and Telegram notifications"
+    ],
+    "legacyCalculationInputsStillUsed": ["analyst expectations"],
+    "comparableForFinalDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 113,
+      "failures": 0,
+      "domain": 22,
+      "application": 20,
+      "adapters": 65,
+      "bootstrap": 2,
+      "architecture": 4
+    },
+    "localColdDirectQuoteParity": {
+      "tickers": 48,
+      "matched": 48,
+      "quoteIdentityFundamentalsScoreBuyScoreAndReasonsExact": true,
+      "medianDurationMs": 742.535,
+      "maxDurationMs": 29529.663,
+      "totalDurationMs": 65291.851,
+      "maxDurationExplanation": "NVDA included a legacy Node route-cache refresh; it is not direct Yahoo or Spring calculation time"
+    },
+    "localWarmDirectQuoteParity": {
+      "tickers": 48,
+      "matched": 48,
+      "medianDurationMs": 2.657,
+      "maxDurationMs": 22.584,
+      "totalDurationMs": 153.107
+    },
+    "homeColdDirectQuoteParity": {
+      "tickers": 48,
+      "matched": 48,
+      "identityMatched": 48,
+      "quoteMatched": 48,
+      "fundamentalsMatched": 48,
+      "scoreMatched": 48,
+      "buyScoreMatched": 48,
+      "medianDurationMs": 697.553,
+      "maxDurationMs": 954.993,
+      "totalDurationMs": 32423.455
+    },
+    "homeWarmDirectQuoteParity": {
+      "tickers": 48,
+      "matched": 48,
+      "medianDurationMs": 3.171,
+      "maxDurationMs": 29.208,
+      "totalDurationMs": 186.002
+    },
+    "compatibilityCases": {
+      "MMC": {
+        "requestedTicker": "MMC",
+        "yahooSymbol": "MRSH",
+        "quoteMatched": true,
+        "allMatched": true
+      },
+      "BRK.B": {
+        "normalizedTicker": "BRK-B",
+        "quoteMatched": true,
+        "allMatched": true
+      },
+      "XOM": {
+        "registryCik": "0002115436",
+        "fundamentalsCik": "0000034088",
+        "quoteMatched": true,
+        "allMatched": true
+      }
+    },
+    "existingPublicEndpointRegression": {
+      "statusObjectAndByteExactMatches": 8,
+      "total": 8,
+      "covered": [
+        "company detail success",
+        "company detail 404",
+        "company search",
+        "company summaries",
+        "crypto catalog",
+        "crypto BTC detail",
+        "research theme catalog",
+        "research sector catalog"
+      ]
+    },
+    "internalUnknownTicker": {
+      "status": 404,
+      "safeErrorBody": true
+    }
+  },
+  "httpBenchmarks": {
+    "homeLoopbackFreshConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "responseBytes": 3427,
+      "totalErrorCount": 0,
+      "medianThroughputPerSecond": 412.35,
+      "medianP50Ms": 8.71,
+      "medianP95Ms": 157.724,
+      "medianP99Ms": 185.637,
+      "medianMaxMs": 187.545
+    },
+    "homeLoopbackFreshSequential": {
+      "requests": 200,
+      "concurrency": 1,
+      "totalErrorCount": 0,
+      "throughputPerSecond": 435.467,
+      "p50Ms": 2.059,
+      "p95Ms": 2.517,
+      "p99Ms": 2.611,
+      "maxMs": 30.289
+    }
+  },
+  "sameWindowIdle10SamplesAfter48TickerAndHttpWarmup": {
+    "node": {
+      "memoryMedianMiB": 122.6,
+      "memoryMinMiB": 122.6,
+      "memoryMaxMiB": 122.6,
+      "cpuMedianPct": 0.68,
+      "cpuMeanPct": 0.759,
+      "cpuMaxPct": 1.56,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 224.5,
+      "memoryMinMiB": 224.5,
+      "memoryMaxMiB": 224.6,
+      "cpuMedianPct": 0.065,
+      "cpuMeanPct": 0.086,
+      "cpuMaxPct": 0.21,
+      "pidCountMedian": 30
+    },
+    "warning": "Node serves the full production workload while Spring still serves read-only shadow traffic, so this is not a final runtime comparison."
+  },
+  "springJvmFinal": {
+    "heapUsedBytes": 68862952,
+    "heapCommittedBytes": 105578496,
+    "tenuredUsedBytes": 39415056,
+    "nonHeapUsedBytes": 85402872,
+    "nonHeapCommittedBytes": 87556096,
+    "gcPauseCount": 12,
+    "gcPauseTotalSeconds": 0.115,
+    "gcPauseMaxSeconds": 0.007,
+    "liveJvmThreads": 20,
+    "peakJvmThreads": 31
+  },
+  "runtime": {
+    "springReadiness": "UP",
+    "springDockerHealth": "healthy",
+    "springWarningCount": 0,
+    "springErrorCount": 0,
+    "springExceptionCount": 0,
+    "springRestartCount": 0,
+    "nodeRestartCount": 0,
+    "clientRestartCount": 0,
+    "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+    "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+    "springContainerId": "0be5068ccbc75d731e7c31e95faf1b06f6dbe04a4bacda51bc3b3018d7367486",
+    "springImageId": "sha256:d10479f229486bc81ab16b3853ce17a598bcefb42358af5767984c6cddd08abe",
+    "springContainerStartedAt": "2026-07-19T13:35:50.8295256Z"
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.698,
+    "springProcessRunningSeconds": 3.218,
+    "composeRecreateToReadinessSeconds": 5.186
+  },
+  "disk": {
+    "springImageBytes": 249288347,
+    "previousSpringImageBytes": 249268811,
+    "imageIncreaseBytes": 19536,
+    "imageIncreasePct": 0.0078,
+    "containerWritableLayerBytes": 32768,
+    "applicationIoComparisonDeferred": true
+  },
+  "rollback": {
+    "previousImageId": "sha256:618231b9e26467e98852909cda8086a27e3457c843b802c535bd0cc98e6f9717",
+    "previousImageTag": "macrosquare-server-spring:rollback-company-identity-direct-sec",
+    "previousImageStillPresent": true,
+    "nodeAndClientWereNotRecreated": true
+  }
+}

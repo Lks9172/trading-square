@@ -17,6 +17,9 @@ import { childLogger, serializeError } from '../services/logger';
 import { DEFAULT_MANUAL_INPUTS, mergeEffectiveManualInputs } from '../services/policy-inputs';
 import { logDecisionDetails } from '../services/decision-logging';
 import { buildTopDownView, enrichSignalExplanations } from '../services/topdown-view';
+import { buildNarrativeThemesForSnapshot } from '../services/narrative-research';
+import { writeLatestPersistedSnapshot } from '../services/persisted-snapshot';
+import { getMarketBreadthGateSnapshot } from '../services/market-breadth-gate';
 
 const log = childLogger({ module: 'state.cache' });
 
@@ -85,6 +88,12 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
   const smartMoney = await withSpan('macrosquare.collector.smartMoney', () =>
     fetchInsiderSummary().catch((error) => {
       log.warn({ error: serializeError(error) }, 'smart money collector failed, using null');
+      return null;
+    }),
+  );
+  const marketBreadthGate = await withSpan('macrosquare.service.marketBreadthGate', () =>
+    getMarketBreadthGateSnapshot(false).catch((error) => {
+      log.warn({ error: serializeError(error) }, 'market breadth gate build failed, using null');
       return null;
     }),
   );
@@ -183,7 +192,24 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
     s.setAttribute('signals.count', r.length);
     return Promise.resolve(r);
   });
-  const topdown = buildTopDownView(raw, derived, regime, signals);
+  const provisionalSnapshot = {
+    timestamp: new Date().toISOString(),
+    raw,
+    derived,
+    regime: { ...regime, explanation: undefined },
+    signals,
+    allocation: {
+      regime: regime.regime,
+      score: regime.score,
+      allocations: {},
+      leverageAllowed: effectiveProfile.leverageEnabled,
+      buyStage: null,
+      date: new Date().toISOString(),
+    },
+    meta: { profile: effectiveProfile },
+  } as unknown as SystemSnapshot;
+  const narratives = await withSpan('macrosquare.engine.narrative', async () => buildNarrativeThemesForSnapshot(provisionalSnapshot));
+  const topdown = buildTopDownView(raw, derived, regime, signals, narratives);
   enrichSignalExplanations(signals, topdown);
   const allocation = await withSpan('macrosquare.engine.allocation', () =>
     Promise.resolve(
@@ -295,6 +321,8 @@ export async function buildSnapshot(profile: UserProfile): Promise<SystemSnapsho
       staleness: computeStaleness(raw),
       smartMoney,
       topdown,
+      marketBreadthGate,
+      narratives,
       calendar,
       executionPlans,
     },
@@ -362,8 +390,9 @@ export async function getSnapshot(profile: UserProfile, force = false) {
 
   const prevSnapshot = cachedSnapshot;
   const pending = buildSnapshot(profile)
-    .then((snapshot) => {
+    .then(async (snapshot) => {
       writeCache(snapshot);
+      await writeLatestPersistedSnapshot(snapshot).catch(() => undefined);
       // 17차 Phase 2 E2: regime/signal 변화 자동 trade log 기록
       // 비동기 로깅 — 실패해도 snapshot 반환에는 영향 없음.
       import('../services/weekly-report')

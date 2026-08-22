@@ -1,0 +1,213 @@
+{
+  "capturedAt": "2026-07-19T10:37:05Z",
+  "milestone": "spring-shadow-company-directory-public-read",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25.0.3 LTS / Spring Boot 4.1.0 / Tomcat 11.0.22",
+    "nodePort": 5846,
+    "springShadowPort": 5856
+  },
+  "scope": {
+    "implementedPublicReads": [
+      "GET /api/company-search?q={query}&limit={limit}",
+      "GET /api/company-summaries?tickers={commaSeparatedTickers}"
+    ],
+    "behavior": [
+      "Spring owns the public controller, explicit web response DTOs, application query use case, input normalization, and transport-neutral search/summary projections",
+      "the temporary outbound anti-corruption adapter reads the existing Node GET projections without adding a collector, persistence write, scheduler, or Telegram side effect",
+      "company search preserves SEC ticker/title result ordering and JavaScript parseInt fallback semantics before clamping limits to 1 through 12",
+      "company summaries preserve request order after trim, uppercase normalization, deduplication, and the legacy maximum of 20 tickers; failed or unknown tickers remain omitted",
+      "successful projections are fresh for five minutes and usable as stale for at most thirty minutes while one background refresh per key executes",
+      "search cache cardinality is bounded to 256 keys and summary combinations to 128 keys; malformed or unavailable responses never replace a successful projection",
+      "JSON field order, nulls, numeric representations, and identity bytes match Node; summary JSON is compressed only when the client negotiates gzip"
+    ],
+    "remainingInNode": [
+      "GET /api/company/{ticker} full public projection",
+      "company research calculation and enrichment ownership",
+      "Yahoo, SEC, analyst, filing, news, and related collectors",
+      "source-cache and snapshot persistence",
+      "schedulers, notifications, and Telegram"
+    ],
+    "comparableForFinalDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 72,
+      "failures": 0,
+      "domain": 19,
+      "application": 13,
+      "adapters": 34,
+      "bootstrap": 2,
+      "architecture": 4
+    },
+    "liveContractParity": {
+      "companyCases": 8,
+      "statusMatches": 8,
+      "objectMatches": 8,
+      "byteMatches": 8,
+      "searchCases": 5,
+      "summaryCases": 3,
+      "searchResponseBytes": {
+        "exactNvda": 70,
+        "empty": 12,
+        "defaultLimitEight": 588,
+        "maximumLimitTwelve": 887
+      },
+      "summaryResponseBytes": {
+        "empty": 12,
+        "normalizedWithUnknownOmitted": 726,
+        "nvdaMsftNem": 1082
+      },
+      "existingResearchAndCryptoRegressionCases": 4,
+      "existingResearchAndCryptoRegressionMatches": 4,
+      "springReadiness": "UP",
+      "springLogWarningCount": 0,
+      "springLogErrorCount": 0,
+      "springRestartCount": 0,
+      "nodeRestartCount": 0,
+      "clientRestartCount": 0,
+      "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+      "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+      "springContainerId": "1fa5adca288e277e099cdb36db50d3ec205c03aaecb2b61c2e60209dec71f585",
+      "springImageId": "sha256:4d0aea61e63962a6a3e6f6474c2a05c20bc9631570c321d86fe98daa6253506c",
+      "springContainerStartedAt": "2026-07-19T10:32:40.235828245Z"
+    }
+  },
+  "httpBenchmarks": {
+    "homeServerLoopbackConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "totalErrorCount": 0,
+      "note": "Python urllib opens a new connection for each request; shared host scheduling and connection tail are separated with the sequential measurement below.",
+      "search": {
+        "responseBytes": 70,
+        "node": {
+          "medianThroughputPerSecond": 371.47,
+          "medianP50Ms": 12.689,
+          "medianP95Ms": 144.307,
+          "medianP99Ms": 171.453
+        },
+        "spring": {
+          "medianThroughputPerSecond": 455.367,
+          "medianP50Ms": 6.672,
+          "medianP95Ms": 152.44,
+          "medianP99Ms": 178.172
+        }
+      },
+      "summaries": {
+        "responseBytes": 1082,
+        "node": {
+          "medianThroughputPerSecond": 350.7,
+          "medianP50Ms": 13.722,
+          "medianP95Ms": 151.983,
+          "medianP99Ms": 169.273
+        },
+        "spring": {
+          "medianThroughputPerSecond": 446.042,
+          "medianP50Ms": 6.485,
+          "medianP95Ms": 146.224,
+          "medianP99Ms": 178.584
+        }
+      }
+    },
+    "homeServerLoopbackSequential": {
+      "requests": 200,
+      "concurrency": 1,
+      "totalErrorCount": 0,
+      "search": {
+        "node": {
+          "throughputPerSecond": 515.614,
+          "p50Ms": 1.482,
+          "p95Ms": 2.993,
+          "p99Ms": 9.084
+        },
+        "spring": {
+          "throughputPerSecond": 610.934,
+          "p50Ms": 1.388,
+          "p95Ms": 1.949,
+          "p99Ms": 2.091
+        }
+      },
+      "summaries": {
+        "node": {
+          "throughputPerSecond": 544.137,
+          "p50Ms": 1.444,
+          "p95Ms": 3.203,
+          "p99Ms": 5.73
+        },
+        "spring": {
+          "throughputPerSecond": 639.893,
+          "p50Ms": 1.28,
+          "p95Ms": 1.676,
+          "p99Ms": 2.025
+        }
+      }
+    },
+    "summaryGzipConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "nodeWireBytes": 1082,
+      "springWireBytes": 504,
+      "springWireReductionPct": 53.42,
+      "nodeMedianP50Ms": 12.161,
+      "nodeMedianP95Ms": 157.185,
+      "springMedianP50Ms": 7.676,
+      "springMedianP95Ms": 147.176,
+      "decodedJsonEquivalent": true,
+      "totalErrorCount": 0
+    }
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.575,
+    "springProcessRunningSeconds": 3.099
+  },
+  "disk": {
+    "nodeImageBytes": 266577284,
+    "springImageBytes": 249166807,
+    "springImageDifferencePct": -6.53,
+    "applicationIoComparisonDeferred": true
+  },
+  "sameWindowIdle10SamplesAfterHttpWarmup": {
+    "node": {
+      "memoryMedianMiB": 163.5,
+      "memoryMinMiB": 163.5,
+      "memoryMaxMiB": 163.6,
+      "cpuMedianPct": 0.695,
+      "cpuMeanPct": 0.679,
+      "cpuMaxPct": 0.73,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 184.0,
+      "memoryMinMiB": 184.0,
+      "memoryMaxMiB": 184.2,
+      "cpuMedianPct": 0.05,
+      "cpuMeanPct": 0.065,
+      "cpuMaxPct": 0.21,
+      "pidCountMedian": 23
+    },
+    "warning": "Node serves the full production workload while Spring serves only shadow read slices, so this is not a final runtime comparison."
+  },
+  "springJvmAfterHttpWarmup": {
+    "heapUsedBytes": 44582424,
+    "heapCommittedBytes": 105578496,
+    "nonHeapUsedBytes": 70896784,
+    "gcPauseCount": 2,
+    "gcPauseTotalSeconds": 0.022,
+    "gcPauseMaxSeconds": 0.013,
+    "liveJvmThreads": 18,
+    "peakJvmThreads": 27
+  },
+  "artifacts": [
+    "migration/benchmark-results/company-public-read/",
+    "migration/tools/warm_company_reads.py"
+  ],
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "reason": "The company search and summary contracts pass in shadow, but the full company detail projection, calculations, collectors, persistence, schedulers, and notifications still belong to Node. Node remains the production route and immediate rollback path."
+  }
+}

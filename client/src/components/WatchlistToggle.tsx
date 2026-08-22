@@ -11,10 +11,9 @@ export function WatchlistToggle({ ticker }: { ticker: string }) {
     <button
       type="button"
       onClick={() => toggle(ticker)}
-      className={`rounded-full border px-3 py-1 text-xs ${active ? "border-amber-500/40 bg-amber-500/15 text-amber-200" : "border-white/10 bg-white/5 text-slate-300"}`}
+      className={`touch-manipulation rounded-full border px-3 py-1 text-xs ${active ? "border-amber-500/40 bg-amber-500/15 text-amber-200" : "border-white/10 bg-white/5 text-slate-300"}`}
     >
       {active ? "★ Watchlist" : "☆ Watchlist"}
     </button>
   );
 }
-

@@ -1,3 +1,5 @@
+import type { NarrativeThemeState } from './narrative';
+
 // ── 원시 지표 ──
 export interface MarketDataPoint {
   code: string;
@@ -97,13 +99,69 @@ export interface SectorQualityScore {
   totalScore: number;
 }
 
+export type BottomSignalState =
+  | '바닥 아님'
+  | '바닥 시도'
+  | '재시험 구간'
+  | '1차 확인'
+  | '구조적 바닥 가능';
+
+export type DeepBottomState = '미충족' | '후보' | '확신';
+
+export type BottomMetricStatus = 'positive' | 'neutral' | 'negative';
+
+export interface BottomSignalMetric {
+  key: string;
+  label: string;
+  score: number | null;
+  status: BottomMetricStatus;
+  detail: string;
+}
+
+export interface BottomSignalChartPoint {
+  date: string;
+  value: number;
+}
+
+export interface BottomSignalChartMarker {
+  kind: 'peak' | 'candidate' | 'retest' | 'confirm' | 'current';
+  date: string;
+  label: string;
+  value: number;
+}
+
+export interface DeepBottomSignal {
+  score: number;
+  state: DeepBottomState;
+  actionBias: '대기' | '관찰 매수' | '분할 매수';
+  signalDate: string | null;
+  daysSinceSignal: number | null;
+  summary: string;
+  recentVolumeRatio: number | null;
+  contractionRatio: number | null;
+  drawdown120dPct: number | null;
+  ma20GapPct: number | null;
+  recentDrop3dPct: number | null;
+  reasons: string[];
+  cautions: string[];
+}
+
 export interface TopDownSectorView {
   key: string;
   label: string;
   classification: SectorClassification;
   score: number | null;
+  shortTermScore?: number | null;
+  longTermScore?: number | null;
+  earningsRevisionScore?: number | null;
+  financialConditionsScore?: number | null;
+  valuationScore?: number | null;
   quality?: SectorQualityScore;
   stance: 'favored' | 'avoided' | 'neutral';
+  appealScore?: number;
+  crowdingScore?: number;
+  buyScore?: number;
+  buyLabel?: '매수 우호' | '선별 접근' | '추격 주의';
   reasons: string[];
 }
 
@@ -116,8 +174,59 @@ export interface TopDownAssetRationale {
   timingNotes: string[];
 }
 
+export type SectorRotationRegime = 'EARLY_CYCLICAL' | 'MID_GROWTH' | 'LATE_INFLATION' | 'DEFENSIVE' | 'RE_ACCELERATION';
+export type SectorRotationState = 'LEADING' | 'IMPROVING' | 'WEAKENING' | 'LAGGING';
+export type SectorRotationLabel = 'Rotation In' | 'Leader' | 'Late Leader' | 'Rotation Out' | 'Defensive Hold';
+export type SectorRotationHorizon = 'now' | '1_3m' | '3_6m' | '6m_plus' | 'unclear';
+
+export interface SectorRotationItem {
+  key: string;
+  label: string;
+  classification: SectorClassification;
+  rotationScore: number;
+  macroFitScore: number;
+  relativeStrengthScore: number;
+  fundamentalScore: number;
+  valuationScore?: number | null;
+  earningsRevisionScore?: number | null;
+  flowScore?: number | null;
+  crowdingReliefScore: number;
+  state: SectorRotationState;
+  rotationLabel: SectorRotationLabel;
+  expectedLeadershipWindow?: SectorRotationHorizon;
+  expectedLeadershipMessage?: string;
+  reasons: string[];
+}
+
+export interface SectorRotationOutlookBucket {
+  label: string;
+  sectorKey: string;
+  rotationScore: number;
+  state: SectorRotationState;
+  rotationLabel: SectorRotationLabel;
+  expectedLeadershipWindow: SectorRotationHorizon;
+  expectedLeadershipMessage: string;
+  note: string;
+}
+
+export interface SectorRotationView {
+  regime: SectorRotationRegime;
+  confidence: number;
+  regimeScores: Record<SectorRotationRegime, number>;
+  summary: string;
+  favoredNext: string[];
+  fadingNext: string[];
+  currentLeaders: SectorRotationOutlookBucket[];
+  nextCandidates: SectorRotationOutlookBucket[];
+  secondaryCandidates: SectorRotationOutlookBucket[];
+  fadingCandidates: SectorRotationOutlookBucket[];
+  sectors: SectorRotationItem[];
+}
+
 export interface TopDownView {
   summary: string;
+  narrativeSummary?: string[];
+  bottleneckSummary?: string[];
   macroView: Array<{
     key: string;
     label: string;
@@ -126,7 +235,48 @@ export interface TopDownView {
   }>;
   favoredSectors: TopDownSectorView[];
   avoidedSectors: TopDownSectorView[];
+  rotation?: SectorRotationView;
   assetRationale: TopDownAssetRationale[];
+}
+
+export type MarketBreadthGateStatus = 'ON' | 'RECENT' | 'OFF';
+
+export interface MarketBreadthGateHistoryRow {
+  signalDate: string;
+  oneMonthReturn: number | null;
+  twoMonthReturn: number | null;
+  threeMonthReturn: number | null;
+}
+
+export interface MarketBreadthGateMarket {
+  asset: 'NASDAQ' | 'SP500';
+  label: string;
+  mode: '실전 개선형';
+  status: MarketBreadthGateStatus;
+  active: boolean;
+  signalDate: string | null;
+  daysSinceSignal: number | null;
+  perYear: number;
+  avg1m: number | null;
+  avg2m: number | null;
+  avg3m: number | null;
+  win1m: number | null;
+  win2m: number | null;
+  win3m: number | null;
+  shortThreshold: number;
+  mediumOversoldThreshold: number;
+  mediumRecoveryFloor: number;
+  lookbackDays: number;
+  regimeFilter: string;
+  summary: string;
+  recentSignals: MarketBreadthGateHistoryRow[];
+}
+
+export interface MarketBreadthGateSnapshot {
+  updatedAt: string;
+  mode: '실전 개선형';
+  summary: string;
+  markets: MarketBreadthGateMarket[];
 }
 
 // ── 비중 ──
@@ -265,6 +415,8 @@ export interface SystemSnapshot {
     staleness: Record<string, { date: string; daysAgo: number; frequency: string }>;
     smartMoney?: { insiderBuyRatio: number; recentInsiderBuys: number; recentInsiderSells: number; score: number; lastUpdated: string } | null;
     topdown?: TopDownView;
+    marketBreadthGate?: MarketBreadthGateSnapshot | null;
+    narratives?: NarrativeThemeState[];
     calendar?: Array<{
       date: string;
       name: string;

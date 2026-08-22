@@ -58,6 +58,18 @@ function sampleFacts(): SecCompanyFactsResponse {
         LongTermDebt: {
           units: { USD: [{ end: '2025-12-31', val: 90 }] },
         },
+        AssetsCurrent: {
+          units: { USD: [{ end: '2025-12-31', val: 210 }] },
+        },
+        LiabilitiesCurrent: {
+          units: { USD: [{ end: '2025-12-31', val: 120 }] },
+        },
+        AccountsReceivableNetCurrent: {
+          units: { USD: [{ end: '2025-12-31', val: 75 }] },
+        },
+        InventoryNet: {
+          units: { USD: [{ end: '2025-12-31', val: 30 }] },
+        },
       },
       dei: {
         EntityCommonStockSharesOutstanding: {

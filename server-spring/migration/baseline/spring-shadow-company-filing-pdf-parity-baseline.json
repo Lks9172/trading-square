@@ -1,0 +1,292 @@
+{
+  "capturedAt": "2026-07-20T01:31:00Z",
+  "milestone": "spring-shadow-company-filing-pdf-parity",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "clientContainer": "macrosquare-client",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25 / Spring Boot 4.1.0 / Tomcat 11.0.22 / Apache PDFBox 3.0.8",
+    "nodePort": 5846,
+    "clientPort": 5847,
+    "springShadowPort": 5856,
+    "springMemoryLimit": "1GiB"
+  },
+  "scope": {
+    "implemented": "bounded SEC PDF slide body extraction and PDF coverage gating on top of direct filing-detail discovery",
+    "internalEndpoints": [
+      "/internal/v1/migration/company-filing-detail-parity/{ticker}",
+      "/internal/v1/migration/company-filing-document-probe?url={officialSecArchiveUrl}"
+    ],
+    "architecture": {
+      "domain": "framework-free document content, format, page-count, and truncation invariants",
+      "application": "content port, bounded probe use case, filing-detail PDF coverage comparison",
+      "outboundAdapter": "SEC HTTPS fetch, URL validation, byte limits, PDFBox parsing, cache, pacing",
+      "inboundAdapter": "bounded preview/summary and parity HTTP responses",
+      "forbiddenOutsideAdapters": ["PDFBox", "Spring", "HTTP client", "Jackson", "java.io stream", "cache implementation"]
+    },
+    "documentPolicy": {
+      "allowedOrigin": "https://www.sec.gov",
+      "allowedPathPrefix": "/Archives/edgar/data/",
+      "supportedFormats": ["HTML", "TEXT", "PDF"],
+      "pdfSignatureSearchBytes": 1024,
+      "requiresTextExtractionPermission": true,
+      "oneIndependentDocumentPerRequest": true,
+      "returnsFullBodyOverHttp": false
+    },
+    "bounds": {
+      "maximumDocumentBytes": 5242880,
+      "maximumPdfPages": 120,
+      "configurationHardMaximumPdfPages": 200,
+      "maximumNormalizedTextCharacters": 30000,
+      "maximumProbePreviewCharacters": 500,
+      "maximumSummaryCharacters": 320,
+      "maximumContentCacheEntries": 512,
+      "freshTtlHours": 6,
+      "staleLimitHours": 24,
+      "maximumConcurrentExternalFetches": 1,
+      "minimumInterRequestDelayMs": 150
+    },
+    "remainingInNode": [
+      "public company orchestration and route-cache ownership",
+      "structured revenue, margin, CAPEX, and FCF guidance values",
+      "segment and geography enrichment",
+      "production filing schedulers, persistence, and Telegram notifications"
+    ],
+    "productionTrafficCutover": false,
+    "comparableForFinalRuntimeDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 213,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "domain": 42,
+      "application": 46,
+      "adapters": 110,
+      "bootstrap": 11,
+      "architecture": 4
+    },
+    "officialPdfFixture": {
+      "issuer": "Automatic Data Processing, Inc.",
+      "title": "Investor Day 2025",
+      "sourceUrl": "https://www.sec.gov/Archives/edgar/data/8670/000000867025000023/adp2025investorday-ex99.pdf",
+      "contentLengthBytes": 4466113,
+      "totalPages": 96,
+      "processedPages": 92,
+      "textCharacters": 29598,
+      "hasText": true,
+      "truncated": true,
+      "local": {
+        "capturedAt": "2026-07-20T01:19:00.566899+00:00",
+        "durationMs": 3000.694,
+        "passed": true
+      },
+      "homeCold": {
+        "capturedAt": "2026-07-20T01:23:42.973026+00:00",
+        "durationMs": 1727.1,
+        "passed": true
+      },
+      "homeWarm": {
+        "capturedAt": "2026-07-20T01:23:43.207032+00:00",
+        "durationMs": 146.647,
+        "passed": true
+      }
+    },
+    "localLiveFilingDetail": {
+      "tickers": 12,
+      "migrationReady": 12,
+      "metadataPreserved": 12,
+      "summariesMatched": 11,
+      "improvedTickers": 12,
+      "directAttachments": 40,
+      "summarizedDirectAttachments": 35,
+      "pdfMaterials": 0,
+      "durationMs": {"total": 17065.383, "median": 1321.81, "max": 2837.657}
+    },
+    "homeLiveFilingDetail": {
+      "tickers": 12,
+      "migrationReady": 12,
+      "metadataPreserved": 12,
+      "summariesMatched": 11,
+      "improvedTickers": 12,
+      "directAttachments": 40,
+      "summarizedDirectAttachments": 35,
+      "pdfMaterials": 0,
+      "pdfCoveragePassed": 12,
+      "durationMs": {"total": 17999.273, "median": 1428.899, "max": 2252.14},
+      "knownSummaryDrift": {
+        "ticker": "AAPL",
+        "field": "irMaterials[0].summary",
+        "metadataPreserved": true,
+        "blocking": false
+      },
+      "pdfCoverageInterpretation": "no PDF occurred in the selected recent three accessions; the independent official PDF probe proves the extraction path"
+    },
+    "submissionsRegression": {
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true,
+      "durationMs": {"total": 27068.974, "median": 708.979, "max": 1336.942}
+    },
+    "priceSignalRegression": {
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true,
+      "durationMs": {"total": 10621.806, "median": 184.332, "max": 517.112}
+    },
+    "companyResearchRegression": {
+      "tickers": 48,
+      "matched": 48,
+      "allMatched": true,
+      "historySources": {"SHADOW": 7, "LEGACY": 41},
+      "durationMs": {"total": 28940.035, "median": 714.723, "max": 1028.795}
+    },
+    "publicEndpointRegression": {
+      "statusAndByteExactMatches": 8,
+      "total": 8,
+      "allMatched": true
+    },
+    "securitySmoke": {
+      "allBlocked": true,
+      "expectedStatus": 502,
+      "boundedGenericError": true,
+      "cases": ["external origin", "SEC path outside archive", "URL userinfo"]
+    },
+    "deploymentIsolation": {
+      "springOnlyRecreated": true,
+      "nodeAndClientWereNotRecreated": true,
+      "legacySourceCacheMountReadOnly": true,
+      "analystHistoryReadMode": "shadow-preferred",
+      "startupShadowBatch": {"date": "2026-07-20", "attempted": 7, "written": 7, "seeded": 0},
+      "shadowFiles": 7,
+      "temporaryFiles": 0
+    }
+  },
+  "httpBenchmarks": {
+    "homeWarmFilingDetailConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "responseBytes": 2680,
+      "totalErrorCount": 0,
+      "medianThroughputPerSecond": 311.626,
+      "medianP50Ms": 20.211,
+      "medianP95Ms": 80.543,
+      "medianP99Ms": 85.13,
+      "maxAcrossRunsMs": 116.403
+    },
+    "homeWarmFilingDetailSequential": {
+      "runs": 3,
+      "requestsPerRun": 200,
+      "concurrency": 1,
+      "responseBytes": 2680,
+      "totalErrorCount": 0,
+      "medianThroughputPerSecond": 52.611,
+      "medianP50Ms": 17.21,
+      "medianP95Ms": 23.833,
+      "medianP99Ms": 48.79,
+      "maxAcrossRunsMs": 163.497
+    },
+    "homeWarmPdfProbeConcurrent": {
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "responseBytes": 1093,
+      "totalErrorCount": 0,
+      "medianThroughputPerSecond": 81.239,
+      "medianP50Ms": 111.403,
+      "medianP95Ms": 169.708,
+      "medianP99Ms": 248.471,
+      "maxAcrossRunsMs": 314.374
+    }
+  },
+  "sameWindow10SamplesAfterParityAndWarmup": {
+    "spring": {
+      "memoryMedianMiB": 295.3,
+      "memoryMinMiB": 295.3,
+      "memoryMaxMiB": 295.8,
+      "cpuMedianPct": 0.07,
+      "cpuMaxPct": 4.57,
+      "pidCountMedian": 43.0,
+      "pidCountMax": 47
+    },
+    "node": {
+      "memoryMedianMiB": 179.25,
+      "memoryMinMiB": 141.4,
+      "memoryMaxMiB": 212.8,
+      "cpuMedianPct": 8.02,
+      "cpuMaxPct": 27.43,
+      "pidCountMedian": 11.0,
+      "pidCountMax": 11
+    },
+    "warning": "Node serves production and background collection while Spring serves migrated shadow slices only; this is not a final runtime comparison."
+  },
+  "springJvmFinal": {
+    "memoryUsedBytes": 180393072.0,
+    "memoryCommittedBytes": 235610112.0,
+    "memoryMaxBytes": 2053251071.0,
+    "gcPauseCount": 32.0,
+    "gcPauseTotalSeconds": 0.338,
+    "gcPauseMaxSeconds": 0.121,
+    "liveJvmThreads": 32.0,
+    "peakJvmThreads": 44.0
+  },
+  "runtime": {
+    "springReadiness": "UP",
+    "springDockerHealth": "healthy",
+    "nodeHealth": "ok",
+    "clientHttpStatus": 200,
+    "springBootReportedStartedSeconds": 3.022,
+    "actuatorApplicationReadySeconds": 3.086,
+    "springWarningCount": 0,
+    "springErrorCount": 0,
+    "springExceptionCount": 0,
+    "springRestartCount": 0,
+    "nodeRestartCount": 0,
+    "clientRestartCount": 0,
+    "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+    "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+    "springContainerId": "44388aa5f2e054e795c9210c0d9ddc6a4d9fd400a5eff14d4ce0d119d90f1056",
+    "springImageId": "sha256:839477889a8d64f0ec622b1846b420d6737cd84a7a080fe8a789de00b2ed5eef"
+  },
+  "disk": {
+    "springImageBytes": 253331811,
+    "previousSpringImageBytes": 249547381,
+    "imageIncreaseBytes": 3784430,
+    "containerWritableLayerBytesApprox": 32800,
+    "shadowVolumeBytes": 17228,
+    "shadowFiles": 7,
+    "temporaryFiles": 0,
+    "sourceCacheMountReadOnly": true
+  },
+  "rollback": {
+    "previousImageId": "sha256:fe05010d360cb087a789d771e1f2f1042d3255f6b19c3dcd80dd689320b24008",
+    "previousImageTag": "macrosquare-server-spring:rollback-company-filing-detail-parity",
+    "previousImageStillPresent": true,
+    "nodeAndClientWereNotRecreated": true,
+    "configurationRollbackModes": ["dual-compare", "legacy"]
+  },
+  "evidenceArtifacts": [
+    "migration/benchmark-results/company-filing-pdf-parity/pdf-probe-local-adp.json",
+    "migration/benchmark-results/company-filing-pdf-parity/pdf-probe-home-adp-cold.json",
+    "migration/benchmark-results/company-filing-pdf-parity/pdf-probe-home-adp-warm.json",
+    "migration/benchmark-results/company-filing-pdf-parity/filing-detail-local-12.json",
+    "migration/benchmark-results/company-filing-pdf-parity/filing-detail-home-12.json",
+    "migration/benchmark-results/company-filing-pdf-parity/submissions-home-48.json",
+    "migration/benchmark-results/company-filing-pdf-parity/price-signal-home-48.json",
+    "migration/benchmark-results/company-filing-pdf-parity/research-home-48.json",
+    "migration/benchmark-results/company-filing-pdf-parity/public-byte-parity-home-8.json",
+    "migration/benchmark-results/company-filing-pdf-parity/benchmark-home-aggregate.json",
+    "migration/benchmark-results/company-filing-pdf-parity/docker-resources-home-final-10.csv",
+    "migration/benchmark-results/company-filing-pdf-parity/jvm-metrics-home-final.json",
+    "migration/benchmark-results/company-filing-pdf-parity/runtime-home.txt",
+    "migration/benchmark-results/company-filing-pdf-parity/security-smoke-home.json"
+  ],
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "internalPdfExtractionShadowAllowed": true,
+    "reason": "bounded PDF extraction and all regressions passed, but structured guidance, segment/geography, public orchestration, and production side effects still belong to Node."
+  }
+}

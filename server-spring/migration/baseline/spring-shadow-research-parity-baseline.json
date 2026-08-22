@@ -1,0 +1,96 @@
+{
+  "capturedAt": "2026-07-19T07:31:51Z",
+  "milestone": "spring-shadow-research-parity-slice",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springProfile": "shadow"
+  },
+  "scope": {
+    "implemented": [
+      "read-only Node /api/snapshot outbound compatibility adapter",
+      "transport-neutral snapshot normalization",
+      "eleven-narrative live dual-run parity",
+      "sector-rotation regime, confidence and regime-score live dual-run parity",
+      "successful-read five-minute in-memory cache"
+    ],
+    "notYetImplemented": [
+      "full sector ranking read model parity",
+      "public snapshot/company/sector/crypto read models",
+      "collectors",
+      "persistent data adapters",
+      "schedulers",
+      "Telegram side effects",
+      "write use cases"
+    ],
+    "comparableForFinalDecision": false
+  },
+  "liveParity": {
+    "sourceTimestamp": "2026-07-19T07:26:49.400Z",
+    "allMatched": true,
+    "narrativesMatched": 11,
+    "narrativesTotal": 11,
+    "rotationMatched": true,
+    "rotationRegime": "RE_ACCELERATION",
+    "differences": []
+  },
+  "latencyObservations": {
+    "firstCallWithWarmNodeSnapshotSeconds": 0.17,
+    "springCachedCallSeconds": 0.01,
+    "firstCallWithStaleNodeSnapshotSeconds": 26.87,
+    "note": "The stale observation includes the legacy Node snapshot refresh and is not Spring compute time. These are smoke observations, not a repeated HTTP benchmark."
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.699,
+    "springProcessRunningSeconds": 3.218
+  },
+  "disk": {
+    "nodeImageBytes": 266577284,
+    "springImageBytes": 248905335,
+    "springImageDifferencePct": -6.63,
+    "applicationIoComparisonDeferred": true
+  },
+  "sameWindowIdle10SamplesAfterParityWarmup": {
+    "node": {
+      "memoryMedianMiB": 152.0,
+      "memoryMinMiB": 152.0,
+      "memoryMaxMiB": 152.3,
+      "cpuMedianPct": 0.645,
+      "cpuMeanPct": 0.765,
+      "cpuMaxPct": 2.31,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 174.9,
+      "memoryMinMiB": 174.6,
+      "memoryMaxMiB": 175.2,
+      "cpuMedianPct": 0.07,
+      "cpuMeanPct": 0.187,
+      "cpuMaxPct": 0.94,
+      "pidCountMedian": 25.5
+    },
+    "warning": "Node is serving production collectors and traffic while Spring only evaluates a read-only parity slice."
+  },
+  "springJvmAfterParityWarmup": {
+    "heapUsedBytes": 40014120,
+    "nonHeapUsedBytes": 66265488,
+    "heapMaxBytes": 727842816,
+    "gcPauseCount": 1,
+    "gcPauseTotalSeconds": 0.009,
+    "gcPauseMaxSeconds": 0.009,
+    "liveJvmThreads": 16
+  },
+  "verification": {
+    "springReadiness": "UP",
+    "springContainerHealthy": true,
+    "springRestartCount": 0,
+    "nodeProductionHealth": "ok",
+    "nodeRestartCount": 0,
+    "springLogWarningsOrErrorsAfterDeploy": 0
+  },
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "reason": "Only the narrative and rotation-regime read-only parity slice is complete; public read models and data ownership remain on Node."
+  }
+}

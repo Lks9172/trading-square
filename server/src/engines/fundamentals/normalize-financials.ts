@@ -72,14 +72,30 @@ function trendFromAnnualRatio(numeratorPoints: SecFactPoint[], denominatorPoints
   return latestRatio - prevRatio;
 }
 
-function ratio(numerator: number | null, denominator: number | null): number | null {
-  if (numerator === null || denominator === null || denominator === 0) return null;
-  return (numerator / denominator) * 100;
+function ratio(numerator: number | null, denominator: number | null, bounds: { min: number; max: number } = { min: -100, max: 100 }): number | null {
+  if (numerator === null || denominator === null || denominator <= 0) return null;
+  const value = (numerator / denominator) * 100;
+  if (!Number.isFinite(value)) return null;
+  if (value < bounds.min || value > bounds.max) return null;
+  return value;
 }
 
-function multiple(numerator: number | null, denominator: number | null): number | null {
-  if (numerator === null || denominator === null || denominator === 0) return null;
-  return numerator / denominator;
+function multiple(numerator: number | null, denominator: number | null, bounds?: { min?: number; max?: number }): number | null {
+  if (numerator === null || denominator === null || denominator <= 0) return null;
+  const value = numerator / denominator;
+  if (!Number.isFinite(value)) return null;
+  if (bounds?.min !== undefined && value < bounds.min) return null;
+  if (bounds?.max !== undefined && value > bounds.max) return null;
+  return value;
+}
+
+
+function saneWorkingCapitalValue(value: number | null, currentAssets: number | null, revenueTtm: number | null, maxRatio: number): number | null {
+  if (value === null) return null;
+  if (value < 0) return null;
+  if (currentAssets !== null && currentAssets > 0 && value > currentAssets * 0.95) return null;
+  if (revenueTtm !== null && revenueTtm > 0 && value > revenueTtm * maxRatio) return null;
+  return value;
 }
 
 function dateOfFacts(...series: SecFactPoint[][]): string {
@@ -103,6 +119,10 @@ export function normalizeCompanyFinancials(
   const sharesSeries = factSeries(facts, 'dei', ['EntityCommonStockSharesOutstanding']);
   const stockCompSeries = factSeries(facts, 'us-gaap', ['ShareBasedCompensation', 'StockBasedCompensation']);
   const equitySeries = factSeries(facts, 'us-gaap', ['StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest']);
+  const currentAssetsSeries = factSeries(facts, 'us-gaap', ['AssetsCurrent']);
+  const currentLiabilitiesSeries = factSeries(facts, 'us-gaap', ['LiabilitiesCurrent']);
+  const receivablesSeries = factSeries(facts, 'us-gaap', ['AccountsReceivableNetCurrent', 'ReceivablesNetCurrent']);
+  const inventorySeries = factSeries(facts, 'us-gaap', ['InventoryNet', 'InventoriesNetOfReserves']);
 
   const revenueTtm = sumTtm(revenueSeries);
   const operatingIncomeTtm = sumTtm(operatingIncomeSeries);
@@ -112,11 +132,17 @@ export function normalizeCompanyFinancials(
   const freeCashFlowTtm = operatingCashFlowTtm !== null && capexTtm !== null ? operatingCashFlowTtm - Math.abs(capexTtm) : null;
   const cash = latestInstant(cashSeries);
   const debt = latestInstant(debtSeries);
+  const currentAssets = latestInstant(currentAssetsSeries);
+  const currentLiabilities = latestInstant(currentLiabilitiesSeries);
+  const rawReceivables = latestInstant(receivablesSeries);
+  const rawInventory = latestInstant(inventorySeries);
   const sharesOutstanding = latestInstant(sharesSeries);
   const marketCap = currentPrice !== null && sharesOutstanding !== null ? currentPrice * sharesOutstanding : null;
   const enterpriseValue = marketCap !== null ? marketCap + (debt ?? 0) - (cash ?? 0) : null;
   const stockCompTtm = sumTtm(stockCompSeries);
   const equity = latestInstant(equitySeries);
+  const receivables = saneWorkingCapitalValue(rawReceivables, currentAssets, revenueTtm, 0.8);
+  const inventory = saneWorkingCapitalValue(rawInventory, currentAssets, revenueTtm, 0.6);
 
   return {
     ticker,
@@ -128,21 +154,28 @@ export function normalizeCompanyFinancials(
     freeCashFlowTtm,
     cash,
     debt,
+    currentAssets,
+    currentLiabilities,
+    receivables,
+    inventory,
     capexTtm,
     operatingCashFlowTtm,
     sharesOutstanding,
     marketCap,
     enterpriseValue,
     revenueGrowthYoY: yoyFromAnnual(revenueSeries),
-    operatingMargin: ratio(operatingIncomeTtm, revenueTtm),
+    operatingMargin: ratio(operatingIncomeTtm, revenueTtm, { min: -100, max: 100 }),
     operatingMarginTrend: trendFromAnnualRatio(operatingIncomeSeries, revenueSeries),
-    freeCashFlowMargin: ratio(freeCashFlowTtm, revenueTtm),
-    netDebtToRevenue: multiple((debt ?? 0) - (cash ?? 0), revenueTtm),
-    evToSales: multiple(enterpriseValue, revenueTtm),
-    evToFcf: multiple(enterpriseValue, freeCashFlowTtm),
+    freeCashFlowMargin: ratio(freeCashFlowTtm, revenueTtm, { min: -100, max: 100 }),
+    netDebtToRevenue: multiple((debt ?? 0) - (cash ?? 0), revenueTtm, { min: -10, max: 10 }),
+    evToSales: multiple(enterpriseValue, revenueTtm, { min: 0, max: 100 }),
+    evToFcf: multiple(enterpriseValue, freeCashFlowTtm, { min: 0, max: 300 }),
     shareDilutionYoY: yoyFromAnnual(sharesSeries),
-    stockCompToRevenue: ratio(stockCompTtm, revenueTtm),
-    roe: ratio(netIncomeTtm, equity),
+    stockCompToRevenue: ratio(stockCompTtm, revenueTtm, { min: 0, max: 50 }),
+    roe: ratio(netIncomeTtm, equity, { min: -100, max: 100 }),
+    currentRatio: multiple(currentAssets, currentLiabilities, { min: 0, max: 20 }),
+    receivablesToRevenue: multiple(receivables, revenueTtm, { min: 0, max: 0.8 }),
+    inventoryToRevenue: multiple(inventory, revenueTtm, { min: 0, max: 0.6 }),
     segmentGeoMixNote: null,
     estimateUpsidePct: null,
   };

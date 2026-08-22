@@ -1,8 +1,19 @@
-# TODO: 기관 리포트(13F) + 정책 자동화 통합 (범위 큰 작업)
+# 역사적 TODO: 기관 리포트(13F) + 정책 자동화 통합
+
+- 문서 상태: **ARCHIVED**
+- 현재 TODO 아님: Node 시기 설계 이력이다.
+
+> **상태 안내 — 2026-07-21**
+> 이 문서는 Node 시기 설계 이력이다. analyst consensus/history와 미국 8-K/IR뿐 아니라
+> SEC 13F-HR 직접 수집·분기 변화 정규화, Federal Reserve 공식 원문 NLP도 Spring 운영 경로에 반영됐다.
+> 현재 13F는 20개 주요 관리자, point-in-time CUSIP identity와 analyst-vs-money divergence까지 제공한다.
+> 정책은 Fed·Treasury·USTR 원문과 FOMC 결정 walk-forward calibration까지 확장됐다. 정확한 현재 상태는
+> [`TODO-STATUS-2026-07-21.md`](TODO-STATUS-2026-07-21.md)를 기준으로 한다.
 
 ## 배경
 
-영상 분석 결과 아래 2개 영역이 **원문에서 강조**되지만 현 시스템에서 **부분/미구현** 상태로 남음 — 범위가 커서 별도 설계/세션에서 다룬다.
+영상 분석에서 아래 2개 영역이 원문상 중요하게 강조됐다. 본문 요구사항은 구현 전 설계 이력이며,
+현재 완료 범위와 의도적으로 남긴 후속 확장을 함께 기록한다.
 
 ---
 
@@ -18,11 +29,13 @@
   - `https://www.tipranks.com/dashboard` — 월스트리트 컨센서스
 
 ### 현 시스템 범위
-- `server/src/collectors/smart-money.ts`: **인사이더 매매**만 (OpenInsider / SEC Form 4 / Dataroma 일부)
-- **13F 대량 보유 변화 미수집**
-- **애널리스트 컨센서스 변화 추적 없음**
+- Spring `institutional` bounded context가 공식 SEC submissions/index/information-table을 직접 수집한다.
+- 최근 두 분기의 보고 주식 수를 비교하여 new/increase/reduce/exit와 추정 순매매를 제공한다.
+- PostgreSQL에는 정규화 결과와 MinIO object key만 저장하고 원문은 MinIO에 보관한다.
+- 현재 관리자 universe는 Berkshire Hathaway, Bridgewater, Renaissance, Soros, Citadel 등 20곳이다.
+- CUSIP→ticker/섹터를 유효기간으로 보존하고 analyst consensus와 13F 수량 변화의 괴리를 별도 표시한다.
 
-### 요구사항
+### 역사적 요구사항과 후속 확장
 1. **13F 수집기 신설** (`server/src/collectors/institutional-13f.ts`):
    - 주요 헤지펀드 (Bridgewater, Citadel, Renaissance, Millennium, Berkshire 등 ~20곳) CIK 리스트 고정
    - SEC EDGAR 13F-HR 파일 분기별 파싱
@@ -55,11 +68,14 @@
 - **video4 §채권 자경단**: 2022 리즈 트러스 총리 44일 해임 사례.
 
 ### 현 시스템 범위
-- `profile.manualInputs.policyDirection`: **사용자가 UI 에서 수동 입력** (-2~+2).
-- `FISCAL_STRESS` / `BOND_VIGILANTE_WARNING`: DGS30 + HY 기반 자동화 있음 (채권 자경단 일부 반영).
-- **뉴스/연준 발언 NLP 없음**.
+- Spring `policy` bounded context가 Federal Reserve·U.S. Treasury·USTR 공식 원문을 수집한다.
+- 매파/비둘기 lexicon, 가중치, 원문 excerpt, confidence를 PostgreSQL에 저장하고 원문은 MinIO에 보관한다.
+- confidence 35 이상·180일 이내의 분석만 market context의 `policyDirection` 자동 입력으로 변환한다.
+- 수동 입력은 override 경로로 유지하며, 수집 장애 시 마지막 유효 자동 입력을 보존한다.
+- `FISCAL_STRESS` / `BOND_VIGILANTE_WARNING`의 기존 금리·HY 근거도 유지한다.
+- 과거 FOMC 성명의 명시적 금리결정을 정답으로 confidence를 인과적 walk-forward 보정한다.
 
-### 요구사항
+### 역사적 요구사항과 후속 확장
 1. **뉴스 수집기** (`server/src/collectors/policy-news.ts`):
    - FOMC 발표문 / 연준 의장 연설 / 재무부 보도자료 RSS 구독
    - FRED가 제공하는 FOMC 문서 (`PRS.txt`) 활용
@@ -89,8 +105,8 @@
 
 ## 우선순위 권고
 
-1. **#8 (13F)**: ROI 높음. 영상 명시도 강하고 SEC 공개 데이터 무료. 분기 배치로 운영 부담 낮음. → ✅ **12차 Phase 1-4 구현 완료** (Phase 4 는 CONSENSUS_DIVERGENCE 남음).
-2. **#9 (정책 자동화)**: ROI 중간. 자동화 어려움 대비 manual input 이 이미 대체 수단. NLP 정확도 도달 전까지는 수동이 더 정확할 수 있음. → **장기 로드맵**.
+1. **#8 (13F)**: ✅ Phase 1-4와 CUSIP identity·20개 manager·CONSENSUS_DIVERGENCE 완료.
+2. **#9 (정책 자동화)**: ✅ Fed·Treasury·USTR 원문, lexicon NLP, confidence gate·walk-forward calibration 완료.
 
 ## 작업 진입 전 확인
 - **데이터 라이선스**: SEC EDGAR 는 public domain, 대부분 뉴스는 RSS 무료 가능.
@@ -148,17 +164,17 @@ RESEARCH_CONSENSUS_DIVERGENCE (value: -2 ~ +2)
 원문 notion: "8-K(미국) / 전자공시(한국): 기업의 중대 이벤트"
 - 범위: 합병/인수/CEO 교체/소송/리스트럭처링 등 종목별 이벤트
 - 난도: 🔴 높음 (SEC EDGAR 8-K XBRL 파싱 + 이벤트 분류 NLP)
-- 대체: 기존 earnings.ts 가 실적 발표 일정 커버. 8-K 는 종목 수준이라 포트폴리오
-  레짐 판단 영향 제한적 — **장기 로드맵**.
+- 현재: ✅ 미국 8-K/6-K/Exhibit/IR과 한국 OpenDART 중대 이벤트·연결재무 parser 구현 완료.
+- OpenDART 운영 수집은 공식 API 키가 주입된 환경에서만 활성화한다.
 
 ### E1. OBV / VWAP (경미)
 - video2/3: 거래량 확인 강조
-- 현재: KOSPI_VOLUME_CONFIRM 있음. NASDAQ OBV 부재
+- 현재: ✅ 기업 OHLCV에서 OBV 방향·VWAP 괴리와 합성 확인 점수를 계산하고 API/UI에 노출
 - 난도: 🟡 중 (fetchYahooHistory 를 OHLCV 확장 필요)
 - 대체: SECTOR 20D return + STRONGEST 로 모멘텀 반영 중
 
 ### Phase 2 A2. horizon 기반 signal 가중 (중간 공수)
 - video1 §5부 "시계열 먼저 정해야"
-- 현재: allocation HORIZON_SHIFT 만 존재 (cash/nasdaq/gold ±5/3/2)
+- 현재: ✅ 단기/중기/장기별 품질·가치·추세·바닥 가중치와 액션을 별도로 계산
 - 확장 여지: signal 레벨 (예: short 투자자는 RSI 가중↑, long 은 월봉 아웃사이드 가중↑)
-- 미구현 이유: 구조 복잡도 높음, 현재 해설(interpretation) 레이어로 UX 일부 대체
+- 검증: ✅ 시점별 당시 데이터만 사용하는 causal walk-forward로 20/63/126 거래일 결과를 독립 평가

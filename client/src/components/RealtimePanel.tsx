@@ -7,6 +7,8 @@ interface DataPoint {
   value: number;
   date: string;
   source: string;
+  eligibleForSignals?: boolean;
+  maximumAgeDays?: number;
 }
 
 interface DerivedPoint {
@@ -14,6 +16,8 @@ interface DerivedPoint {
   value: number;
   date: string;
   formula: string;
+  eligibleForSignals?: boolean;
+  maximumAgeDays?: number;
 }
 
 const REALTIME_ITEMS: Array<{
@@ -43,11 +47,20 @@ const REALTIME_ITEMS: Array<{
   { key: "KRW_FX_LEVEL", type: "derived", label: "환율 레벨", unit: "", desc: "≤1400:+2, ≤1480:+1, ≤1500:0, ≤1550:-1, >1550:-2" },
 ];
 
-function defaultFormat(v: number, unit: string): string {
+function defaultFormat(v: number): string {
   if (Math.abs(v) >= 10000) return v.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
   if (Math.abs(v) >= 100) return v.toFixed(1);
   if (Math.abs(v) >= 1) return v.toFixed(2);
   return v.toFixed(4);
+}
+
+function sourceFrequency(key: string, type: "raw" | "derived"): string {
+  if (type === "derived") return "화면 5분 재계산 · 원천 발표주기 따름";
+  if (["TREASURY_MARKETABLE_ISSUANCE", "FEDERAL_DEBT_GDP", "FEDERAL_DEFICIT_GDP"].includes(key)) return "분기";
+  if (key === "WM2NS") return "주간 관측 · 월간 발표";
+  if (["UNRATE", "M2SL", "INDPRO", "CPI", "PCE"].includes(key)) return "월간";
+  if (["ICSA", "WALCL", "WRESBAL", "WDTGAL", "WTREGEN", "WRMFNS", "STLFSI4", "AAII_BULL_BEAR_SPREAD", "NAAIM_EXPOSURE"].includes(key)) return "주간";
+  return "거래일/일간";
 }
 
 interface Props {
@@ -83,6 +96,7 @@ function FuturesSpotBlock({ raw, usPriceSource }: { raw: Record<string, DataPoin
                 <div className="text-sm sm:text-base font-mono font-bold">
                   {typeof spot?.value === "number" ? spot.value.toLocaleString("ko-KR", { maximumFractionDigits: 0 }) : "-"}
                 </div>
+                {spot?.date && <div className="mt-1 text-[8px] text-[var(--muted)]">기준 {spot.date}</div>}
               </div>
               <div className={`rounded p-2 ${isFuturesActive ? "bg-blue-500/10 border border-blue-500/30" : "bg-neutral-800"}`}>
                 <div className="flex items-center gap-1 mb-1">
@@ -92,6 +106,7 @@ function FuturesSpotBlock({ raw, usPriceSource }: { raw: Record<string, DataPoin
                 <div className="text-sm sm:text-base font-mono font-bold">
                   {typeof futures?.value === "number" ? futures.value.toLocaleString("ko-KR", { maximumFractionDigits: 0 }) : "-"}
                 </div>
+                {futures?.date && <div className="mt-1 text-[8px] text-[var(--muted)]">기준 {futures.date}</div>}
               </div>
             </div>
           </div>
@@ -106,12 +121,12 @@ export function RealtimePanel({ raw, derived, timestamp, usPriceSource }: Props)
     <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h3 className="text-base sm:text-lg font-semibold">실시간 수집 지표</h3>
-          <p className="text-[11px] sm:text-xs text-[var(--muted)]">5분마다 자동 갱신. 시장 상태를 즉시 반영.</p>
+          <h3 className="text-base sm:text-lg font-semibold">시장 관측 지표</h3>
+          <p className="text-[11px] sm:text-xs text-[var(--muted)]">화면 스냅샷은 5분마다 갱신하며, 값 자체는 일·주·월·분기 원천 발표주기를 따릅니다.</p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          <span className="text-[10px] sm:text-xs text-[var(--muted)]">LIVE</span>
+          <span className="w-2 h-2 rounded-full bg-blue-400" />
+          <span className="text-[10px] sm:text-xs text-[var(--muted)]" title={`snapshot ${timestamp}`}>SNAPSHOT</span>
         </div>
       </div>
 
@@ -124,16 +139,20 @@ export function RealtimePanel({ raw, derived, timestamp, usPriceSource }: Props)
           const value = dp?.value ?? ddp?.value ?? null;
           if (value === null) return null;
 
-          const formatted = item.format ? item.format(value) : defaultFormat(value, item.unit);
+          const formatted = item.format ? item.format(value) : defaultFormat(value);
 
           return (
             <div key={item.key} className="rounded-lg bg-[var(--background)] border border-[var(--card-border)] p-2.5">
               <div className="flex items-center text-[10px] sm:text-xs text-[var(--muted)] mb-1">
                 <span className="truncate">{item.label}</span>
-                <InfoTooltip title={item.label} description={item.desc} frequency="5분" source={item.type === "raw" ? (dp?.source || "") : "자체 계산"} />
+                <InfoTooltip title={item.label} description={item.desc} frequency={sourceFrequency(item.key, item.type)} source={item.type === "raw" ? (dp?.source || "") : "자체 계산"} />
               </div>
               <div className="text-base sm:text-lg font-mono font-bold leading-tight">{formatted}</div>
               <div className="text-[9px] text-[var(--muted)] mt-0.5">{item.unit}</div>
+              {(dp?.date || ddp?.date) && <div className="mt-1 text-[8px] text-[var(--muted)]">기준 {dp?.date || ddp?.date}</div>}
+              {(dp?.eligibleForSignals === false || ddp?.eligibleForSignals === false) && (
+                <div className="mt-1 rounded bg-red-500/15 px-1 py-0.5 text-[8px] text-red-300">신선도 만료 · 산식 제외</div>
+              )}
             </div>
           );
         })}

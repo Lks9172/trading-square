@@ -2,8 +2,7 @@ import { Dashboard } from "@/components/Dashboard";
 
 export const dynamic = "force-dynamic";
 
-const SSR_API_URL = process.env.SSR_API_URL || "http://localhost:5846";
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5846";
+const SSR_API_URL = process.env.SSR_API_URL || process.env.INTERNAL_API_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:5846' : 'http://macrosquare-server:5846');
 
 async function fetchSnapshot() {
   try {

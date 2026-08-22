@@ -1,0 +1,162 @@
+{
+  "capturedAt": "2026-07-19T08:37:56Z",
+  "milestone": "spring-shadow-research-detail-public-read",
+  "environment": {
+    "host": "home-server",
+    "client": "Mac on same LAN",
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25.0.3 LTS / Spring Boot 4.1.0"
+  },
+  "scope": {
+    "implementedPublicReads": [
+      "GET /api/research/themes/{id}?sort={sort}&companySort={companySort}",
+      "GET /api/research/sectors/{id}"
+    ],
+    "behavior": [
+      "Spring owns the public route, response DTO, use case, sort normalization, and transport-neutral projection",
+      "a temporary read-only anti-corruption adapter obtains the legacy calculated projection",
+      "conditional fields, nullable trend elements, numeric JSON forms, company success/error shapes, and 404 bodies are preserved",
+      "successful detail reads are cached for five minutes by normalized key and same-key concurrent misses use single-flight",
+      "404, malformed, and unavailable upstream responses are not cached; malformed or unavailable responses fail closed with HTTP 502",
+      "Spring introduces no local collector, persistence, scheduler, or Telegram side effect; the upstream Node GET can retain its existing cache refresh"
+    ],
+    "remainingInNode": [
+      "research score and density calculation ownership",
+      "company enrichment used by research detail pages",
+      "collectors, snapshot assembly, persistence, schedulers, and notifications"
+    ],
+    "comparableForFinalDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 47,
+      "failures": 0,
+      "domain": 19,
+      "application": 7,
+      "adapters": 15,
+      "bootstrap": 2,
+      "architecture": 4
+    },
+    "liveContractParity": {
+      "caseCount": 33,
+      "statusMatches": 33,
+      "objectMatches": 33,
+      "byteMatches": 33,
+      "themeDefaults": 6,
+      "sectorDefaults": 11,
+      "themeSectorSortCases": 6,
+      "themeCompanySortCases": 6,
+      "fallbackCases": 2,
+      "notFoundCases": 2,
+      "representativeThemeResponseBytes": 13671,
+      "representativeSectorResponseBytes": 16251,
+      "unknownThemeBody": {
+        "error": "theme not found"
+      },
+      "unknownSectorBody": {
+        "error": "sector not found"
+      },
+      "themeCatalogStillExact": true,
+      "sectorCatalogStillExact": true,
+      "narrativeCatalogStillExact": true,
+      "internalNarrativesMatched": "11/11",
+      "rotationMatched": true,
+      "springReadiness": "UP",
+      "springLogWarningsOrErrors": 0,
+      "nodeLogWarningsOrErrorsInVerificationWindow": 0,
+      "springRestartCount": 0,
+      "nodeRestartCount": 0,
+      "clientRestartCount": 0,
+      "nodeContainerCreatedAt": "2026-07-03T03:18:54.452065332Z",
+      "clientContainerCreatedAt": "2026-07-03T03:13:11.684228951Z",
+      "springContainerCreatedAt": "2026-07-19T08:32:24.042895787Z"
+    }
+  },
+  "httpBenchmarks": {
+    "method": "GET",
+    "mode": "warm successful cache",
+    "runs": 3,
+    "requestsPerRun": 200,
+    "concurrency": 10,
+    "themeDetail": {
+      "path": "/api/research/themes/ai-semiconductors",
+      "responseBytes": 13671,
+      "node": {
+        "medianThroughputPerSecond": 437.899,
+        "medianP50Ms": 18.391,
+        "medianP95Ms": 41.871,
+        "medianP99Ms": 81.121,
+        "totalErrorCount": 0
+      },
+      "spring": {
+        "medianThroughputPerSecond": 485.359,
+        "medianP50Ms": 17.907,
+        "medianP95Ms": 26.897,
+        "medianP99Ms": 54.245,
+        "totalErrorCount": 0
+      }
+    },
+    "sectorDetail": {
+      "path": "/api/research/sectors/technology",
+      "responseBytes": 16251,
+      "node": {
+        "medianThroughputPerSecond": 406.455,
+        "medianP50Ms": 21.287,
+        "medianP95Ms": 31.938,
+        "medianP99Ms": 75.737,
+        "totalErrorCount": 0
+      },
+      "spring": {
+        "medianThroughputPerSecond": 431.096,
+        "medianP50Ms": 20.699,
+        "medianP95Ms": 27.433,
+        "medianP99Ms": 53.44,
+        "totalErrorCount": 0
+      }
+    }
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.549,
+    "springProcessRunningSeconds": 3.052
+  },
+  "disk": {
+    "nodeImageBytes": 266577284,
+    "springImageBytes": 249028237,
+    "springImageDifferencePct": -6.58,
+    "applicationIoComparisonDeferred": true
+  },
+  "sameWindowIdle10SamplesAfterHttpWarmup": {
+    "node": {
+      "memoryMedianMiB": 158.3,
+      "memoryMinMiB": 158.3,
+      "memoryMaxMiB": 158.3,
+      "cpuMedianPct": 0.67,
+      "cpuMeanPct": 0.644,
+      "cpuMaxPct": 0.9,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 199.7,
+      "memoryMinMiB": 199.7,
+      "memoryMaxMiB": 200.0,
+      "cpuMedianPct": 0.06,
+      "cpuMeanPct": 0.073,
+      "cpuMaxPct": 0.18,
+      "pidCountMedian": 28
+    },
+    "warning": "Node serves production workload while Spring only serves a shadow read slice."
+  },
+  "springJvmAfterHttpWarmup": {
+    "heapUsedBytes": 40044296,
+    "nonHeapUsedBytes": 77437304,
+    "gcPauseCount": 4,
+    "gcPauseTotalSeconds": 0.033,
+    "gcPauseMaxSeconds": 0.01,
+    "liveJvmThreads": 18
+  },
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "reason": "Public list and detail route contracts pass parity and warm-latency gates, but research calculations, enrichment, collectors, and persistence still belong to Node."
+  }
+}

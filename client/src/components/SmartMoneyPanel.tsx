@@ -33,12 +33,25 @@ interface EarningsEvent {
   date: string;
 }
 
+interface SmartMoneyFreshness {
+  observedOn: string | null;
+  ageDays: number | null;
+  maximumAgeDays: number;
+  eligibleForDecisions: boolean;
+  status: "CURRENT" | "STALE" | "UNKNOWN";
+  explanation: string;
+}
+
 export function SmartMoneyPanel() {
   const [insider, setInsider] = useState<InsiderData | null>(null);
+  const [freshness, setFreshness] = useState<SmartMoneyFreshness | null>(null);
   const [earnings, setEarnings] = useState<EarningsEvent[]>([]);
 
   useEffect(() => {
-    fetch("/api/smart-money").then((r) => r.json()).then((d) => setInsider(d.insider)).catch(() => {});
+    fetch("/api/smart-money").then((r) => r.json()).then((d) => {
+      setInsider(d.insider);
+      setFreshness(d.freshness ?? null);
+    }).catch(() => {});
     fetch("/api/earnings").then((r) => r.json()).then((d) => setEarnings(d.earnings || [])).catch(() => {});
   }, []);
 
@@ -51,11 +64,18 @@ export function SmartMoneyPanel() {
         {insider ? (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-xs text-[var(--muted)]">
-              <span className={`rounded-full border px-2 py-0.5 ${insider.sources?.openInsider ? "border-green-500/40 text-green-400" : "border-amber-500/40 text-amber-300"}`}>
-                OpenInsider {insider.sources?.openInsider ? "정상" : "지연"}
+              {freshness ? (
+                <span className={`rounded-full border px-2 py-0.5 ${freshness.eligibleForDecisions
+                  ? "border-green-500/40 text-green-400"
+                  : "border-red-500/40 text-red-300"}`} title={freshness.explanation}>
+                  {freshness.eligibleForDecisions ? "현재 판단 반영" : "STALE · 판단 미반영"}
+                </span>
+              ) : null}
+              <span className={`rounded-full border px-2 py-0.5 ${insider.sources?.openInsider && freshness?.eligibleForDecisions ? "border-green-500/40 text-green-400" : "border-amber-500/40 text-amber-300"}`}>
+                OpenInsider {insider.sources?.openInsider ? (freshness?.eligibleForDecisions ? "최신" : "과거 자료") : "지연"}
               </span>
-              <span className={`rounded-full border px-2 py-0.5 ${insider.sources?.dataroma ? "border-green-500/40 text-green-400" : "border-amber-500/40 text-amber-300"}`}>
-                Dataroma {insider.sources?.dataroma ? "정상" : "지연"}
+              <span className={`rounded-full border px-2 py-0.5 ${insider.sources?.dataroma && freshness?.eligibleForDecisions ? "border-green-500/40 text-green-400" : "border-amber-500/40 text-amber-300"}`}>
+                Dataroma {insider.sources?.dataroma ? (freshness?.eligibleForDecisions ? "최신" : "과거 자료") : "지연"}
               </span>
               <span className="rounded-full border border-sky-500/40 px-2 py-0.5 text-sky-300">
                 내부자 소스 {insider.sources?.insiderPrimarySource === "sec-form4"
@@ -96,7 +116,7 @@ export function SmartMoneyPanel() {
               <span className={`font-mono ${
                 (insider.score ?? 0) > 0 ? 'text-green-400' : (insider.score ?? 0) < 0 ? 'text-red-400' : 'text-neutral-400'
               }`}>
-                {insider.score ?? 0}
+                {insider.score ?? 0}{freshness && !freshness.eligibleForDecisions ? " (현재 미반영)" : ""}
               </span>
             </div>
             <div className="pt-2 border-t border-[var(--card-border)] text-[10px] sm:text-xs text-[var(--muted)] space-y-1">
@@ -131,7 +151,12 @@ export function SmartMoneyPanel() {
                 }`}>{insider.dataromaScore ?? 0}</span>
               </div>
             </div>
-            <div className="text-[10px] text-[var(--muted)]">갱신: {insider.lastUpdated}</div>
+            <div className="text-[10px] text-[var(--muted)]">
+              관측일: {insider.lastUpdated}
+              {freshness?.ageDays !== null && freshness?.ageDays !== undefined
+                ? ` · ${freshness.ageDays}일 경과 / 허용 ${freshness.maximumAgeDays}일`
+                : ""}
+            </div>
           </div>
         ) : (
           <div className="text-xs text-[var(--muted)]">로딩 중...</div>

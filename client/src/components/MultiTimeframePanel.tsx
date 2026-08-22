@@ -59,7 +59,7 @@ export function MultiTimeframePanel({ derived }: Props) {
     <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
       <h3 className="text-base sm:text-lg font-semibold mb-1">멀티 타임프레임 캔들</h3>
       <p className="text-[11px] sm:text-xs text-[var(--muted)] mb-4">
-        영상 3·4·5 "월→주→일" 위계 판단. 월봉 구조·주봉 흐름·이상 패턴 경고
+        영상 3·4·5 “월→주→일” 위계 판단. 월봉 구조·주봉 흐름·이상 패턴 경고
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

@@ -1,0 +1,48 @@
+# Historical parallel-run environment. Production uses the root docker-compose.yml.
+# Kept only to reproduce cutover evidence; it never starts a Node bridge.
+services:
+  server-spring-shadow:
+    build:
+      context: ./server-spring
+    image: macrosquare-server-spring:shadow
+    container_name: macrosquare-server-spring-shadow
+    ports:
+      - "5856:5856"
+    volumes:
+      - ./server/data/source-cache:/app/legacy-source-cache:ro
+      - ./server/data/history:/app/legacy-history:ro
+      - ./server/data:/app/legacy-data:ro
+      - macrosquare-spring-analyst-history:/app/spring-data/company-analyst-history
+      - macrosquare-spring-data:/app/spring-data
+    environment:
+      - PORT=5856
+      - SPRING_PROFILES_ACTIVE=shadow
+      - MARKET_READ_MODE=file-preferred
+      - MARKET_SNAPSHOT_FILE=/app/legacy-source-cache/latest-system-snapshot-default-v1.json
+      - MARKET_HISTORY_DIR=/app/legacy-history
+      - COMPANY_READ_MODE=file-preferred
+      - COMPANY_READ_SOURCE_CACHE_DIR=/app/legacy-source-cache
+      - RESEARCH_CATALOG_READ_MODE=file-preferred
+      - CRYPTO_READ_MODE=file-preferred
+      - PERSISTED_PROJECTION_DIR=/app/legacy-source-cache
+      - MARKET_COLLECTION_SHADOW_ENABLED=true
+      - MARKET_COLLECTION_DIR=/app/spring-data/market-observations
+      - FRED_API_KEY=${FRED_API_KEY}
+      - COMPANY_ANALYST_SOURCE_CACHE_DIR=/app/legacy-source-cache
+      - COMPANY_ANALYST_HISTORY_ENABLED=true
+      - COMPANY_ANALYST_HISTORY_READ_MODE=dual-compare
+      - COMPANY_ANALYST_HISTORY_DIR=/app/spring-data/company-analyst-history
+      - COMPANY_ANALYST_HISTORY_STARTUP_DELAY=30s
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+volumes:
+  macrosquare-spring-analyst-history:
+    name: macrosquare-spring-analyst-history
+  macrosquare-spring-data:
+    name: macrosquare-spring-data

@@ -1,8 +1,9 @@
 'use client';
 
 /**
- * 22차 P1#5: 첫 방문 onboarding 4스텝 모달.
+ * 22차 P1#5: 첫 방문 onboarding 4스텝 안내 카드.
  * localStorage 'onboarding_done_v1' 미설정 시 노출. 우상단 ? 버튼으로 재호출 가능.
+ * 페이지 전체를 덮지 않아 안내 중에도 탐색/실행 UI를 계속 사용할 수 있다.
  */
 
 import { useEffect, useState } from 'react';
@@ -26,7 +27,7 @@ const STEPS = [
   },
   {
     title: '📊 4단계 — 시스템 신호 활용',
-    body: '레짐 신호등 + 7축 확신 게이지 + Telegram /status /log 5종 명령. ConvictionPanel 핵심 카드는 collapsible 6영역으로 모바일 최적화. /log 는 즉시 trade-log + horizon 정합 체크.',
+    body: '레짐 신호등 + 7축 조건 합치 + Telegram /status /log 5종 명령. 합치도는 확률이 아니므로 가격·수급·손실 한도와 함께 확인합니다. ConvictionPanel 핵심 카드는 collapsible 6영역으로 모바일 최적화. /log 는 즉시 trade-log + horizon 정합 체크.',
     cite: 'video6 §"오늘 내용만 알면 상위 10%"',
   },
 ];
@@ -38,7 +39,9 @@ export function Onboarding() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const done = window.localStorage.getItem('onboarding_done_v1');
-    if (!done) setOpen(true);
+    if (done) return;
+    const timer = window.setTimeout(() => setOpen(true), 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   function close() {
@@ -66,19 +69,30 @@ export function Onboarding() {
   const current = STEPS[step];
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4">
-      <div className="max-w-md w-full rounded-xl border border-cyan-700 bg-slate-950 p-6 shadow-xl">
-        <div className="text-xs text-slate-400 mb-2">단계 {step + 1} / {STEPS.length}</div>
+    <aside
+      aria-label="처음 사용 안내"
+      className="fixed bottom-4 left-4 right-4 z-30 ml-auto max-w-md rounded-xl border border-cyan-700 bg-slate-950/95 p-5 shadow-2xl backdrop-blur sm:left-auto"
+    >
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-xs text-slate-400 mb-2">단계 {step + 1} / {STEPS.length}</div>
+          <button
+            type="button"
+            onClick={close}
+            className="-mr-1 -mt-1 inline-flex min-h-8 min-w-8 touch-manipulation items-center justify-center rounded-full text-slate-400 hover:bg-white/5 hover:text-white"
+            aria-label="처음 사용 안내 닫기"
+          >
+            ×
+          </button>
+        </div>
         <h2 className="text-lg font-bold text-slate-100 mb-2">{current.title}</h2>
         <p className="text-sm text-slate-200 leading-relaxed">{current.body}</p>
         <p className="text-[10px] text-slate-500 mt-2 italic">{current.cite}</p>
         <div className="mt-4 flex justify-between gap-2">
-          <button onClick={close} className="text-xs text-slate-400 hover:text-slate-200">건너뛰기</button>
-          <button onClick={next} className="px-3 py-1.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-sm">
+          <button type="button" onClick={close} className="min-h-10 touch-manipulation px-2 text-xs text-slate-400 hover:text-slate-200">건너뛰기</button>
+          <button type="button" onClick={next} className="min-h-10 touch-manipulation rounded bg-cyan-600 px-3 py-1.5 text-sm text-white hover:bg-cyan-500">
             {step < STEPS.length - 1 ? '다음 →' : '시작하기'}
           </button>
         </div>
-      </div>
-    </div>
+    </aside>
   );
 }

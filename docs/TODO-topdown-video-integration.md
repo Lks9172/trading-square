@@ -1,4 +1,12 @@
-# TODO: Top-down 투자 영상 반영 (거시 → 섹터 → 자산/기업)
+# 역사적 계획: Top-down 투자 영상 반영 (거시 → 섹터 → 자산/기업)
+
+- 문서 상태: **ARCHIVED**
+- 현재 TODO 아님: Node 시기 설계 이력이다.
+
+> **상태 안내 — 2026-07-21**
+> 탑다운·섹터 순환·기업/병목/내러티브·실행 UI의 본문 범위는 현재 Spring 운영 경로에 대부분 반영됐다.
+> 아래 TypeScript 경로와 “보류” 표시는 작성 당시 이력이며 현재 TODO가 아니다. 실제 잔여 항목은
+> [`TODO-STATUS-2026-07-21.md`](TODO-STATUS-2026-07-21.md)를 기준으로 한다.
 
 ## 배경
 
@@ -549,3 +557,255 @@ MacroSquare 는 이미 거시/유동성/레짐 엔진이 강하므로, 이번 TO
 이다.
 
 장기적으로는 바텀업/병목/내러티브 판별까지 갈 수 있으나, 현재 단계에서는 **탑다운 본체를 먼저 강화하는 것이 우선순위**다.
+
+
+---
+
+# 추가 보완 TODO (영상 재분석 반영)
+
+최근 영상 재검토 기준으로, 기존 탑다운/섹터/기업/내러티브 반영 외에 아래 5가지는 별도 보강이 필요하다.
+
+## A. 비중 관리 엔진 강화
+
+영상 핵심:
+- 종목보다 타이밍이 먼저
+- 타이밍보다 비중이 먼저
+- 비중보다 심리가 먼저
+
+### 필요 이유
+현재 시스템은 BUY/HOLD/REDUCE 판정과 execution plan 은 있으나,
+**지금 몇 % 들어가야 하는지 / 현금을 얼마나 남겨야 하는지 / 추가 매수를 몇 번으로 나눌지** 를 직접적으로 설명하는 레이어는 약하다.
+
+### 후보 작업
+#### 서버
+- `server/src/engines/execution_plan.ts`
+- `server/src/types/indicators.ts`
+- `server/src/services/topdown-view.ts`
+
+#### 추가 필드 후보
+- `positionSizingScore`
+- `cashReserveTarget`
+- `maxInitialEntryPct`
+- `addOnDropPlan`
+- `stopScenario`
+
+### 목표
+- 같은 BUY 여도
+  - 적극 진입
+  - 1차만 진입
+  - 현금 보존 우선
+  을 구분해 보여줄 수 있어야 함
+
+---
+
+## B. 심리 / 포모 / 군중화 리스크 문구화
+
+영상 핵심:
+- 포모는 고점 추격을 만든다
+- 공포는 저점 매도를 만든다
+- 군중 심리는 계좌를 망친다
+
+### 필요 이유
+현재 `sentiment`, `crowding`, `narrative heat` 는 존재하지만,
+사용자에게 **지금 포모인지 / 공포 구간인지 / crowded trade 인지** 를 직접 말해주는 설명은 약하다.
+
+### 후보 작업
+#### 서버
+- `server/src/services/topdown-view.ts`
+- `server/src/engines/signals.ts`
+- `server/src/services/company-research.ts`
+
+#### 클라이언트
+- `client/src/components/SignalPanel.tsx`
+- `client/src/app/company/[ticker]/page.tsx`
+- `client/src/app/research/theme/[id]/page.tsx`
+
+#### 추가 문구 후보
+- `FOMO risk high`
+- `panic zone opportunity`
+- `crowded long`
+- `fear-driven entry zone`
+- `consensus crowded`
+
+### 목표
+- 숫자만이 아니라 심리 해석 문구로
+  - 추격 주의
+  - 공포 기반 분할매수 가능
+  - 군중화 과열
+  을 직관적으로 보여주기
+
+---
+
+## C. 시나리오 엔진 강화
+
+영상 핵심:
+- A 시나리오면 더 산다
+- B 시나리오면 현금 늘린다
+- 계획이 없으면 감정이 결정한다
+
+### 필요 이유
+현재 시스템은 “현재 상태 판단”은 강하지만,
+**조건부 분기 시나리오**는 상대적으로 약하다.
+
+### 후보 작업
+#### 서버
+- `server/src/services/topdown-view.ts`
+- `server/src/engines/execution_plan.ts`
+- `server/src/state/cache.ts`
+- 신규 검토: `server/src/services/scenario-engine.ts`
+
+#### 추가 구조 후보
+- `scenarioA`
+- `scenarioB`
+- `trigger`
+- `portfolioAction`
+- `watchItems`
+
+### 예시
+- CPI 하락 + DXY 약세 → 성장주/반도체 add
+- 유가 급등 + 지정학 악화 → 베타 축소 / 금 확대
+- 외국인 유입 회복 + 원화 안정 → 한국 비중 확대
+
+### 목표
+- 사용자가 “지금 상태”뿐 아니라
+  **무슨 조건이 오면 어떻게 행동할지** 미리 볼 수 있어야 함
+
+---
+
+## D. 기업 바텀업에서 안정성 / 현금흐름 질 강화
+
+영상 핵심:
+- 안정성
+- 수익성
+- 성장성
+- 이익과 현금흐름을 같이 봐야 한다
+
+### 필요 이유
+현재 fundamentals 는 많이 확장됐지만,
+영상 기준으로는 **현금흐름 질 / 부채 부담 / 흑자부도 리스크** 가 더 눈에 띄어야 한다.
+
+### 후보 작업
+#### 서버
+- `server/src/engines/fundamentals/normalize-financials.ts`
+- `server/src/engines/fundamentals/quality-score.ts`
+- `server/src/engines/fundamentals/balance-sheet-score.ts`
+- `server/src/types/fundamentals.ts`
+
+#### 추가 지표 후보
+- `currentRatio`
+- `quickRatio`
+- `receivablesGrowthVsRevenue`
+- `inventoryGrowthVsRevenue`
+- `netIncomeVsOperatingCashFlowGap`
+- `accrualRiskScore`
+
+### 목표
+- “실적이 좋아 보인다” 수준이 아니라
+  **현금이 실제로 따라오는지 / 재무가 버티는지** 를 보여줄 수 있어야 함
+
+---
+
+## E. 멀티플 해석 엔진 강화
+
+영상 핵심:
+- 주가는 이익 × 멀티플
+- 금리와 내러티브가 멀티플을 움직인다
+
+### 필요 이유
+현재 EV/Sales, EV/FCF, buy score 는 있으나,
+**왜 멀티플이 확장/축소될 수 있는지** 를 직접 설명하는 레이어는 약하다.
+
+### 후보 작업
+#### 서버
+- `server/src/services/company-research.ts`
+- `server/src/engines/fundamentals/valuation-score.ts`
+- 신규 검토: `server/src/engines/fundamentals/multiple-context.ts`
+
+#### 추가 필드 후보
+- `multipleExpansionRisk`
+- `rateSensitivity`
+- `narrativePremium`
+- `valuationVsPeer`
+- `valuationVsOwnHistory`
+
+### 목표
+- “비싸다/싸다”를 넘어서
+  - 금리 민감으로 멀티플 축소 위험
+  - 내러티브 프리미엄 과다
+  - 동종 업계 대비 할인/프리미엄
+  을 설명할 수 있어야 함
+
+---
+
+## 우선순위 추천 (재분석 반영)
+
+### 1순위
+1. 비중 관리 엔진 강화
+2. 시나리오 엔진 강화
+3. 심리 / 포모 리스크 문구화
+
+### 2순위
+4. 안정성 / 현금흐름 질 강화
+5. 멀티플 해석 엔진 강화
+
+### 메모
+이 5개는 기존 탑다운 철학을 뒤집는 작업이 아니라,
+현재 시스템을 **실전 운용형 의사결정 엔진** 쪽으로 더 밀어주는 보강 작업이다.
+
+
+## Company 축 추가 보완 TODO (영상 재분석 반영)
+
+### 1. 병목/대체불가를 company 화면에 직접 연결
+- 목표: 개별 회사가 왜 구조적으로 중요한지 바로 보이게 하기
+- 추가 필드 후보:
+  - `bottleneck.score`
+  - `bottleneck.role`
+  - `bottleneck.switchingCost`
+  - `bottleneck.pricingPower`
+  - `bottleneck.leadTimeSignal`
+  - `bottleneck.backlogSignal`
+- 관련 파일:
+  - `/Users/lks/Desktop/project/trading-square/server/src/services/company-research.ts`
+  - `/Users/lks/Desktop/project/trading-square/server/src/services/bottleneck-research.ts`
+  - `/Users/lks/Desktop/project/trading-square/client/src/app/company/[ticker]/page.tsx`
+
+### 2. 내러티브 단계의 company 직접 연결
+- 목표: 좋은 회사라도 지금이 초기/중반/과열 중 어디인지 표시
+- 추가 필드 후보:
+  - `narrative.theme`
+  - `narrative.stage`
+  - `narrative.heatScore`
+  - `narrative.riskNote`
+- 관련 파일:
+  - `/Users/lks/Desktop/project/trading-square/server/src/services/company-research.ts`
+  - `/Users/lks/Desktop/project/trading-square/server/src/services/narrative-research.ts`
+  - `/Users/lks/Desktop/project/trading-square/client/src/app/company/[ticker]/page.tsx`
+
+### 3. 좋은 회사 vs 좋은 투자 verdict 분리
+- 목표: 사업 품질과 투자 타이밍을 분리해서 보여주기
+- 추가 필드 후보:
+  - `verdicts.businessQuality`
+  - `verdicts.valuation`
+  - `verdicts.timing`
+  - `verdicts.finalAction`
+- 관련 파일:
+  - `/Users/lks/Desktop/project/trading-square/server/src/services/company-research.ts`
+  - `/Users/lks/Desktop/project/trading-square/server/src/types/fundamentals.ts`
+  - `/Users/lks/Desktop/project/trading-square/client/src/app/company/[ticker]/page.tsx`
+
+### 4. 구조 자금 유입 근거 강화
+- 목표: ETF/기관/정책/CAPEX 연동 논리를 company에서 직접 설명
+- 추가 필드 후보:
+  - `capitalFlow.etfInclusion`
+  - `capitalFlow.policyTailwinds`
+  - `capitalFlow.capexLinkage`
+  - `capitalFlow.fundingDrivers[]`
+
+### 5. 현금흐름 질 / 회계 질 강화
+- 목표: 겉으로 좋아 보이는 기업을 걸러내기
+- 추가 필드 후보:
+  - `cashConversionScore`
+  - `earningsQualityScore`
+  - `receivablesRisk`
+  - `inventoryRisk`
+  - `accrualRisk`

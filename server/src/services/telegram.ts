@@ -1,6 +1,7 @@
 import axios from 'axios';
 import https from 'https';
-import { AssetSignal, RegimeState, AllocationPlan } from '../types/indicators';
+import { AssetSignal, RegimeState, AllocationPlan, MarketBreadthGateSnapshot } from '../types/indicators';
+import type { TelegramBottomCandidateSummary } from './telegram-bottom-candidates';
 
 // IPv4 전용 소켓 강제. dns.setDefaultResultOrder('ipv4first') 는 해석 우선순위만
 // 바꾸고 IPv6 시도를 완전히 차단하진 않는다. httpsAgent 에 family: 4 를 지정하면
@@ -40,6 +41,7 @@ let previousRegime: string = '';
 let previousRegimeComponents: Record<string, number> = {};
 let previousAllocations: Record<string, number> = {};
 let previousOverallSignal: string = '';
+let previousMarketGateSignalDates: Record<string, string | null> = {};
 // 21차 P2#12: regime 변경 cooldown (60분) — single tick spam 방지
 let lastRegimeChangeAt = 0;
 const REGIME_COOLDOWN_MS = 60 * 60 * 1000;
@@ -215,10 +217,93 @@ function buildSummaryMessage(signals: AssetSignal[], regime: RegimeState, alloca
   return summarySection + allocSection;
 }
 
+function reversalConfirmationLabel(item: TelegramBottomCandidateSummary): 'OFF' | 'ON(보통)' | 'ON(강함)' {
+  const hasSignal = Boolean(item.signalDate) && Array.isArray(item.reasons) && item.reasons.some((reason) => String(reason || '').trim().length > 0);
+  if (!hasSignal) return 'OFF';
+  const score = typeof item.confirmedBottomScore === 'number' ? item.confirmedBottomScore : null;
+  if (item.confirmedBottomState === '확신' && score !== null && score >= 85) return 'ON(강함)';
+  return 'ON(보통)';
+}
+
+function formatBottomSignalReasons(item: TelegramBottomCandidateSummary, limit = 2): string | null {
+  const reasons = Array.isArray(item.reasons)
+    ? item.reasons.map((reason) => String(reason || '').trim()).filter(Boolean).slice(0, limit)
+    : [];
+  if (!reasons.length) return null;
+  return reasons.map((reason) => `   · ${reason}`).join('\n');
+}
+
+function formatStartupSectionItems(items: TelegramBottomCandidateSummary[]): string[] {
+  return items.map((item, index) => {
+    const symbol = item.kind === 'company' ? item.ticker : item.symbol;
+    const action = item.action ? ` / ${item.action}` : '';
+    const reversalOn = reversalConfirmationLabel(item);
+    const reversalLine = `
+   • 반전 확인 신호: ${reversalOn}`;
+    const signalDate = item.signalDate ? `
+   • 반전 확인일: ${item.signalDate}` : '';
+    const reasons = formatBottomSignalReasons(item, 2);
+    return `${index + 1}. ${symbol} ${item.confirmedBottomState} / B${item.buyScore} / 총${item.totalScore}${action}${reversalLine}${signalDate}${reasons ? `
+${reasons}` : ''}`;
+  });
+}
+
+function buildMarketBreadthLines(gate?: MarketBreadthGateSnapshot | null): string[] {
+  if (!gate?.markets?.length) return [];
+  return gate.markets.map((market) => {
+    const label = market.asset === 'NASDAQ' ? 'NASDAQ' : 'S&P500';
+    const recent = market.signalDate ? ` / 최근 ${market.signalDate}` : '';
+    return `   • ${label} 반전신호: ${market.status}${recent}`;
+  });
+}
+
+function buildConfirmedBottomSummary(items?: TelegramBottomCandidateSummary[], gate?: MarketBreadthGateSnapshot | null) {
+  if (!items?.length) return '';
+  const marketLines = buildMarketBreadthLines(gate);
+  const marketPrefix = marketLines.length ? `${marketLines.join('\n')}\n` : '';
+  const companies = items.filter((item) => item.kind === 'company');
+  const cryptos = items.filter((item) => item.kind === 'crypto');
+  const sections: string[] = [];
+  if (companies.length) sections.push(`📈 회사\n${marketPrefix}${formatStartupSectionItems(companies).join('\n')}`);
+  if (cryptos.length) sections.push(`🪙 코인\n${marketPrefix}${formatStartupSectionItems(cryptos).join('\n')}`);
+  return `\n\n🟣 현재 반전 후보/확신 (Buy≥70 · 총점≥70)\n${sections.join('\n\n')}`;
+}
+
+function buildMarketBreadthGateSummary(gate?: MarketBreadthGateSnapshot | null) {
+  if (!gate?.markets?.length) return '';
+  const lines = gate.markets.map((market) => {
+    const base = `${market.asset === 'NASDAQ' ? '🟣 NASDAQ' : '🔵 S&P500'} ${market.status}`;
+    const signal = market.signalDate ? ` / 최근 ${market.signalDate}` : '';
+    const stats = ` / 1·2·3M ${market.avg1m ?? '—'}·${market.avg2m ?? '—'}·${market.avg3m ?? '—'}%`;
+    return `${base}${signal}${stats}`;
+  });
+  return `\n\n📡 시장 Breadth 실전 게이트\n${lines.join('\n')}`;
+}
+
+function formatMarketBreadthGateAlert(gate: MarketBreadthGateSnapshot) {
+  const turnedOn = gate.markets.filter((market) => {
+    const prev = previousMarketGateSignalDates[market.asset] ?? null;
+    return market.status === 'ON' && market.signalDate && market.signalDate !== prev;
+  });
+  if (!turnedOn.length) return null;
+  const body = turnedOn.map((market) => [
+    `${market.asset === 'NASDAQ' ? '🟣 NASDAQ' : '🔵 S&P500'} ON`,
+    `• 신호일: ${market.signalDate}`,
+    `• 요약: ${market.summary}`,
+    `• 평균 수익률: 1M ${market.avg1m ?? '—'}% / 2M ${market.avg2m ?? '—'}% / 3M ${market.avg3m ?? '—'}%`,
+  ].join('\n')).join('\n\n');
+  return `🚦 시장 Breadth 게이트 ON\n${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}\n\n${body}`;
+}
+
+export function previewStartupBottomCandidateSummary(items?: TelegramBottomCandidateSummary[], gate?: MarketBreadthGateSnapshot | null) {
+  return buildConfirmedBottomSummary(items, gate);
+}
+
 export async function checkAndNotify(
   signals: AssetSignal[],
   regime: RegimeState,
-  allocation?: AllocationPlan
+  allocation?: AllocationPlan,
+  marketBreadthGate?: MarketBreadthGateSnapshot | null,
 ) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -269,7 +354,8 @@ export async function checkAndNotify(
     previousAllocations = { ...allocation.allocations };
   }
 
-  if (messages.length === 0 && allocChanges.length === 0) return;
+  const marketGateAlert = marketBreadthGate ? formatMarketBreadthGateAlert(marketBreadthGate) : null;
+  if (messages.length === 0 && allocChanges.length === 0 && !marketGateAlert) return;
 
   // 22차 P2#11+P2#12: quietHours 적용 — regime 변경/신호 변경은 WARN, allocChanges 만 있으면 INFO
   const level: NotificationLevel = (messages.some((m) => m.includes('국면 변경') || m.includes('신호 변경'))) ? 'WARN' : 'INFO';
@@ -295,12 +381,27 @@ export async function checkAndNotify(
       chat_id: chatId,
       text,
     }, { timeout: 10000, httpsAgent: ipv4Agent });
+    if (marketGateAlert) {
+      await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+        chat_id: chatId,
+        text: marketGateAlert,
+      }, { timeout: 10000, httpsAgent: ipv4Agent });
+    }
   } catch (err: any) {
     console.error('Telegram notification failed:', err.message);
+  } finally {
+    if (marketBreadthGate?.markets?.length) {
+      previousMarketGateSignalDates = Object.fromEntries(marketBreadthGate.markets.map((market) => [market.asset, market.signalDate ?? null]));
+    }
   }
 }
 
-export async function sendStartupSnapshot(signals: AssetSignal[], regime: RegimeState, allocation?: AllocationPlan) {
+export async function sendStartupSnapshot(
+  signals: AssetSignal[],
+  regime: RegimeState,
+  allocation?: AllocationPlan,
+  options?: { confirmedBottomCompanies?: TelegramBottomCandidateSummary[]; marketBreadthGate?: MarketBreadthGateSnapshot | null },
+) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) return false;
@@ -311,8 +412,12 @@ export async function sendStartupSnapshot(signals: AssetSignal[], regime: Regime
   previousSignals = Object.fromEntries(signals.map((s) => [s.asset, s.signal]));
   previousSignalReasons = Object.fromEntries(signals.map((s) => [s.asset, [...s.reasons]]));
   previousAllocations = allocation ? { ...allocation.allocations } : {};
+  previousMarketGateSignalDates = Object.fromEntries((options?.marketBreadthGate?.markets ?? []).map((market) => [market.asset, market.signalDate ?? null]));
 
-  const text = `🚀 MacroSquare 서버 시작\n${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}` + buildSummaryMessage(signals, regime, allocation);
+  const text = `🚀 MacroSquare 서버 시작\n${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`
+    + buildSummaryMessage(signals, regime, allocation)
+    + buildConfirmedBottomSummary(options?.confirmedBottomCompanies, options?.marketBreadthGate)
+    + buildMarketBreadthGateSummary(options?.marketBreadthGate);
 
   // 재시도 5회, timeout 짧게(10s), 지수 backoff. 총 최대 ~2분 안에 6번 시도.
   const MAX_ATTEMPTS = 5;
@@ -335,27 +440,46 @@ export async function sendStartupSnapshot(signals: AssetSignal[], regime: Regime
   return false;
 }
 
+export async function sendStartupNotice(options?: { confirmedBottomCompanies?: TelegramBottomCandidateSummary[]; marketBreadthGate?: MarketBreadthGateSnapshot | null }): Promise<boolean> {
+  const text = `🚀 MacroSquare 서버 시작\n${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`
+    + `\n\n서버 재기동 완료. 상세 스냅샷/캐시는 순차적으로 워밍업됩니다.`
+    + buildConfirmedBottomSummary(options?.confirmedBottomCompanies, options?.marketBreadthGate)
+    + buildMarketBreadthGateSummary(options?.marketBreadthGate);
+  try {
+    return await sendTelegramText(text);
+  } catch {
+    return false;
+  }
+}
+
 // 17차 Phase 2 D1: Weekly report Telegram 전송
 export async function sendWeeklyReportText(text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) return false;
-  // Telegram message limit = 4096 chars. 넘치면 분할.
-  const MAX = 3800;
-  const chunks: string[] = [];
-  for (let i = 0; i < text.length; i += MAX) chunks.push(text.slice(i, i + MAX));
   try {
-    for (const chunk of chunks) {
-      await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
-        chat_id: chatId,
-        text: chunk,
-      }, { timeout: 10000, httpsAgent: ipv4Agent });
-    }
+    await sendTelegramText(text);
     return true;
   } catch (err: any) {
     console.error('Weekly report telegram failed:', err?.message || err?.code);
     return false;
   }
+}
+
+export async function sendTelegramText(text: string): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return false;
+  const MAX = 3800;
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += MAX) chunks.push(text.slice(i, i + MAX));
+  for (const chunk of chunks) {
+    await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+      chat_id: chatId,
+      text: chunk,
+    }, { timeout: 10000, httpsAgent: ipv4Agent });
+  }
+  return true;
 }
 
 export async function sendTestMessage() {

@@ -11,12 +11,13 @@
 
 import axios from 'axios';
 import { childLogger, serializeError } from '../services/logger';
+import { ANALYST_CONSENSUS_FRESH_MS } from '../services/company-refresh-policy';
 import { readSourceCacheWithin, writeSourceCache } from '../services/source-cache';
 import { getYahooCrumb, invalidateYahooCrumb } from '../utils/yahoo-auth';
 
 const log = childLogger({ module: 'collector.analyst-consensus' });
 const CACHE_KEY = 'analyst-consensus-nasdaq-megacap';
-const FRESH_MS = 6 * 60 * 60 * 1000; // 6시간
+const FRESH_MS = ANALYST_CONSENSUS_FRESH_MS;
 const STALE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const MEGACAP = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA'];

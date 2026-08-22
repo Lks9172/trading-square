@@ -1,0 +1,53 @@
+name: Cutover CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  documentation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify financial, development and decision-record contracts
+        run: python3 scripts/verify-documentation.py
+      - name: Test documentation and observability guard scripts
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Verify Java backend and architecture boundaries
+        working-directory: server-spring
+        run: ./mvnw -B -ntp clean verify
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - name: Install
+        working-directory: client
+        run: npm ci
+      - name: Test resilient server API fetches
+        working-directory: client
+        run: npm run test:server-api
+      - name: Lint
+        working-directory: client
+        run: npm run lint
+      - name: Build
+        working-directory: client
+        run: npm run build

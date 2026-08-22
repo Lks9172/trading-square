@@ -15,13 +15,20 @@ import { readSourceCacheWithin, writeSourceCache } from '../services/source-cach
 
 const log = childLogger({ module: 'collector.stablecoin' });
 const DEFILLAMA_URL = 'https://stablecoins.llama.fi/stablecoins';
+const DEFILLAMA_HISTORY_URL = 'https://stablecoins.llama.fi/stablecoincharts/all';
 const CACHE_KEY = 'stablecoin-mcap';
+const HISTORY_CACHE_KEY = 'stablecoin-mcap-history';
 const FRESH_MS = 6 * 60 * 60 * 1000; // 6시간
 const STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7일
 
 interface StablecoinEntry {
   name?: string;
   circulating?: { peggedUSD?: number };
+}
+
+export interface StablecoinHistoryPoint {
+  date: string;
+  marketCapBillions: number;
 }
 
 async function fetchLive(): Promise<MarketDataPoint | null> {
@@ -72,4 +79,37 @@ export async function fetchStablecoinMcap(): Promise<MarketDataPoint | null> {
     return stale.value;
   }
   return null;
+}
+
+export async function fetchStablecoinMcapHistory(days = 30): Promise<StablecoinHistoryPoint[]> {
+  const fresh = await readSourceCacheWithin<StablecoinHistoryPoint[]>(HISTORY_CACHE_KEY, FRESH_MS);
+  if (fresh?.value?.length) return fresh.value.slice(-days);
+
+  try {
+    const { data } = await axios.get<Array<Record<string, unknown>>>(DEFILLAMA_HISTORY_URL, {
+      timeout: 15000,
+      headers: { Accept: 'application/json' },
+    });
+    const rows = Array.isArray(data) ? data : [];
+    const mapped = rows
+      .map((row) => {
+        const ts = Number(row.date ?? 0);
+        const totalCirculatingUsd = Number((row.totalCirculatingUSD as Record<string, unknown> | undefined)?.peggedUSD ?? 0);
+        if (!ts || !Number.isFinite(totalCirculatingUsd) || totalCirculatingUsd <= 0) return null;
+        return {
+          date: new Date(ts * 1000).toISOString().split('T')[0],
+          marketCapBillions: Number((totalCirculatingUsd / 1_000_000_000).toFixed(2)),
+        } satisfies StablecoinHistoryPoint;
+      })
+      .filter((row): row is StablecoinHistoryPoint => Boolean(row));
+    if (mapped.length) {
+      await writeSourceCache(HISTORY_CACHE_KEY, mapped, { source: 'defillama' });
+      return mapped.slice(-days);
+    }
+  } catch (err) {
+    log.warn({ err: serializeError(err) }, 'stablecoin history fetch failed');
+  }
+
+  const stale = await readSourceCacheWithin<StablecoinHistoryPoint[]>(HISTORY_CACHE_KEY, STALE_MS);
+  return stale?.value?.slice(-days) ?? [];
 }

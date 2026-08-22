@@ -103,7 +103,7 @@ export function HistoryPanel() {
   const [interval, setInterval] = useState<IntervalKey>("1W");
   const [selected, setSelected] = useState<string[]>(["YAHOO:NASDAQ", "YAHOO:GOLD", "SIGNAL:REGIME"]);
   const [seriesMap, setSeriesMap] = useState<Record<string, HistoryPoint[]>>({});
-  const [windowStart, setWindowStart] = useState(0);
+  const [windowStart, setWindowStart] = useState(Number.MAX_SAFE_INTEGER);
   const dragState = useRef<{ dragging: boolean; startX: number; startWindow: number }>({ dragging: false, startX: 0, startWindow: 0 });
 
   useEffect(() => {
@@ -131,17 +131,14 @@ export function HistoryPanel() {
   const longestLength = Math.max(0, ...activeSeries.map((s) => s.points.length));
   const visibleCount = Math.max(10, Math.round(longestLength * displayWindowFactor(range, effective)));
   const maxWindowStart = Math.max(0, longestLength - visibleCount);
-
-  useEffect(() => {
-    setWindowStart(maxWindowStart);
-  }, [range, interval, selected.join(","), maxWindowStart]);
+  const safeWindowStart = Math.min(windowStart, maxWindowStart);
 
   const windowedSeries = useMemo(() => {
     return activeSeries.map((series) => ({
       ...series,
-      points: series.points.slice(windowStart, windowStart + visibleCount),
+      points: series.points.slice(safeWindowStart, safeWindowStart + visibleCount),
     }));
-  }, [activeSeries, windowStart, visibleCount]);
+  }, [activeSeries, safeWindowStart, visibleCount]);
 
   const indexedSeries = windowedSeries.filter((s) => s.mode === "indexed");
   const signalSeries = windowedSeries.filter((s) => s.mode === "signal");
@@ -169,7 +166,7 @@ export function HistoryPanel() {
   }, [windowedSeries, range]);
 
   function onPointerDown(clientX: number) {
-    dragState.current = { dragging: true, startX: clientX, startWindow: windowStart };
+    dragState.current = { dragging: true, startX: clientX, startWindow: safeWindowStart };
   }
   function onPointerMove(clientX: number) {
     if (!dragState.current.dragging) return;
@@ -197,23 +194,23 @@ export function HistoryPanel() {
 
       <div className="flex flex-wrap gap-2">
         {RANGE_OPTIONS.map((item) => (
-          <button key={item} type="button" onClick={() => setRange(item)} className={`rounded px-2.5 py-1.5 text-xs sm:text-sm border ${range === item ? "border-blue-500 bg-blue-500/10 text-blue-300" : "border-[var(--card-border)] text-[var(--muted)]"}`}>{item}</button>
+          <button key={item} type="button" onClick={() => { setRange(item); setWindowStart(Number.MAX_SAFE_INTEGER); }} className={`rounded px-2.5 py-1.5 text-xs sm:text-sm border ${range === item ? "border-blue-500 bg-blue-500/10 text-blue-300" : "border-[var(--card-border)] text-[var(--muted)]"}`}>{item}</button>
         ))}
       </div>
       <div className="flex flex-wrap gap-2">
         {INTERVAL_OPTIONS.map((item) => (
-          <button key={item} type="button" onClick={() => setInterval(item)} className={`rounded px-2.5 py-1.5 text-xs sm:text-sm border ${interval === item ? "border-green-500 bg-green-500/10 text-green-300" : "border-[var(--card-border)] text-[var(--muted)]"}`}>간격 {item}</button>
+          <button key={item} type="button" onClick={() => { setInterval(item); setWindowStart(Number.MAX_SAFE_INTEGER); }} className={`rounded px-2.5 py-1.5 text-xs sm:text-sm border ${interval === item ? "border-green-500 bg-green-500/10 text-green-300" : "border-[var(--card-border)] text-[var(--muted)]"}`}>간격 {item}</button>
         ))}
       </div>
 
-      <SelectorGroup title="주요 데이터" items={SERIES.filter((s) => s.group === "macro")} selected={selected} setSelected={setSelected} />
-      <SelectorGroup title="주요 자산 가격" items={SERIES.filter((s) => s.group === "asset")} selected={selected} setSelected={setSelected} />
-      <SelectorGroup title="자산별/종합 신호" items={SERIES.filter((s) => s.group === "signal")} selected={selected} setSelected={setSelected} />
+      <SelectorGroup title="주요 데이터" items={SERIES.filter((s) => s.group === "macro")} selected={selected} setSelected={setSelected} resetWindow={() => setWindowStart(Number.MAX_SAFE_INTEGER)} />
+      <SelectorGroup title="주요 자산 가격" items={SERIES.filter((s) => s.group === "asset")} selected={selected} setSelected={setSelected} resetWindow={() => setWindowStart(Number.MAX_SAFE_INTEGER)} />
+      <SelectorGroup title="자산별/종합 신호" items={SERIES.filter((s) => s.group === "signal")} selected={selected} setSelected={setSelected} resetWindow={() => setWindowStart(Number.MAX_SAFE_INTEGER)} />
 
       <div className="rounded-lg border border-[var(--card-border)] bg-[var(--background)] p-3">
         <div className="flex items-center justify-between mb-2 text-[10px] sm:text-xs text-[var(--muted)]">
           <span>드래그해서 과거/최근 구간 이동</span>
-          <span>{windowStart + 1} ~ {Math.min(windowStart + visibleCount, longestLength)} / {longestLength}</span>
+          <span>{safeWindowStart + 1} ~ {Math.min(safeWindowStart + visibleCount, longestLength)} / {longestLength}</span>
         </div>
 
         <svg
@@ -294,11 +291,13 @@ function SelectorGroup({
   items,
   selected,
   setSelected,
+  resetWindow,
 }: {
   title: string;
   items: SeriesDef[];
   selected: string[];
   setSelected: React.Dispatch<React.SetStateAction<string[]>>;
+  resetWindow: () => void;
 }) {
   return (
     <div>
@@ -310,7 +309,10 @@ function SelectorGroup({
             <button
               key={item.queryKey}
               type="button"
-              onClick={() => setSelected((prev) => active ? prev.filter((v) => v !== item.queryKey) : [...prev, item.queryKey])}
+              onClick={() => {
+                resetWindow();
+                setSelected((prev) => active ? prev.filter((v) => v !== item.queryKey) : [...prev, item.queryKey]);
+              }}
               className={`rounded-lg border px-2.5 py-2 text-left transition-colors ${active ? "border-blue-500 bg-blue-500/10 text-blue-300" : "border-[var(--card-border)] bg-[var(--background)] text-[var(--muted)] hover:text-white"}`}
             >
               <div className="text-xs sm:text-sm font-medium">{item.label}</div>

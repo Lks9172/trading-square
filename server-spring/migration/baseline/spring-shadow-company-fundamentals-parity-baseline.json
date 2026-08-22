@@ -1,0 +1,220 @@
+{
+  "capturedAt": "2026-07-19T12:31:55Z",
+  "milestone": "spring-shadow-company-fundamentals-direct-sec-parity",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25.0.3 LTS / Spring Boot 4.1.0 / Tomcat 11.0.22",
+    "nodePort": 5846,
+    "springShadowPort": 5856,
+    "springMemoryLimit": "1GiB"
+  },
+  "scope": {
+    "implementedInternalRead": "GET /internal/v1/migration/company-research-parity/{ticker}",
+    "behavior": [
+      "legacy company detail remains the serving baseline while Spring independently loads SEC Company Facts and recomputes normalized fundamentals, Company Score, and Buy Score",
+      "SEC/XBRL/HTTP/Jackson types remain inside the outbound adapter; application and domain use transport-neutral semantic fact points",
+      "the SEC response is parsed token-by-token and only selected us-gaap/dei tags are materialized instead of building a full JsonNode tree",
+      "each selected series retains only the newest point, newest four 10-Q points, and newest two 10-K/FY points that the legacy normalizer can observe",
+      "successful evidence is bounded to 128 CIKs, fresh for four hours, stale for at most twenty-four hours, and protected by per-CIK single-flight",
+      "large SEC fetch/parse work is bounded to two concurrent CIKs by default; malformed and failed responses never replace a successful cache entry",
+      "the endpoint is demand-driven and adds no startup fetch, scheduler, persistence write, notification, or Telegram side effect"
+    ],
+    "remainingInNode": [
+      "SEC submissions and ticker-map collection",
+      "Yahoo quote collection",
+      "analyst consensus collection and history persistence",
+      "company detail enrichment and route-cache ownership",
+      "company research schedulers and Telegram notifications"
+    ],
+    "legacyInputsStillUsed": ["CIK", "current quote", "analyst expectations"],
+    "comparableForFinalDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 96,
+      "failures": 0,
+      "domain": 22,
+      "application": 17,
+      "adapters": 51,
+      "bootstrap": 2,
+      "architecture": 4
+    },
+    "localStreamingLiveParity": {
+      "tickers": ["NVDA", "NEM", "JPM", "MSFT", "ISRG", "BRK.B", "INTU", "TSM", "ASML", "XOM"],
+      "matched": 10,
+      "total": 10,
+      "fundamentalsScoreBuyScoreAndReasonsExact": true
+    },
+    "homeColdRepresentativeParity": {
+      "tickers": ["NVDA", "NEM", "JPM", "MSFT", "ISRG", "BRK.B", "INTU", "TSM", "ASML", "XOM"],
+      "matched": 10,
+      "total": 10,
+      "medianDurationMs": 622.467,
+      "maxDurationMs": 984.595,
+      "fundamentalsScoreBuyScoreAndReasonsExact": true
+    },
+    "homeColdExtendedParity": {
+      "tickers": ["AAPL", "AMZN", "META", "GOOGL", "AVGO", "AMD", "INTC", "QCOM", "ORCL", "CRM", "ADBE", "NFLX", "TSLA", "V", "MA", "BAC", "GS", "MS", "WMT", "COST", "HD", "LOW", "UNH", "LLY", "JNJ", "PFE", "PG", "KO", "PEP", "MCD"],
+      "matched": 30,
+      "total": 30,
+      "medianDurationMs": 559.552,
+      "maxDurationMs": 2259.993,
+      "totalDurationMs": 18537.718,
+      "fundamentalsScoreBuyScoreAndReasonsExact": true
+    },
+    "homeConcurrentColdParity": {
+      "tickers": ["CVX", "COP", "SLB", "LIN", "GE", "RTX", "CAT", "DE"],
+      "clientConcurrency": 8,
+      "secFetchConcurrencyLimit": 2,
+      "matched": 8,
+      "total": 8,
+      "elapsedMs": 3991.438
+    },
+    "homeFreshRepresentativeParity": {
+      "matched": 10,
+      "total": 10,
+      "medianDurationMs": 13.328,
+      "maxDurationMs": 31.091
+    },
+    "existingPublicEndpointRegression": {
+      "statusObjectAndByteExactMatches": 8,
+      "total": 8,
+      "covered": [
+        "company detail success",
+        "company detail 404",
+        "company search",
+        "company summaries",
+        "crypto catalog",
+        "crypto BTC detail",
+        "research theme catalog",
+        "research sector catalog"
+      ]
+    },
+    "internalUnknownTicker": {
+      "status": 404,
+      "safeErrorBody": true
+    },
+    "runtime": {
+      "springReadiness": "UP",
+      "springWarningCount": 0,
+      "springErrorOrExceptionCount": 0,
+      "springRestartCount": 0,
+      "nodeRestartCount": 0,
+      "clientRestartCount": 0,
+      "nodeContainerId": "d5ce6ef44ee4dc9703dcb0daee018a47cc942a70306424d1ab0a280c3d9764b4",
+      "clientContainerId": "09dafacc9a81e6f678651041c639740e992bd75bd1e61e2e5c2bf174cca2d11a",
+      "springContainerId": "7453ad9ae5829c59cb00097a53c9b46f54fa8b11cf4fb55959199098b4ec177a",
+      "springImageId": "sha256:beaec8da13647f7774c9404ba2a0fcce8aff3b3008bf978b4a388f6f4f66cacb",
+      "springContainerStartedAt": "2026-07-19T12:26:57.362093241Z"
+    }
+  },
+  "httpBenchmarks": {
+    "homeLoopbackFreshConcurrent": {
+      "path": "/internal/v1/migration/company-research-parity/NVDA",
+      "runs": 3,
+      "requestsPerRun": 100,
+      "concurrency": 10,
+      "responseBytes": 3223,
+      "totalErrorCount": 0,
+      "medianThroughputPerSecond": 422.551,
+      "medianP50Ms": 7.919,
+      "medianP95Ms": 149.78,
+      "medianP99Ms": 172.137
+    },
+    "homeLoopbackFreshSequential": {
+      "requests": 200,
+      "concurrency": 1,
+      "totalErrorCount": 0,
+      "throughputPerSecond": 415.824,
+      "p50Ms": 2.073,
+      "p95Ms": 2.804,
+      "p99Ms": 3.378,
+      "maxMs": 28.594
+    }
+  },
+  "streamingMemoryComparison": {
+    "fullTreeAfter40Cik": {
+      "springImageId": "sha256:4bce42cca9b1a7cd8d0f6c89127e148eb0cbc3e323b705f71bc4df6914e776ec",
+      "containerMemoryMiB": 783.4,
+      "heapUsedBytes": 178719768,
+      "heapCommittedBytes": 682725376,
+      "tenuredUsedBytes": 73568832,
+      "gcPauseCount": 37,
+      "gcPauseTotalSeconds": 1.355,
+      "gcPauseMaxSeconds": 0.185,
+      "majorGcObserved": true
+    },
+    "streamingAfter40Cik": {
+      "springImageId": "sha256:beaec8da13647f7774c9404ba2a0fcce8aff3b3008bf978b4a388f6f4f66cacb",
+      "containerMemoryMiB": 203.6,
+      "heapUsedBytes": 60916776,
+      "heapCommittedBytes": 105578496,
+      "tenuredUsedBytes": 31400648,
+      "gcPauseCount": 7,
+      "gcPauseTotalSeconds": 0.082,
+      "gcPauseMaxSeconds": 0.022,
+      "majorGcObserved": false
+    },
+    "streamingReductionPct": {
+      "containerMemory": 74.011,
+      "heapUsed": 65.915,
+      "heapCommitted": 84.536,
+      "gcPauseTotal": 93.948,
+      "gcPauseMax": 88.108
+    },
+    "interpretation": "The full-tree spike was transient JSON materialization and promotion rather than retained evidence-cache growth. Streaming removes the peak while preserving exact output."
+  },
+  "sameWindowIdle10SamplesAfter48CikAndHttpWarmup": {
+    "node": {
+      "memoryMedianMiB": 116.1,
+      "memoryMinMiB": 116.1,
+      "memoryMaxMiB": 116.3,
+      "cpuMedianPct": 0.665,
+      "cpuMeanPct": 0.68,
+      "cpuMaxPct": 1.11,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 221.15,
+      "memoryMinMiB": 220.3,
+      "memoryMaxMiB": 222.1,
+      "cpuMedianPct": 0.05,
+      "cpuMeanPct": 0.401,
+      "cpuMaxPct": 3.59,
+      "pidCountMedian": 29
+    },
+    "warning": "Node serves the full production workload while Spring still serves read-only shadow traffic, so this is not a final runtime comparison."
+  },
+  "springJvmFinal": {
+    "heapUsedBytes": 47959448,
+    "heapCommittedBytes": 105578496,
+    "heapMaxBytes": 727842816,
+    "tenuredUsedBytes": 37990968,
+    "nonHeapUsedBytes": 84235232,
+    "gcPauseCount": 11,
+    "gcPauseTotalSeconds": 0.109,
+    "gcPauseMaxSeconds": 0.013,
+    "liveJvmThreads": 17,
+    "peakJvmThreads": 35
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.622,
+    "springProcessRunningSeconds": 3.14
+  },
+  "disk": {
+    "nodeImageBytes": 266577284,
+    "springImageBytes": 249249149,
+    "previousSpringImageBytes": 249242436,
+    "streamingImageIncreasePct": 0.003,
+    "applicationIoComparisonDeferred": true
+  },
+  "rollback": {
+    "previousImageId": "sha256:4bce42cca9b1a7cd8d0f6c89127e148eb0cbc3e323b705f71bc4df6914e776ec",
+    "previousImageStillPresent": true,
+    "earlierStableImageId": "sha256:c52bcd204e701ef9c3e07a642b872d4677c37f462d821ee9d1dab48058714f25",
+    "earlierStableImageStillPresent": true,
+    "nodeAndClientWereNotRecreated": true
+  }
+}

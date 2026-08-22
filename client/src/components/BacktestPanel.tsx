@@ -36,7 +36,6 @@ export function BacktestPanel() {
   const [data, setData] = useState<BacktestData | null>(null);
   const [portfolios, setPortfolios] = useState<Record<number, PortfolioResult>>({});
   const [pfYears, setPfYears] = useState<number>(3);
-  const [loadingYear, setLoadingYear] = useState<number | null>(null);
 
   useEffect(() => {
     fetch("/api/backtest/summary").then((r) => r.json()).then(setData).catch(() => {});
@@ -63,22 +62,6 @@ export function BacktestPanel() {
     });
     return () => { cancelled = true; };
   }, []);
-
-  // 클릭 후 캐시에 없는 년은 on-demand fetch (보통 prefetch 된 상태).
-  useEffect(() => {
-    if (portfolios[pfYears]) return;
-    let cancelled = false;
-    setLoadingYear(pfYears);
-    fetch(`/api/backtest/portfolio?years=${pfYears}`)
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancelled) return;
-        if (j && j.series) setPortfolios((p) => ({ ...p, [pfYears]: j as PortfolioResult }));
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoadingYear(null); });
-    return () => { cancelled = true; };
-  }, [pfYears, portfolios]);
 
   const portfolio = portfolios[pfYears] ?? null;
 
@@ -124,7 +107,7 @@ export function BacktestPanel() {
           <div className="flex gap-1">
             {YEAR_OPTIONS.map((y) => {
               const isActive = pfYears === y;
-              const isLoading = loadingYear === y && !portfolios[y];
+              const isLoading = isActive && !portfolios[y];
               const isCached = !!portfolios[y];
               return (
                 <button

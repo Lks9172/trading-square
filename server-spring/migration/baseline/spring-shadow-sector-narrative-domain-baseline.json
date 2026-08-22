@@ -1,0 +1,82 @@
+{
+  "capturedAt": "2026-07-19T06:58:00Z",
+  "milestone": "spring-shadow-sector-narrative-domain",
+  "environment": {
+    "host": "home-server",
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow"
+  },
+  "scope": {
+    "springImplemented": [
+      "compatibility health endpoint",
+      "company score domain policy and internal endpoint",
+      "company buy score domain policy",
+      "bottom pattern domain policy",
+      "deep-bottom and reversal-confirmation domain policies",
+      "bottleneck candidate score domain policy",
+      "sector rotation regime, ranking and leadership-horizon domain policy",
+      "eleven narrative heat and stage domain policies"
+    ],
+    "springNotYetImplemented": [
+      "collectors",
+      "persistent data adapters",
+      "schedulers",
+      "Telegram side effects",
+      "snapshot/company/sector/crypto public read models",
+      "write use cases"
+    ],
+    "comparableForFinalDecision": false
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.356,
+    "springApplicationReadySeconds": 2.421,
+    "note": "Single shadow redeployment observation; the prior three-run baseline remains the startup reference."
+  },
+  "disk": {
+    "nodeImageBytes": 266577284,
+    "springImageBytes": 248873318,
+    "springImageDifferencePct": -6.64,
+    "applicationIoComparisonDeferred": true
+  },
+  "sameWindowIdle10Samples": {
+    "node": {
+      "memoryMedianMiB": 122.3,
+      "memoryMinMiB": 122.3,
+      "memoryMaxMiB": 122.3,
+      "cpuMedianPct": 0.695,
+      "cpuMeanPct": 0.774,
+      "cpuMaxPct": 1.36,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 159.4,
+      "memoryMinMiB": 159.4,
+      "memoryMaxMiB": 159.7,
+      "cpuMedianPct": 0.055,
+      "cpuMeanPct": 0.423,
+      "cpuMaxPct": 3.45,
+      "pidCountMedian": 21
+    },
+    "warning": "Spring has no collectors, persistence or schedulers while Node is serving production traffic."
+  },
+  "springJvmAfterWarmup": {
+    "heapUsedBytes": 28581280,
+    "nonHeapUsedBytes": 60013848,
+    "heapMaxBytes": 727842816,
+    "gcPauseCount": 2,
+    "gcPauseTotalSeconds": 0.051,
+    "gcPauseMaxSeconds": 0.045,
+    "liveJvmThreads": 14
+  },
+  "verification": {
+    "springReadiness": "UP",
+    "nodeProductionHealth": "ok",
+    "springCompanyScoreGolden": 87,
+    "springContainerHealthy": true,
+    "springLogWarningsOrErrorsAfterDeploy": 0
+  },
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "reason": "Feature, public read-model and persistence parity are incomplete."
+  }
+}

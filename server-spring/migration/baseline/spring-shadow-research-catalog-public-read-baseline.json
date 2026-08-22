@@ -1,0 +1,140 @@
+{
+  "capturedAt": "2026-07-19T08:06:00Z",
+  "milestone": "spring-shadow-research-catalog-public-read",
+  "environment": {
+    "host": "home-server",
+    "client": "Mac on same LAN",
+    "nodeContainer": "macrosquare-server",
+    "springContainer": "macrosquare-server-spring-shadow",
+    "springRuntime": "OpenJDK 25.0.3 LTS / Spring Boot 4.1.0"
+  },
+  "scope": {
+    "implementedPublicReads": [
+      "GET /api/research/themes",
+      "GET /api/research/sectors"
+    ],
+    "behavior": [
+      "Spring owns the public route, response DTO, use case, and transport-neutral catalog projection",
+      "a temporary read-only anti-corruption adapter obtains the legacy calculated projection",
+      "successful normalized reads are cached for five minutes",
+      "malformed or unavailable upstream responses fail closed with HTTP 502",
+      "no startup call, persistence write, scheduler, collector, or Telegram side effect is introduced"
+    ],
+    "remainingInNode": [
+      "research theme and sector detail read models",
+      "sector score and density data ownership",
+      "company enrichment used by research detail pages",
+      "collectors, persistence, schedulers, and notifications"
+    ],
+    "comparableForFinalDecision": false
+  },
+  "verification": {
+    "java25Tests": {
+      "total": 43,
+      "failures": 0,
+      "domain": 19,
+      "application": 7,
+      "adapters": 11,
+      "bootstrap": 2,
+      "architecture": 4
+    },
+    "liveContractParity": {
+      "themeCatalogExact": true,
+      "themeCount": 6,
+      "themeResponseBytes": 8103,
+      "sectorCatalogExact": true,
+      "sectorCount": 11,
+      "sectorResponseBytes": 27641,
+      "narrativeCatalogStillExact": true,
+      "internalNarrativesMatched": "11/11",
+      "rotationMatched": true,
+      "springReadiness": "UP",
+      "springLogWarningsOrErrors": 0,
+      "springRestartCount": 0,
+      "nodeRestartCount": 0,
+      "clientRestartCount": 0,
+      "nodeAndClientContainerIdsUnchanged": true
+    }
+  },
+  "httpBenchmarks": {
+    "method": "GET",
+    "runs": 3,
+    "requestsPerRun": 300,
+    "concurrency": 15,
+    "themeCatalog": {
+      "node": {
+        "medianThroughputPerSecond": 593.279,
+        "medianP50Ms": 22.272,
+        "medianP95Ms": 44.622,
+        "medianP99Ms": 81.721,
+        "totalErrorCount": 0
+      },
+      "spring": {
+        "medianThroughputPerSecond": 790.47,
+        "medianP50Ms": 16.905,
+        "medianP95Ms": 23.796,
+        "medianP99Ms": 45.644,
+        "totalErrorCount": 0
+      },
+      "note": "One Node run crossed its 15-minute route-cache refresh window and recorded a 27.688s p99; the three-run median is reported."
+    },
+    "sectorCatalog": {
+      "node": {
+        "medianThroughputPerSecond": 343.543,
+        "medianP50Ms": 38.1,
+        "medianP95Ms": 63.553,
+        "medianP99Ms": 90.797,
+        "totalErrorCount": 0
+      },
+      "spring": {
+        "medianThroughputPerSecond": 356.081,
+        "medianP50Ms": 40.844,
+        "medianP95Ms": 52.269,
+        "medianP99Ms": 71.17,
+        "totalErrorCount": 0
+      }
+    }
+  },
+  "startup": {
+    "springBootReportedStartedSeconds": 2.613,
+    "springProcessRunningSeconds": 3.204
+  },
+  "disk": {
+    "nodeImageBytes": 266577284,
+    "springImageBytes": 248990007,
+    "springImageDifferencePct": -6.6,
+    "applicationIoComparisonDeferred": true
+  },
+  "sameWindowIdle10SamplesAfterHttpWarmup": {
+    "node": {
+      "memoryMedianMiB": 151.7,
+      "memoryMinMiB": 151.7,
+      "memoryMaxMiB": 151.8,
+      "cpuMedianPct": 0.69,
+      "cpuMeanPct": 0.805,
+      "cpuMaxPct": 2.02,
+      "pidCountMedian": 11
+    },
+    "spring": {
+      "memoryMedianMiB": 185.25,
+      "memoryMinMiB": 185.2,
+      "memoryMaxMiB": 185.3,
+      "cpuMedianPct": 0.055,
+      "cpuMeanPct": 0.407,
+      "cpuMaxPct": 3.41,
+      "pidCountMedian": 23
+    },
+    "warning": "Node serves the production workload while Spring only serves a shadow read slice."
+  },
+  "springJvmAfterHttpWarmup": {
+    "heapUsedBytes": 41988016,
+    "nonHeapUsedBytes": 72050376,
+    "gcPauseCount": 2,
+    "gcPauseTotalSeconds": 0.034,
+    "liveJvmThreads": 16
+  },
+  "decision": {
+    "trafficSwitchAllowed": false,
+    "reason": "The two list contracts pass parity and latency gates, but detail reads and calculated data ownership still remain on Node."
+  }
+}

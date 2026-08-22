@@ -1,5 +1,5 @@
 import { MarketDataPoint, DerivedIndicator } from '../types/indicators';
-import { fetchYahooHistory, fetchYahooOHLC } from '../collectors/yahoo';
+import { fetchYahooForwardPE, fetchYahooHistory, fetchYahooOHLC } from '../collectors/yahoo';
 import { fetchFredHistory } from '../collectors/fred';
 import { readHistory, writeHistoryPoint } from '../state/history-store';
 import { fetchKrxInvestorFlow, summarizeInvestorFlow } from '../collectors/krx-flow';
@@ -16,6 +16,8 @@ import {
 } from './candles';
 import { withSpan } from '../observability/trace';
 import { buildSectorQualityDerived } from './sector-derived';
+import { getResearchStandardSectors } from '../services/company-peer-map';
+import { readSourceCacheWithin, writeSourceCache } from '../services/source-cache';
 
 function val(raw: Record<string, MarketDataPoint>, key: string): number | null {
   return raw[key]?.value ?? null;
@@ -882,33 +884,162 @@ export async function computeDerived(
     ['SOXX','반도체(광역)'],['SMH','반도체(대형주)'],['ITA','방산/항공우주'],['GRID','전력망'],['IGF','인프라'],
   ];
   try {
-    // 2026-04 로그 관측성 개선: derived 7s 병목 세분화 — 섹터/MTF/yearly 각각 child span.
+    // 2026-06: 기존 구현은 Yahoo history(오름차순)를 역순처럼 계산해 섹터 모멘텀을 왜곡했다.
+    // 이를 수정하고 1M/3M/6M/12M 중기 상대강도 프레임을 함께 저장한다.
     await withSpan('macrosquare.engine.derived.sector', async (span) => {
-    const sectorResults = await Promise.allSettled(sectorEtfs.map(([sym]) => fetchYahooHistory(sym, 30)));
-    span.setAttribute('derived.sector.count', sectorEtfs.length);
-    const sectorReturns: Array<{ key: string; label: string; ret: number }> = [];
-    sectorEtfs.forEach(([sym, label], i) => {
-      const r = sectorResults[i];
-      if (r.status === 'fulfilled' && r.value.length >= 20) {
-        const closes = r.value.map((h) => h.close);
-        const ret = ((closes[0] - closes[19]) / closes[19]) * 100;
-        sectorReturns.push({ key: sym, label, ret });
-        d[`SECTOR_${sym}`] = { name: `sector_${sym.toLowerCase()}`, value: parseFloat(ret.toFixed(2)), date: dt, formula: `${label} ETF 20일 수익률(%)` };
-      } else {
-        const cur = val(raw, sym);
-        const high52 = val(raw, `${sym}_52WH`);
-        if (cur !== null && high52 !== null && high52 > 0) {
-          const ret52 = ((cur - high52) / high52) * 100;
-          sectorReturns.push({ key: sym, label, ret: ret52 });
-          d[`SECTOR_${sym}`] = { name: `sector_${sym.toLowerCase()}`, value: parseFloat(ret52.toFixed(2)), date: dt, formula: `${label} 52주최고 대비(%) fallback` };
+      const sectorResults = await Promise.allSettled(sectorEtfs.map(([sym]) => fetchYahooHistory(sym, 380)));
+      span.setAttribute('derived.sector.count', sectorEtfs.length);
+      const sectorReturns: Array<{ key: string; label: string; ret: number }> = [];
+      const calcReturn = (closes: number[], lookback: number): number | null => {
+        if (closes.length <= lookback) return null;
+        const prev = closes[closes.length - 1 - lookback];
+        const curr = closes[closes.length - 1];
+        if (!Number.isFinite(prev) || !Number.isFinite(curr) || prev <= 0) return null;
+        return ((curr / prev) - 1) * 100;
+      };
+      sectorEtfs.forEach(([sym, label], i) => {
+        const r = sectorResults[i];
+        if (r.status === 'fulfilled' && r.value.length >= 22) {
+          const closes = r.value.map((h) => h.close).filter((value) => Number.isFinite(value) && value > 0);
+          const ret1m = calcReturn(closes, 21);
+          const ret3m = calcReturn(closes, 63);
+          const ret6m = calcReturn(closes, 126);
+          const ret12m = calcReturn(closes, 252);
+          const weightedPairs: Array<[number | null, number]> = [
+            [ret1m, 0.15],
+            [ret3m, 0.35],
+            [ret6m, 0.35],
+            [ret12m, 0.15],
+          ];
+          const weightSum = weightedPairs.reduce((sum, [value, weight]) => (typeof value === 'number' ? sum + weight : sum), 0);
+          const rsComposite = weightSum > 0
+            ? weightedPairs.reduce((sum, [value, weight]) => (typeof value === 'number' ? sum + value * weight : sum), 0) / weightSum
+            : null;
+
+          if (typeof ret1m === 'number') {
+            sectorReturns.push({ key: sym, label, ret: ret1m });
+            d[`SECTOR_${sym}`] = {
+              name: `sector_${sym.toLowerCase()}`,
+              value: parseFloat(ret1m.toFixed(2)),
+              date: dt,
+              formula: `${label} ETF 최근 1개월 수익률(%)`,
+            };
+          }
+          if (typeof ret3m === 'number') {
+            d[`SECTOR_RET_3M_${sym}`] = {
+              name: `sector_ret_3m_${sym.toLowerCase()}`,
+              value: parseFloat(ret3m.toFixed(2)),
+              date: dt,
+              formula: `${label} ETF 최근 3개월 수익률(%)`,
+            };
+          }
+          if (typeof ret6m === 'number') {
+            d[`SECTOR_RET_6M_${sym}`] = {
+              name: `sector_ret_6m_${sym.toLowerCase()}`,
+              value: parseFloat(ret6m.toFixed(2)),
+              date: dt,
+              formula: `${label} ETF 최근 6개월 수익률(%)`,
+            };
+          }
+          if (typeof ret12m === 'number') {
+            d[`SECTOR_RET_12M_${sym}`] = {
+              name: `sector_ret_12m_${sym.toLowerCase()}`,
+              value: parseFloat(ret12m.toFixed(2)),
+              date: dt,
+              formula: `${label} ETF 최근 12개월 수익률(%)`,
+            };
+          }
+          if (typeof rsComposite === 'number') {
+            d[`SECTOR_RS_${sym}`] = {
+              name: `sector_rs_${sym.toLowerCase()}`,
+              value: parseFloat(rsComposite.toFixed(2)),
+              date: dt,
+              formula: `${label} 중기 상대강도 프록시 = 1M*15% + 3M*35% + 6M*35% + 12M*15%`,
+            };
+          }
+        } else {
+          const cur = val(raw, sym);
+          const high52 = val(raw, `${sym}_52WH`);
+          if (cur !== null && high52 !== null && high52 > 0) {
+            const ret52 = ((cur - high52) / high52) * 100;
+            sectorReturns.push({ key: sym, label, ret: ret52 });
+            d[`SECTOR_${sym}`] = {
+              name: `sector_${sym.toLowerCase()}`,
+              value: parseFloat(ret52.toFixed(2)),
+              date: dt,
+              formula: `${label} 52주최고 대비(%) fallback`,
+            };
+          }
+        }
+      });
+      if (sectorReturns.length > 0) {
+        const strongest = sectorReturns.sort((a, b) => b.ret - a.ret)[0];
+        d.SECTOR_STRONGEST = { name: 'sector_strongest', value: strongest.ret, date: dt, formula: `가장 강한 섹터(1M): ${strongest.label}(${strongest.key}) ${strongest.ret.toFixed(1)}%` };
+      }
+    }); // withSpan sector
+  } catch { void 0; }
+
+  try {
+    // 2026-06: 섹터 밸류에이션 프록시 — 표준 섹터 대표주 4개 forward PE median.
+    // 24시간 캐시하여 startup 부담을 제한한다.
+    await withSpan('macrosquare.engine.derived.sector-valuation', async (span) => {
+      const standardSectors = getResearchStandardSectors();
+      const valuationRows = await Promise.all(standardSectors.map(async (sector) => {
+        const cacheKey = `sector-forward-pe:${sector.sectorKey}`;
+        const cached = await readSourceCacheWithin<{ samples: Array<{ ticker: string; forwardPE: number }>; median: number | null }>(cacheKey, 24 * 60 * 60 * 1000);
+        if (cached?.value) {
+          return { sectorKey: sector.sectorKey, samples: cached.value.samples, median: cached.value.median };
+        }
+        const samples: Array<{ ticker: string; forwardPE: number }> = [];
+        for (const ticker of sector.tickers.slice(0, 4)) {
+          const pe = await fetchYahooForwardPE([ticker]);
+          if (pe?.forwardPE) samples.push(pe);
+          if (samples.length >= 4) break;
+        }
+        const sorted = samples.map((item) => item.forwardPE).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+        const median = !sorted.length
+          ? null
+          : sorted.length % 2 === 1
+            ? sorted[Math.floor(sorted.length / 2)]
+            : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+        await writeSourceCache(cacheKey, { samples, median }, { sectorKey: sector.sectorKey, sampleCount: samples.length });
+        return { sectorKey: sector.sectorKey, samples, median };
+      }));
+      const available = valuationRows.filter((row) => typeof row.median === 'number') as Array<{ sectorKey: string; samples: Array<{ ticker: string; forwardPE: number }>; median: number }>;
+      const allMedians = available.map((row) => row.median).sort((a, b) => a - b);
+      const universeMedian = allMedians.length
+        ? (allMedians.length % 2 === 1
+          ? allMedians[Math.floor(allMedians.length / 2)]
+          : (allMedians[allMedians.length / 2 - 1] + allMedians[allMedians.length / 2]) / 2)
+        : null;
+      span.setAttribute('derived.sector_valuation.count', available.length);
+      if (universeMedian !== null) {
+        d.SECTOR_FORWARD_PE_UNIVERSE_MEDIAN = {
+          name: 'sector_forward_pe_universe_median',
+          value: parseFloat(universeMedian.toFixed(2)),
+          date: dt,
+          formula: '표준 11개 섹터 대표주 forward PE median의 cross-sector median',
+        };
+      }
+      for (const row of available) {
+        const suffix = row.sectorKey.replace('SECTOR_', '');
+        d[`SECTOR_FORWARD_PE_${suffix}`] = {
+          name: `sector_forward_pe_${suffix.toLowerCase()}`,
+          value: parseFloat(row.median.toFixed(2)),
+          date: dt,
+          formula: `${row.sectorKey} 대표주 ${row.samples.length}개 forward PE median`,
+        };
+        if (universeMedian !== null && universeMedian > 0) {
+          const premiumPct = ((row.median / universeMedian) - 1) * 100;
+          d[`SECTOR_FORWARD_PE_PREMIUM_${suffix}`] = {
+            name: `sector_forward_pe_premium_${suffix.toLowerCase()}`,
+            value: parseFloat(premiumPct.toFixed(2)),
+            date: dt,
+            formula: `${row.sectorKey} forward PE vs cross-sector median premium/discount (%)`,
+          };
         }
       }
     });
-    if (sectorReturns.length > 0) {
-      const strongest = sectorReturns.sort((a, b) => b.ret - a.ret)[0];
-      d.SECTOR_STRONGEST = { name: 'sector_strongest', value: strongest.ret, date: dt, formula: `가장 강한 섹터: ${strongest.label}(${strongest.key}) ${strongest.ret.toFixed(1)}%` };
-    }
-    }); // withSpan sector
   } catch { void 0; }
 
   try {
@@ -7678,7 +7809,7 @@ export async function computeDerived(
   } catch { void 0; }
 
   // ★ === 29차 P2-E #35: INSIDER_CLUSTER_PURCHASES_COUNT_50K (OpenInsider) ===
-  // 노션 §OpenInsider — http://openinsider.com/insider-cluster-purchases.
+  // 노션 §OpenInsider — screener grp=2(복수 insider) + 30일 + $50K 이상.
   // $50K 컷오프 + 30일 윈도우. cluster (2+ insiders) 종목 수 ≥ 5 → +1.
   try {
     const { fetchOpenInsiderClusterPurchases } = await import('../collectors/openinsider');

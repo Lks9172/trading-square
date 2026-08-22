@@ -1,5 +1,10 @@
 # History Cross-Date Alignment 감사 (13차 B6)
 
+- 문서 상태: **ARCHIVED**
+- 현재 운영 계약 아님: Node 계산 엔진을 대상으로 한 과거 감사다. 현재 기준은
+  [`finance/BACKTEST-AND-MODEL-GOVERNANCE.md`](finance/BACKTEST-AND-MODEL-GOVERNANCE.md)와 Spring
+  Domain policy다.
+
 MacroSquare 의 시계열 데이터는 **3가지 서로 다른 빈도** 를 섞어 계산한다.
 정확한 판단을 위해 **date alignment 전략** 이 명확해야 한다.
 

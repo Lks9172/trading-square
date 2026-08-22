@@ -4,7 +4,7 @@
  * 19차 P1#1 + P3#18 통합 노출 패널 (ConvictionPanel).
  *
  * 18차 + 19차에 추가됐지만 UI 어디에도 노출 안 되던 신규 derived key 들을 묶어 표시.
- * - 7축 확신 게이지
+ * - 7축 조건 합치 게이지(확률 아님)
  * - 레버리지 3-of-3 트리거
  * - 시나리오 게이트 (A/B)
  * - 골디락스 신호등
@@ -18,6 +18,8 @@ interface DerivedEntry {
   value: number | null;
   interpretation?: string;
   formula?: string;
+  eligibleForSignals?: boolean;
+  maximumAgeDays?: number;
 }
 
 interface Props {
@@ -47,7 +49,14 @@ function fmt(d: DerivedEntry | undefined, suffix = ''): string {
   return `${d.value}${suffix}`;
 }
 
-export function ConvictionPanel({ derived }: Props) {
+export function ConvictionPanel({ derived: rawDerived }: Props) {
+  const expiredCount = Object.values(rawDerived).filter((entry) => entry?.eligibleForSignals === false).length;
+  const derived = Object.fromEntries(Object.entries(rawDerived).map(([key, entry]) => [
+    key,
+    entry?.eligibleForSignals === false
+      ? { ...entry, value: null, interpretation: '신선도 만료 · 현재 판단 산식 제외' }
+      : entry,
+  ])) as Record<string, DerivedEntry>;
   const conv = derived.CONVICTION_SCORE_7AXIS;
   const lev3 = derived.LEVERAGE_TRIGGER_3OF3;
   const levCount = derived.LEVERAGE_TRIGGER_COUNT;
@@ -62,7 +71,6 @@ export function ConvictionPanel({ derived }: Props) {
   const fakeout = derived.NASDAQ_RANGE_BREAK_FAKEOUT;
   const helium = derived.HELIUM_AI_BOTTLENECK;
   const fxDev = derived.FX_FOREIGN_DEVIATION_RATIO;
-  const fxLevel = derived.FX_FOREIGN_DEVIATION_LEVEL;
   const horizonAlign = derived.USER_HORIZON_ALIGNMENT;
   const ksOvershoot = derived.KOSPI_HISTORIC_OVERSHOOT_FLAG;
 
@@ -138,16 +146,22 @@ export function ConvictionPanel({ derived }: Props) {
   return (
     <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 sm:p-5">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-base sm:text-lg font-semibold">🧭 18·19차 통합 — 확신·게이트·D-day</h3>
+        <h3 className="text-base sm:text-lg font-semibold">🧭 복합 조건·실행 게이트·D-day</h3>
         <span className="text-[10px] text-slate-500">video1+4 §확신 / 노션 §대시보드 정합</span>
       </div>
 
+      {expiredCount > 0 && (
+        <div className="mb-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+          신선도 만료 파생지표 {expiredCount}개는 과거값 대신 ‘산식 제외’로 표시합니다.
+        </div>
+      )}
+
       {/* 22차 P1#6: 모바일 대응 — collapsible 6영역. 첫 영역만 default open */}
       <details open className="mb-3">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">⭐ 핵심 (확신·레버리지·시나리오)</summary>
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">⭐ 핵심 (조건 합치·레버리지·시나리오)</summary>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* 1) 핵심 통합 게이지 */}
-        <Card title="🎯 7축 확신 점수" accent={convAccent}>
+        <Card title="🎯 7축 조건 합치" accent={convAccent}>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-bold">{convVal >= 0 ? '+' : ''}{convVal}</span>
             <span className="text-xs text-slate-400">/ 7</span>
@@ -169,7 +183,7 @@ export function ConvictionPanel({ derived }: Props) {
           )}
         </Card>
 
-        <Card title="🚀 착한 레버리지 트리거" accent={levAccent}>
+        <Card title="🚀 레버리지 3조건 트리거" accent={levAccent}>
           <div className="text-base font-semibold">
             {lev3?.value === 1 ? '🟢 3/3 발동' : `${levCount?.value ?? 0}/3 (대기)`}
           </div>
@@ -262,7 +276,7 @@ export function ConvictionPanel({ derived }: Props) {
       </details>
 
       <details className="mb-3">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">⏱️ 시계열·확률·DCA</summary>
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200 mb-2">⏱️ 시계열·과거검증·DCA</summary>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* 6) 시계열 정합 */}
         <Card title="🧭 시계열 정합">
@@ -280,10 +294,10 @@ export function ConvictionPanel({ derived }: Props) {
           <Stat label="다음 D-day" value={fmt(earnDday, '일')} />
         </Card>
         {/* 22차 P2#8: regime forward return + 신호 적중률 + 시나리오 flips */}
-        <Card title="📊 레짐 90D 기대 수익">
+        <Card title="📊 과거 동일 레짐 90D 평균">
           <div>{regimeFwdRet?.interpretation || (typeof regimeFwdRet?.value === 'number' ? `${regimeFwdRet.value}%` : '—')}</div>
         </Card>
-        <Card title="🎯 BUY 신호 30D 적중률">
+        <Card title="🎯 과거 BUY 후 30D 양(+) 비율">
           <div>{sigHitRate?.interpretation || (typeof sigHitRate?.value === 'number' ? `${sigHitRate.value}%` : '—')}</div>
         </Card>
         <Card title="🔁 시나리오 30일 전환수">

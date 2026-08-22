@@ -16,6 +16,7 @@
  */
 
 import { useState } from 'react';
+import { formatKstDateTime } from '@/lib/format';
 
 interface InvestmentPlan {
   horizon: 'short' | 'medium' | 'long';
@@ -28,6 +29,17 @@ interface InvestmentPlan {
   monthlyDCA_KRW: number;
   // 21차
   currentHoldings?: Record<string, number | undefined>;
+  currentHoldingsMeta?: {
+    sourceUnit: 'EMPTY' | 'PERCENT' | 'KRW_ABSOLUTE';
+    normalized: boolean;
+    sourceTotal: number;
+    denominator: number;
+    allocatedPct: number;
+    unallocatedPct: number;
+    overAllocatedPct: number;
+    sourceValues: Record<string, number>;
+    cautions: string[];
+  };
   totalCapitalKRW?: number;
   investmentExperienceYears?: number;
   accountType?: 'general' | 'isa' | 'pension' | 'foreign';
@@ -52,13 +64,20 @@ interface WeeklyReport {
   keySignals: Array<{ asset: string; signal: string; met: string }>;
 }
 
+const ETF_IMPLEMENTATION_GUIDE: Record<NonNullable<InvestmentPlan['accountType']>, string> = {
+  general: '세후 총비용을 비교하세요. 총보수뿐 아니라 추적오차·매매 스프레드·환전비용·분배금 과세를 함께 확인해야 합니다.',
+  isa: '편입 가능 상품·납입한도·중도인출·세제 조건은 변경될 수 있습니다. 증권사와 최신 과세 기준을 확인한 뒤 국내상장 ETF의 세후 비용을 비교하세요.',
+  pension: '연금저축/IRP는 편입 제한·위험자산 한도·인출 조건을 먼저 확인하세요. 장기 코어에는 저비용·고유동성·낮은 추적오차가 우선입니다.',
+  foreign: '해외 ETF는 총보수 외에 환전 스프레드·원천징수·국내 신고·거래시간과 호가 스프레드를 함께 비교하세요.',
+};
+
 interface Props {
   initialPlan: InvestmentPlan | null;
   initialLog: TradeLogEntry[];
   weeklyReport: WeeklyReport | null;
   weeklyText: string;
   // 19차 신규
-  convictionScore?: number | null;          // CONVICTION_SCORE_7AXIS (-7~+9 — 28차 9축)
+  convictionScore?: number | null;          // legacy key: CONVICTION_SCORE_7AXIS, UI에서는 조건 합치로 표현
   trancheUsedPct?: number;
   // 22차 P1#4: 운영자 한마디 회전
   operatorQuote?: { short: string; full: string } | null;
@@ -166,6 +185,7 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
   const [plan, setPlan] = useState<InvestmentPlan | null>(initialPlan);
   const [log, setLog] = useState<TradeLogEntry[]>(initialLog);
   const [savingPlan, setSavingPlan] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
   const [checks, setChecks] = useState<Record<string, boolean>>({});
   const [reason, setReason] = useState('');
@@ -176,14 +196,18 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
 
   async function savePlan(patch: Partial<InvestmentPlan>) {
     setSavingPlan(true);
+    setSaveError('');
     try {
       const res = await fetch('/api/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `저장 실패 (${res.status})`);
       if (data?.plan) setPlan(data.plan);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : '투자 계획을 저장하지 못했습니다.');
     } finally {
       setSavingPlan(false);
     }
@@ -202,16 +226,20 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
       body: JSON.stringify(body),
     });
     if (res.ok) {
+      setSaveError('');
       setLog([{ ts: new Date().toISOString(), ...body }, ...log].slice(0, 50));
       setNoteDraft('');
       setReason('');
       setChecks({});
+    } else {
+      const data = await res.json().catch(() => null);
+      setSaveError(data?.error || `관찰 기록 저장 실패 (${res.status})`);
     }
   }
 
   const checkedCount = Object.values(checks).filter(Boolean).length;
-  // 19차 P2#12: 확신 점수 미달(<3) 시 액션 잠금 권고
-  const lowConviction = typeof convictionScore === 'number' && convictionScore < 3;
+  // 단일 합성점수만으로 실행 가능 여부를 단정하지 않고 보조 게이트로만 사용한다.
+  const lowConditionAlignment = typeof convictionScore === 'number' && convictionScore < 3;
   const dcaPct = typeof trancheUsedPct === 'number' ? trancheUsedPct : 0;
 
   return (
@@ -219,7 +247,7 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
       <header className="border-b border-slate-800 pb-4">
         <h1 className="text-2xl font-bold text-slate-100">🧭 나만의 투자 템플릿</h1>
         <p className="text-sm text-slate-400 mt-1">
-          video1 §5부 — "시스템이 있으면 심리 싸움에서 이길 수 있다"
+          video1 §5부 — “시스템이 있으면 심리 싸움에서 이길 수 있다”
         </p>
         {/* 22차 P1#4: 운영자 9단락 회전 인용 (노션 §전하는 말) */}
         {operatorQuote && (
@@ -229,14 +257,14 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
         )}
         {/* 22차 P2#21: 노션 §실전 투자 템플릿 정합 캡션 */}
         <p className="text-[10px] text-slate-500 mt-1">
-          본 페이지는 노션 §"자산제곱 실전 투자 템플릿"의 디지털 구현체입니다.
+          본 페이지는 노션 §“자산제곱 실전 투자 템플릿”의 디지털 구현체입니다.
         </p>
 
         {/* 28차 영상6: 4단 우선순위 진척도 (종목 < 타이밍 < 비중 < 심리) */}
         {typeof priorityOrderScore === 'number' && (
           <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/40 p-3">
             <div className="text-xs font-semibold text-slate-200 mb-2">
-              🎯 4단 우선순위 진척도 ({priorityOrderScore}/4) — video6 "종목 &lt; 타이밍 &lt; 비중 &lt; 심리"
+              🎯 4단 우선순위 진척도 ({priorityOrderScore}/4) — video6 “종목 &lt; 타이밍 &lt; 비중 &lt; 심리”
             </div>
             <div className="grid grid-cols-2 gap-1 text-[11px]">
               <div className={priorityOrderScore >= 1 ? 'text-emerald-300' : 'text-slate-500'}>
@@ -270,13 +298,13 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
             )}
           </div>
         )}
-        {/* 19차 P2#12: 확신 점수 표시 + 미달 시 게이트 경고 */}
+        {/* legacy 7축 점수는 확률·확신이 아니라 현재 조건의 합치도로 표시 */}
         {typeof convictionScore === 'number' && (
-          <div className={`mt-3 rounded-lg p-3 text-sm ${lowConviction ? 'border border-amber-700 bg-amber-950/40 text-amber-200' : 'border border-emerald-800 bg-emerald-950/30 text-emerald-200'}`}>
-            <span className="font-semibold">7축 확신 점수: {convictionScore >= 0 ? '+' : ''}{convictionScore}/7</span>
-            {lowConviction
-              ? ' — ⚠️ 확신 미달(3 미만). 새 매수 액션 자제 권고 (video1 §"확신 없으면 판단하지 마라").'
-              : ' — 🟢 확신 충족 (3 이상). 계획대로 실행 가능.'}
+          <div className={`mt-3 rounded-lg p-3 text-sm ${lowConditionAlignment ? 'border border-amber-700 bg-amber-950/40 text-amber-200' : 'border border-emerald-800 bg-emerald-950/30 text-emerald-200'}`}>
+            <span className="font-semibold">7축 조건 합치: {convictionScore >= 0 ? '+' : ''}{convictionScore}/7</span>
+            {lowConditionAlignment
+              ? ' — ⚠️ 합치도 3 미만. 신규 매수보다 조건 재확인이 우선입니다.'
+              : ' — 🟢 합치도 3 이상. 가격·수급·손실 한도 게이트를 추가 확인하세요.'}
           </div>
         )}
         {/* 19차 P3#14: DCA 진척도 */}
@@ -372,10 +400,35 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
           </Field>
         </div>
 
+        <div className="mt-3 rounded-lg border border-cyan-800/50 bg-cyan-950/20 px-3 py-2 text-[10px] leading-5 text-cyan-100/85">
+          <div className="font-semibold text-cyan-200">ETF 실행 체크리스트 · 계좌별 안내</div>
+          <div>{ETF_IMPLEMENTATION_GUIDE[plan.accountType ?? 'general']}</div>
+          <div className="text-slate-400">
+            공통 확인: 총보수보다 실제 추적차이 · 순자산/거래대금 · 호가 스프레드 · 상위 종목 집중도 · 환헤지 비용.
+            코어 광범위 ETF와 위성 테마 ETF를 분리하고, 세제 혜택이나 배당률만으로 매수 신호를 만들지 않습니다.
+          </div>
+          <div className="text-amber-200/80">세법·계좌 한도는 시스템에 고정값으로 넣지 않으며 주문 전 최신 공식 안내를 확인해야 합니다.</div>
+        </div>
+
         {/* 21차 Phase 1#2: 사용자 실제 보유 비중 입력 — 권고 vs 현재 drift 측정용 */}
         <div className="mt-4 rounded-lg border border-slate-700 bg-slate-950/50 p-3">
           <h3 className="text-sm font-semibold text-slate-200 mb-2">📊 내 실제 보유 비중 (%)</h3>
           <p className="text-[10px] text-slate-500 mb-2">권고 비중 대비 차이를 weekly-report 가 추적합니다 (≥10%p drift 시 경고).</p>
+          {plan.currentHoldingsMeta?.sourceUnit === 'KRW_ABSOLUTE' && (
+            <div className="mb-3 rounded-lg border border-cyan-700/50 bg-cyan-950/25 px-3 py-2 text-[11px] leading-5 text-cyan-100">
+              기존 KRW 보유금액 합계 {formatInteger(plan.currentHoldingsMeta.sourceTotal)}원을
+              {' '}{formatInteger(plan.currentHoldingsMeta.denominator)}원 총 운용자본 기준 비중으로 환산해 표시합니다.
+              원금액은 보존되며, 비중을 수정하면 % 계약으로 전환됩니다.
+              {plan.currentHoldingsMeta.overAllocatedPct > 0 && (
+                <div className="mt-1 font-semibold text-red-200">
+                  실제 노출 {plan.currentHoldingsMeta.allocatedPct.toFixed(1)}% · 총자본 대비 {plan.currentHoldingsMeta.overAllocatedPct.toFixed(1)}%p 초과
+                </div>
+              )}
+              {plan.currentHoldingsMeta.cautions.map((caution) => (
+                <div key={caution} className="text-amber-200">• {caution}</div>
+              ))}
+            </div>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {(['cash','nasdaq','leverage','gold','silver','copper','korea','emerging'] as const).map((k) => (
               <NumberField
@@ -388,8 +441,9 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
           </div>
         </div>
         <div className="mt-4 text-xs text-slate-500">
-          최종 업데이트: {new Date(plan.updatedAt).toLocaleString('ko-KR')}
+          최종 업데이트: {formatKstDateTime(plan.updatedAt)}
           {savingPlan && <span className="ml-2 text-cyan-400">저장 중…</span>}
+          {saveError && <span role="alert" className="ml-2 text-red-300">{saveError}</span>}
         </div>
       </section>
 
@@ -515,7 +569,7 @@ export function PlanEditor({ initialPlan, initialLog, weeklyReport, weeklyText, 
             {log.map((e, i) => (
               <li key={i} className="text-xs border-b border-slate-800 pb-2">
                 <div className="text-slate-400">
-                  {new Date(e.ts).toLocaleString('ko-KR')} · {e.kind}
+                  {formatKstDateTime(e.ts)} · {e.kind}
                   {e.asset ? ` · ${e.asset}` : ''}
                   {e.from && e.to ? ` · ${e.from} → ${e.to}` : ''}
                 </div>
@@ -565,4 +619,8 @@ function NumberField({
       {hint && <p className="text-xs text-slate-500 mt-1">{hint}</p>}
     </Field>
   );
+}
+
+function formatInteger(value: number) {
+  return Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
